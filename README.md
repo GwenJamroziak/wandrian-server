@@ -1,14 +1,18 @@
-# Evergrind server -- Phase 1
+# Wandrian server -- Phase 1
 
-This is the backend for Evergrind's online mode: accounts, persistent character saves,
-a shared graveyard, a leaderboard, and global chat. It also serves the game client
-itself (`public/index.html`), so the whole thing -- game plus server -- is one thing
-you run and one thing you point a domain at.
+This is the backend for Wandrian's online mode: accounts, persistent character saves,
+a shared graveyard, a leaderboard (regular + hardcore, ranked by lifetime experience),
+global chat, private mailbox notifications, and a real auction house. It also serves
+the game client itself (`public/index.html`), so the whole thing -- game plus server --
+is one thing you run and one thing you point a domain at.
 
 ## What's real vs. what's still client-trusted
 
-Accounts, saves, graveyard, leaderboard and chat all live on the server now, so
-friends can log in from anywhere and see each other. That part is solid.
+Accounts, saves, graveyard, leaderboard, chat, and the auction house all live on the
+server now, so friends can log in from anywhere and see each other. Auction sales credit
+the seller's gold directly server-side (since the seller isn't present for the buyer's
+request), and both sides get a private mailbox notification, delivered live over the
+chat WebSocket if they're online, or queued and delivered next time they connect.
 
 What this phase does **not** do yet: stop a player from opening devtools on their own
 browser and editing the character JSON before it's sent to `PUT /api/characters/:slot`
@@ -69,8 +73,9 @@ run a long-lived Node process.
 
 ## What's next (not built yet)
 
-- Server-side combat/loot resolution (the actual anti-cheat layer)
-- Auction House with real player-to-player trades (currently a "coming soon" stub in
-  the client, same as before)
+- Server-side combat/loot resolution (the actual anti-cheat layer). The auction house's
+  gold check is a partial exception -- it verifies the buyer's last-saved gold server-side
+  before letting a purchase through -- but combat, loot rolls, and levels are still
+  client-computed and just handed to the server as-is.
 - Wrapping the client in Electron + Steamworks for a Steam build, once the above is
   in place

@@ -80,7 +80,38 @@ db.exec(`
     message TEXT NOT NULL,
     created_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS auction_listings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    seller_account_id INTEGER NOT NULL,
+    seller_username TEXT NOT NULL,
+    seller_character_name TEXT NOT NULL,
+    seller_slot INTEGER NOT NULL,
+    type TEXT NOT NULL,
+    item_key TEXT,
+    item_json TEXT,
+    display_name TEXT NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 1,
+    price INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS mailbox_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    message TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    delivered INTEGER NOT NULL DEFAULT 0
+  );
 `);
+
+// Migrations for columns added after the table already existed on a live deployment --
+// SQLite's ALTER TABLE ADD COLUMN fails if the column is already there, so these are
+// wrapped individually and ignored if they've already been applied.
+for (const stmt of [
+  "ALTER TABLE leaderboard_bests ADD COLUMN hardcore INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE leaderboard_bests ADD COLUMN lifetime_xp INTEGER NOT NULL DEFAULT 0",
+]) {
+  try { db.exec(stmt); } catch (e) { /* column already exists -- fine */ }
+}
 
 /* ---------------- auth helpers ---------------- */
 
@@ -219,14 +250,16 @@ app.put("/api/characters/:slot", requireAuth, (req, res) => {
   // Track this character's personal best for the leaderboard, independent of live deletion.
   if (data.character_name && data.class_display_name) {
     db.prepare(
-      `INSERT INTO leaderboard_bests (account_id, character_name, class_name, level, highest_tier_reached, gold, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO leaderboard_bests (account_id, character_name, class_name, level, highest_tier_reached, gold, updated_at, hardcore, lifetime_xp)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(account_id, character_name) DO UPDATE SET
          class_name=excluded.class_name,
          level=MAX(leaderboard_bests.level, excluded.level),
          highest_tier_reached=MAX(leaderboard_bests.highest_tier_reached, excluded.highest_tier_reached),
          gold=MAX(leaderboard_bests.gold, excluded.gold),
-         updated_at=excluded.updated_at`
+         updated_at=excluded.updated_at,
+         hardcore=excluded.hardcore,
+         lifetime_xp=MAX(leaderboard_bests.lifetime_xp, excluded.lifetime_xp)`
     ).run(
       req.account.id,
       data.character_name,
@@ -234,7 +267,9 @@ app.put("/api/characters/:slot", requireAuth, (req, res) => {
       data.level || 1,
       data.highest_tier_reached || 1,
       data.gold || 0,
-      nowIso()
+      nowIso(),
+      data.hardcore ? 1 : 0,
+      data.lifetime_xp || 0
     );
   }
   res.json({ ok: true });
@@ -268,21 +303,187 @@ app.get("/api/graveyard", requireAuth, (req, res) => {
 });
 
 app.get("/api/leaderboard", (req, res) => {
+  const hardcore = req.query.hardcore ? 1 : 0;
   const rows = db
     .prepare(
-      `SELECT account_id, character_name, class_name, level, highest_tier_reached, gold
-       FROM leaderboard_bests ORDER BY level DESC, highest_tier_reached DESC, gold DESC LIMIT 50`
+      `SELECT account_id, character_name, class_name, level, highest_tier_reached, gold, lifetime_xp
+       FROM leaderboard_bests WHERE hardcore = ? ORDER BY lifetime_xp DESC, level DESC, highest_tier_reached DESC, gold DESC LIMIT 50`
     )
-    .all();
+    .all(hardcore);
   // join usernames without leaking passcode data
   const withNames = rows.map((r) => {
     const acc = db.prepare("SELECT username FROM accounts WHERE id = ?").get(r.account_id);
-    return { player: acc ? acc.username : "?", character_name: r.character_name, class_name: r.class_name, level: r.level, highest_tier_reached: r.highest_tier_reached, gold: r.gold };
+    return { player: acc ? acc.username : "?", character_name: r.character_name, class_name: r.class_name, level: r.level, highest_tier_reached: r.highest_tier_reached, gold: r.gold, lifetime_xp: r.lifetime_xp || 0 };
   });
   res.json({ entries: withNames });
 });
 
 app.get("/api/health", (req, res) => res.json({ ok: true, time: nowIso() }));
+
+/* ---------------- system chat announcements (trial results, hardcore deaths) ---------------- */
+// These are self-reported by the client (consistent with this phase's "not cheat-proof yet"
+// trust model -- see the top-of-file note) but are flavor-only chat text, no economy impact.
+
+function broadcastSystemMessage(message) {
+  const created_at = nowIso();
+  db.prepare("INSERT INTO chat_messages (username, message, created_at) VALUES (?, ?, ?)").run("System", message, created_at);
+  const payload = JSON.stringify({ type: "chat", username: "System", message, created_at });
+  for (const client of chatClients) {
+    if (client.readyState === client.OPEN) client.send(payload);
+  }
+}
+
+app.post("/api/announce/trial", requireAuth, (req, res) => {
+  const { character_name, level, class_name, result } = req.body || {};
+  if (!character_name || !class_name || (result !== "passed" && result !== "failed")) {
+    return res.status(400).json({ error: "Invalid announcement." });
+  }
+  broadcastSystemMessage(`${character_name} (Lv ${level || 1} ${class_name}) has ${result} the broken bridge trial.`);
+  res.json({ ok: true });
+});
+
+app.post("/api/announce/death", requireAuth, (req, res) => {
+  const { character_name, level, class_name, cause } = req.body || {};
+  if (!character_name || !class_name || !cause) {
+    return res.status(400).json({ error: "Invalid announcement." });
+  }
+  broadcastSystemMessage(`${character_name} (Lv ${level || 1} ${class_name}) has ${cause}.`);
+  res.json({ ok: true });
+});
+
+/* ---------------- private mailbox (auction sale notifications) ---------------- */
+
+function sendPrivateMessage(accountId, message) {
+  const created_at = nowIso();
+  let delivered = 0;
+  for (const client of chatClients) {
+    if (client.accountId === accountId && client.readyState === client.OPEN) {
+      client.send(JSON.stringify({ type: "private", message, created_at }));
+      delivered = 1;
+    }
+  }
+  db.prepare("INSERT INTO mailbox_messages (account_id, message, created_at, delivered) VALUES (?, ?, ?, ?)").run(
+    accountId,
+    message,
+    created_at,
+    delivered
+  );
+}
+
+/* ---------------- auction house ---------------- */
+
+app.get("/api/auction", requireAuth, (req, res) => {
+  const rows = db.prepare("SELECT * FROM auction_listings ORDER BY created_at DESC LIMIT 100").all();
+  const out = rows.map((r) => ({
+    id: r.id,
+    seller_username: r.seller_username,
+    seller_character_name: r.seller_character_name,
+    type: r.type,
+    item_key: r.item_key,
+    item: r.item_json ? JSON.parse(r.item_json) : null,
+    display_name: r.display_name,
+    quantity: r.quantity,
+    price: r.price,
+  }));
+  res.json({ listings: out });
+});
+
+app.post("/api/auction", requireAuth, (req, res) => {
+  const { type, price, character_name, item, item_key, quantity, display_name, seller_slot } = req.body || {};
+  if (!["gear", "consumable", "herb"].includes(type)) return res.status(400).json({ error: "Invalid item type." });
+  const numPrice = Number(price);
+  if (!Number.isFinite(numPrice) || numPrice < 1) return res.status(400).json({ error: "Invalid price." });
+  if (!character_name || !display_name) return res.status(400).json({ error: "Missing listing details." });
+  const numQty = type === "gear" ? 1 : Math.max(1, Number(quantity) || 1);
+  const itemJson = type === "gear" ? JSON.stringify(item || {}) : null;
+  const info = db
+    .prepare(
+      `INSERT INTO auction_listings
+       (seller_account_id, seller_username, seller_character_name, seller_slot, type, item_key, item_json, display_name, quantity, price, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      req.account.id,
+      req.account.username,
+      character_name,
+      Number.isInteger(seller_slot) ? seller_slot : -1,
+      type,
+      type === "gear" ? null : String(item_key || ""),
+      itemJson,
+      display_name,
+      numQty,
+      Math.round(numPrice),
+      nowIso()
+    );
+  res.json({ ok: true, id: Number(info.lastInsertRowid) });
+});
+
+app.delete("/api/auction/:id", requireAuth, (req, res) => {
+  const id = Number(req.params.id);
+  const listing = db.prepare("SELECT * FROM auction_listings WHERE id = ?").get(id);
+  if (!listing) return res.status(404).json({ error: "Listing not found." });
+  if (listing.seller_account_id !== req.account.id) return res.status(403).json({ error: "Not your listing." });
+  db.prepare("DELETE FROM auction_listings WHERE id = ?").run(id);
+  res.json({ ok: true, refund: { type: listing.type, item_key: listing.item_key, item: listing.item_json ? JSON.parse(listing.item_json) : null, quantity: listing.quantity } });
+});
+
+app.post("/api/auction/:id/buy", requireAuth, (req, res) => {
+  const id = Number(req.params.id);
+  const { character_name } = req.body || {};
+  const listing = db.prepare("SELECT * FROM auction_listings WHERE id = ?").get(id);
+  if (!listing) return res.status(404).json({ error: "That listing is no longer available." });
+  if (listing.seller_account_id === req.account.id) return res.status(400).json({ error: "You can't buy your own listing." });
+
+  // Best-effort gold check against the buyer's own persisted characters (defense in depth --
+  // the client is still trusted for its own post-purchase save, per this phase's model).
+  const buyerChars = db.prepare("SELECT data FROM characters WHERE account_id = ?").all(req.account.id);
+  const hasEnoughGold = buyerChars.some((row) => {
+    try {
+      const d = JSON.parse(row.data);
+      return (d.gold || 0) >= listing.price;
+    } catch (e) {
+      return false;
+    }
+  });
+  if (!hasEnoughGold) return res.status(400).json({ error: "Not enough gold." });
+
+  // Remove the listing first (best-effort race protection against double-buy).
+  const del = db.prepare("DELETE FROM auction_listings WHERE id = ?").run(id);
+  if (del.changes === 0) return res.status(409).json({ error: "Someone already bought that." });
+
+  // Credit the seller directly, since the seller's own client isn't present for this request.
+  if (listing.seller_slot >= 0) {
+    const sellerRow = db
+      .prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?")
+      .get(listing.seller_account_id, listing.seller_slot);
+    if (sellerRow) {
+      try {
+        const d = JSON.parse(sellerRow.data);
+        d.gold = (d.gold || 0) + listing.price;
+        db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(
+          JSON.stringify(d),
+          nowIso(),
+          listing.seller_account_id,
+          listing.seller_slot
+        );
+      } catch (e) {
+        /* if the seller's save is somehow malformed, skip the credit rather than crash the sale */
+      }
+    }
+  }
+
+  const label = listing.quantity > 1 ? `${listing.display_name} x${listing.quantity}` : listing.display_name;
+  sendPrivateMessage(req.account.id, `You bought ${label} for ${listing.price} gold from ${listing.seller_character_name}.`);
+  sendPrivateMessage(listing.seller_account_id, `Your ${label} has been sold to ${character_name || req.account.username} for ${listing.price} gold.`);
+
+  res.json({
+    ok: true,
+    type: listing.type,
+    item_key: listing.item_key,
+    item: listing.item_json ? JSON.parse(listing.item_json) : null,
+    quantity: listing.quantity,
+  });
+});
 
 const server = http.createServer(app);
 
@@ -308,8 +509,17 @@ wss.on("connection", (ws, req) => {
     return;
   }
   ws.username = account.username;
+  ws.accountId = account.id;
   chatClients.add(ws);
   ws.send(JSON.stringify({ type: "history", messages: loadRecentChat() }));
+
+  const pending = db
+    .prepare("SELECT message, created_at FROM mailbox_messages WHERE account_id = ? AND delivered = 0 ORDER BY id ASC")
+    .all(account.id);
+  if (pending.length > 0) {
+    ws.send(JSON.stringify({ type: "private_history", messages: pending }));
+    db.prepare("UPDATE mailbox_messages SET delivered = 1 WHERE account_id = ? AND delivered = 0").run(account.id);
+  }
 
   ws.on("message", (raw) => {
     let parsed;
