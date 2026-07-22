@@ -912,7 +912,6 @@ function screenMainMenuSlots(){
   root.appendChild(h("div",{class:"row",style:{marginBottom:"10px"}},[
     h("span",{class:"muted"},[Net.online?`Playing online as ${Net.username}`:"Playing offline (this browser only)"]),
     h("span",{class:"linklike",style:{marginLeft:"10px"},onClick:()=>{ Net.logout(); GF.goto("authGate"); }},[Net.online?"Log out":"Switch to online"]),
-    Net.online?h("span",{class:"linklike",style:{marginLeft:"10px"},onClick:()=>GF.goto("leaderboard")},["Leaderboard"]):null,
   ]));
   const t=toastBox(); if(t) root.appendChild(t);
 
@@ -954,6 +953,10 @@ function screenMainMenuSlots(){
     h("div",{class:"col",style:{width:"240px"}},[
       h("button",{class:"wide",onClick:()=>GF.goto("graveyard")},["† Graveyard"]),
       h("div",{class:"dim-note"},["Final resting place for our fallen heroes"]),
+    ]),
+    h("div",{class:"col",style:{width:"240px"}},[
+      Net.online?h("button",{class:"wide",onClick:()=>GF.goto("leaderboard")},["🏆 Leaderboard"]):h("button",{class:"wide",disabled:true},["🏆 Leaderboard (log in online)"]),
+      h("div",{class:"dim-note"},["See how your heroes rank"]),
     ]),
   ]));
   return root;
@@ -1076,7 +1079,6 @@ function screenTown(){
     serviceButton("Inventory","🎒",()=>GF.goto("inventory")),
     PS.canAttemptTrial()?serviceButton("Master Trial","⭐",()=>GF.goto("masterTrial")):h("button",{disabled:true},[`Master Trial (reach Lv ${Balance.LEVEL_CAP})`]),
     Net.online?serviceButton("Global Chat","💬",()=>GF.goto("chat")):h("button",{disabled:true},["Global Chat (log in online)"]),
-    Net.online?serviceButton("Leaderboard","🏆",()=>GF.goto("leaderboard")):h("button",{disabled:true},["Leaderboard (log in online)"]),
   ]));
 
   root.appendChild(h("div",{class:"row",style:{marginTop:"6px"}},[
