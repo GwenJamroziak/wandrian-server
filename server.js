@@ -303,17 +303,25 @@ app.get("/api/graveyard", requireAuth, (req, res) => {
 });
 
 app.get("/api/leaderboard", (req, res) => {
-  const hardcore = req.query.hardcore ? 1 : 0;
   const rows = db
     .prepare(
-      `SELECT account_id, character_name, class_name, level, highest_tier_reached, gold, lifetime_xp
-       FROM leaderboard_bests WHERE hardcore = ? ORDER BY lifetime_xp DESC, level DESC, highest_tier_reached DESC, gold DESC LIMIT 50`
+      `SELECT account_id, character_name, class_name, level, highest_tier_reached, gold, lifetime_xp, hardcore
+       FROM leaderboard_bests ORDER BY lifetime_xp DESC, level DESC, highest_tier_reached DESC, gold DESC LIMIT 50`
     )
-    .all(hardcore);
+    .all();
   // join usernames without leaking passcode data
   const withNames = rows.map((r) => {
     const acc = db.prepare("SELECT username FROM accounts WHERE id = ?").get(r.account_id);
-    return { player: acc ? acc.username : "?", character_name: r.character_name, class_name: r.class_name, level: r.level, highest_tier_reached: r.highest_tier_reached, gold: r.gold, lifetime_xp: r.lifetime_xp || 0 };
+    return {
+      player: acc ? acc.username : "?",
+      character_name: r.character_name,
+      class_name: r.class_name,
+      level: r.level,
+      highest_tier_reached: r.highest_tier_reached,
+      gold: r.gold,
+      lifetime_xp: r.lifetime_xp || 0,
+      hardcore: !!r.hardcore,
+    };
   });
   res.json({ entries: withNames });
 });
@@ -334,11 +342,12 @@ function broadcastSystemMessage(message) {
 }
 
 app.post("/api/announce/trial", requireAuth, (req, res) => {
-  const { character_name, level, class_name, result } = req.body || {};
+  const { character_name, level, class_name, result, new_class_name } = req.body || {};
   if (!character_name || !class_name || (result !== "passed" && result !== "failed")) {
     return res.status(400).json({ error: "Invalid announcement." });
   }
-  broadcastSystemMessage(`${character_name} (Lv ${level || 1} ${class_name}) has ${result} the broken bridge trial.`);
+  const suffix = result === "passed" && new_class_name ? ` and is now a ${new_class_name}` : "";
+  broadcastSystemMessage(`${character_name} (Lv ${level || 1} ${class_name}) has ${result} the broken bridge trial${suffix}.`);
   res.json({ ok: true });
 });
 

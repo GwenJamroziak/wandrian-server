@@ -1,8 +1,9 @@
 # Wandrian server -- Phase 1
 
 This is the backend for Wandrian's online mode: accounts, persistent character saves,
-a shared graveyard, a leaderboard (regular + hardcore, ranked by lifetime experience),
-global chat, private mailbox notifications, and a real auction house. It also serves
+a shared graveyard, a single combined leaderboard (ranked by lifetime experience, with
+hardcore runs called out), global chat, private mailbox notifications, and a real
+auction house. It also serves
 the game client itself (`public/index.html`), so the whole thing -- game plus server --
 is one thing you run and one thing you point a domain at.
 

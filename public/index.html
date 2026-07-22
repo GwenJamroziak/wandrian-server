@@ -42,7 +42,7 @@ input[type=text]{
 }
 .bar-bg{background:#000;border-radius:4px;overflow:hidden;height:16px;border:1px solid rgba(255,255,255,.08);}
 .bar-fill{height:100%;transition:width .25s;}
-.bar-hp{background:var(--hp);} .bar-stamina{background:var(--stamina);} .bar-xp{background:var(--xp);} .bar-gold{background:var(--gold);}
+.bar-hp{background:var(--hp);} .bar-stamina{background:var(--stamina);} .bar-xp{background:var(--xp);} .bar-gold{background:var(--gold);} .bar-brew{background:#c9a04a;}
 .hp-text{color:var(--hp);} .stamina-text{color:var(--stamina);} .xp-text{color:var(--xp);} .gold-text{color:var(--gold);}
 a.back-link,.linklike{color:#cbd9a0;cursor:pointer;text-decoration:underline;}
 .icon-badge{width:56px;height:56px;border-radius:50%;overflow:hidden;flex:none;background:#000;display:flex;align-items:center;justify-content:center;}
@@ -73,6 +73,15 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 .trash-btn{flex:0 0 auto;padding:8px 10px;}
 .blocked-icon{opacity:.85;}
 .dim-icon{opacity:.4;}
+.bar-bg.compact{height:8px;}
+.town-quadrants{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start;}
+.town-quadrants .panel{margin-bottom:0;height:100%;}
+.gear-row{display:flex;justify-content:space-between;align-items:center;gap:10px;}
+.gear-row-actions{display:flex;gap:6px;flex:0 0 auto;}
+.rarity-Common{color:#9a9686;} .rarity-Uncommon{color:#e8e4d8;} .rarity-Rare{color:#5a9ae0;} .rarity-Epic{color:#e0c94a;} .rarity-Legendary{color:#d9902f;}
+.plank-btn{min-width:52px;}
+.plank-btn.safe{background:#254a25;color:#9fe89f;border-color:#3a7a3a;}
+.plank-btn.unsafe{background:#4a2020;color:#e89f9f;border-color:#7a3a3a;}
 </style>
 </head>
 <body>
@@ -87,8 +96,7 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
    + core loop as a single self-contained HTML/JS file, so it can be hosted
    on literally any static host (no export templates, no COOP/COEP headers
    needed) and friends can just open a link. See the in-game "About this
-   build" note in the admin panel for what's deferred vs. the native build
-   (Global Chat and the Gambling Goblin are stubs/omitted this round).
+   build" note in the admin panel for what's deferred vs. the native build.
    ========================================================================= */
 
 /* ---------- DATA ---------- */
@@ -139,6 +147,7 @@ const ITEMS = {
   scroll_of_challenge_1:{name:"Scroll of Challenge I",type:"scroll",level_bonus:1,sell_value:6},
   scroll_of_challenge_2:{name:"Scroll of Challenge II",type:"scroll",level_bonus:2,sell_value:14},
   scroll_of_challenge_3:{name:"Scroll of Challenge III",type:"scroll",level_bonus:3,sell_value:30},
+  elixir_of_eyesight:{name:"Elixir of Eyesight",type:"consumable",eyesight_steps:500,sell_value:20},
   traveler_pouch:{name:"Traveler's Pouch",type:"bag",capacity:8,sell_value:10},
   woven_bag:{name:"Woven Bramble Bag",type:"bag",capacity:16,sell_value:20},
   bramble_sack:{name:"Bramble Sack",type:"bag",capacity:24,sell_value:32},
@@ -150,6 +159,7 @@ const HERBS = {
   moonleaf:{name:"Moonleaf",found_in:"Herb nodes in any maze."},
   emberroot:{name:"Ember Root",found_in:"Herb nodes in any maze; also drops from uncommon-tier kills."},
   frostvine:{name:"Frostvine",found_in:"Herb nodes in any maze; also drops from rare/epic-tier kills."},
+  starveil:{name:"Starveil Petal",found_in:"A rare find in herb nodes -- most travelers never spot one.",rare:true},
 };
 
 const RECIPES = [
@@ -157,6 +167,7 @@ const RECIPES = [
   {id:"brew_greater_health_potion",result_item:"greater_health_potion",herbs:{sunpetal:2,emberroot:1}},
   {id:"brew_stamina_potion",result_item:"stamina_potion",herbs:{moonleaf:2}},
   {id:"brew_stamina_potion_deluxe",result_item:"greater_stamina_potion",herbs:{moonleaf:1,frostvine:1}},
+  {id:"brew_elixir_of_eyesight",result_item:"elixir_of_eyesight",herbs:{sunpetal:1,starveil:2}},
 ];
 
 const LOOT_TABLES = {
@@ -182,15 +193,82 @@ shadowbloom:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circ
 druid:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#d8e0c4"/><ellipse cx="70" cy="88" rx="32" ry="36" fill="#5a4a2e"/><circle cx="70" cy="50" r="19" fill="#c99a70"/><circle cx="63" cy="49" r="2.4" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.4" fill="#2a2a2a"/><path d="M 40,92 Q 70,74 100,92 L 94,116 Q 70,126 46,116 Z" fill="#3f6b3f"/><path d="M 56,38 Q 48,26 38,24 Q 48,32 50,42 M 50,32 Q 42,28 36,30" stroke="#7a5a3a" stroke-width="2.2" fill="none"/><path d="M 84,38 Q 92,26 102,24 Q 92,32 90,42 M 90,32 Q 98,28 104,30" stroke="#7a5a3a" stroke-width="2.2" fill="none"/><polygon points="62,40 70,22 78,40" fill="#4fae4f"/></svg>`,
 };
 
+/* Procedurally-generated monster portraits (placeholder art -- swap in bespoke assets any time
+   by replacing monsterPortrait() with a lookup into a real MONSTER_PORTRAITS map). Deterministic
+   per monster id so the same monster always looks the same; a "slain" variant is derived from
+   the same shape with X eyes, a lolling tongue, and a dizzy swirl for the post-combat view. */
+function hashHue(str){ let hh=0; for(let i=0;i<str.length;i++) hh=(hh*31+str.charCodeAt(i))>>>0; return hh%360; }
+function monsterPortrait(monsterId, opts={}){
+  const slain=!!opts.slain;
+  const hue=hashHue(monsterId||"?");
+  const bodyColor=`hsl(${hue},45%,38%)`;
+  const bellyColor=`hsl(${hue},35%,58%)`;
+  const eyes = slain
+    ? `<path d="M55,75 L70,90 M70,75 L55,90" stroke="#1a1a1a" stroke-width="4" stroke-linecap="round"/><path d="M90,75 L105,90 M105,75 L90,90" stroke="#1a1a1a" stroke-width="4" stroke-linecap="round"/>`
+    : `<circle cx="62" cy="80" r="7" fill="#1a1a1a"/><circle cx="98" cy="80" r="7" fill="#1a1a1a"/><circle cx="64" cy="78" r="2" fill="#fff"/><circle cx="100" cy="78" r="2" fill="#fff"/>`;
+  const mouth = slain
+    ? `<path d="M65,103 Q80,98 95,103" stroke="#1a1a1a" stroke-width="3" fill="none" stroke-linecap="round"/><ellipse cx="80" cy="112" rx="6" ry="9" fill="#c96a6a"/>`
+    : `<path d="M65,105 Q80,116 95,105" stroke="#1a1a1a" stroke-width="3" fill="none" stroke-linecap="round"/>`;
+  const dizzy = slain
+    ? `<path d="M58,48 Q68,38 78,48 Q88,58 98,48" stroke="#e0c94a" stroke-width="2.5" fill="none" stroke-linecap="round" opacity="0.85"/><circle cx="58" cy="46" r="2.2" fill="#e0c94a"/><circle cx="98" cy="46" r="2.2" fill="#e0c94a"/>`
+    : "";
+  return `<svg viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg"><ellipse cx="80" cy="95" rx="55" ry="48" fill="${bodyColor}"${slain?' opacity="0.7"':''}/><ellipse cx="80" cy="107" rx="34" ry="26" fill="${bellyColor}" opacity="0.6"/>${dizzy}${eyes}${mouth}</svg>`;
+}
+
 const LOGO_SVG = `<svg viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="badgeBg" cx="50%" cy="42%" r="65%"><stop offset="0%" stop-color="#2c4a2e"/><stop offset="70%" stop-color="#16281a"/><stop offset="100%" stop-color="#0d1a10"/></radialGradient><linearGradient id="ring" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#f0c96a"/><stop offset="50%" stop-color="#b8862f"/><stop offset="100%" stop-color="#f0c96a"/></linearGradient><linearGradient id="bladeLight" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#3f7a3a"/><stop offset="100%" stop-color="#8fce6a"/></linearGradient><linearGradient id="bladeDark" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#2c5c2a"/><stop offset="100%" stop-color="#5e9b4c"/></linearGradient></defs><circle cx="80" cy="80" r="76" fill="url(#ring)"/><circle cx="80" cy="80" r="70" fill="url(#badgeBg)"/><path d="M 80,118 C 68,100 52,86 40,54 C 58,66 72,82 78,104 Z" fill="url(#bladeDark)"/><path d="M 80,118 C 92,100 108,86 120,54 C 102,66 88,82 82,104 Z" fill="url(#bladeDark)"/><path d="M 80,120 C 72,96 66,74 62,42 C 76,58 82,82 82,110 Z" fill="url(#bladeLight)"/><path d="M 80,120 C 88,96 94,74 98,42 C 84,58 78,82 78,110 Z" fill="url(#bladeLight)"/><circle cx="80" cy="122" r="16" fill="#ff9d3d" opacity="0.5"/><circle cx="80" cy="124" r="5" fill="#ffdd9a"/></svg>`;
 
 const TRASH_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>`;
 const PLUS_CIRCLE_SVG = `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="18" fill="#2a3a20" stroke="#8fce6a" stroke-width="2"/><path d="M20 11v18M11 20h18" stroke="#c9e8a0" stroke-width="3.2" stroke-linecap="round"/></svg>`;
 const CHAT_BUBBLE_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>`;
 const BOULDER_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M4 16c-1.2-1.6-1-4 .8-5.4 .3-2.4 2.3-4.2 4.7-4.2 .9 0 1.7.3 2.4.7 .9-1.1 2.3-1.8 3.8-1.8 2.7 0 4.9 2.2 4.9 4.9 0 .3 0 .6-.1.9 1.4.8 2.4 2.3 2.4 4.1 0 2.6-2.1 4.6-4.6 4.6H6.9C5.3 19.8 4 18.5 4 16z" fill="#6b6b64" stroke="#3a3a34" stroke-width="1"/></svg>`;
-const CHARSELECT_BG_SVG = `<svg viewBox="0 0 900 200" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMax slice"><rect width="900" height="200" fill="none"/><path d="M0,200 L0,120 Q60,90 120,120 L120,200 Z" fill="#152016"/><path d="M90,200 L90,100 Q150,70 210,100 L210,200 Z" fill="#0f1811"/><path d="M700,200 L700,110 Q760,80 820,110 L820,200 Z" fill="#0f1811"/><path d="M790,200 L790,95 Q850,65 900,95 L900,200 Z" fill="#152016"/><circle cx="450" cy="150" r="26" fill="#ff9d3d" opacity="0.18"/><circle cx="450" cy="150" r="12" fill="#ffcf7a" opacity="0.28"/><path d="M420,200 Q450,175 480,200 Z" fill="#241a12"/></svg>`;
+const CHARSELECT_BG_SVG = `<svg width="100%" height="100%" viewBox="0 0 900 200" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMax slice"><rect width="900" height="200" fill="none"/><path d="M0,200 L0,140 Q60,115 120,140 L120,200 Z" fill="#152016"/><path d="M780,200 L780,140 Q840,115 900,140 L900,200 Z" fill="#152016"/><circle cx="450" cy="160" r="22" fill="#ff9d3d" opacity="0.14"/><circle cx="450" cy="160" r="10" fill="#ffcf7a" opacity="0.22"/><path d="M425,200 Q450,180 475,200 Z" fill="#241a12"/></svg>`;
 
 function inlineIcon(svg,size=18){ const d=h("span",{style:{display:"inline-flex",alignItems:"center",justifyContent:"center",width:size+"px",height:size+"px",verticalAlign:"middle"}}); d.innerHTML=svg; return d; }
+
+/* Procedural placeholder art for potions/scrolls/bags -- each item id gets its own hue so
+   different items (and different tiers of the same base type) read as visually distinct.
+   Swap these for real art any time; nothing else needs to change. */
+function itemIconSvg(itemId){
+  const item=DL.getItem(itemId);
+  const hue=hashHue(itemId);
+  if(item.type==="consumable"){
+    const liquid=`hsl(${hue},70%,52%)`;
+    return `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><rect x="16" y="4" width="8" height="6" rx="1" fill="#8a8a8a"/><path d="M15,10 L15,17 Q9,22 9,29 Q9,36 20,36 Q31,36 31,29 Q31,22 25,17 L25,10 Z" fill="#cfe6ee" stroke="#7a9aa8" stroke-width="1.5"/><path d="M10,25 Q9,33 20,34 Q31,33 30,25 Q31,31 20,32 Q9,31 10,25 Z" fill="${liquid}"/></svg>`;
+  }
+  if(item.type==="scroll"){
+    const ribbon=`hsl(${hue},60%,45%)`;
+    return `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><rect x="6" y="14" width="28" height="12" rx="6" fill="#e8d9b0" stroke="#a8946a" stroke-width="1.5"/><rect x="4" y="14" width="6" height="12" rx="3" fill="#d8c090"/><rect x="30" y="14" width="6" height="12" rx="3" fill="#d8c090"/><rect x="10" y="18" width="20" height="2" fill="${ribbon}"/></svg>`;
+  }
+  if(item.type==="bag"){
+    const cloth=`hsl(${hue},35%,42%)`;
+    return `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><path d="M12,16 Q20,10 28,16 L30,34 Q20,38 10,34 Z" fill="${cloth}" stroke="#2a2a2a" stroke-width="1.2"/><rect x="17" y="9" width="6" height="6" rx="2" fill="none" stroke="#c9a04a" stroke-width="1.5"/></svg>`;
+  }
+  return `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="14" fill="#666"/></svg>`;
+}
+function itemIcon(itemId,size=26){ return iconBadge(itemIconSvg(itemId),size); }
+
+/* Procedural placeholder art for equippable gear -- shape varies by slot type, color
+   follows the Diablo-style rarity palette (grey/white/blue/yellow/gold) so different
+   tiers and rarities of the same base item read as visually distinct at a glance. */
+const RARITY_ICON_COLORS={Common:"#9a9686",Uncommon:"#e8e4d8",Rare:"#5a9ae0",Epic:"#e0c94a",Legendary:"#d9902f"};
+function gearIconSvg(inst){
+  const color=RARITY_ICON_COLORS[inst.rarity]||"#9a9686";
+  const shapes={
+    weapon:`<path d="M20,6 L24,10 L15,32 L11,28 Z" fill="${color}" stroke="#222" stroke-width="1.2"/><rect x="9" y="27" width="8" height="4" rx="1" fill="#5a4028" transform="rotate(-40 13 29)"/>`,
+    head:`<path d="M8,22 Q8,8 20,8 Q32,8 32,22 L32,24 L8,24 Z" fill="${color}" stroke="#222" stroke-width="1.2"/><rect x="8" y="22" width="24" height="4" fill="#222" opacity="0.3"/>`,
+    shoulders:`<circle cx="13" cy="16" r="8" fill="${color}" stroke="#222" stroke-width="1.2"/><circle cx="27" cy="16" r="8" fill="${color}" stroke="#222" stroke-width="1.2"/>`,
+    armor:`<path d="M12,10 L28,10 L31,18 L26,34 L14,34 L9,18 Z" fill="${color}" stroke="#222" stroke-width="1.2"/>`,
+    pants:`<path d="M14,8 L26,8 L27,32 L21,32 L20,18 L19,32 L13,32 Z" fill="${color}" stroke="#222" stroke-width="1.2"/>`,
+    gloves:`<path d="M12,18 L12,10 L16,10 L16,16 L18,16 L18,8 L22,8 L22,16 L24,16 L24,10 L28,10 L28,20 Q28,30 20,32 Q12,30 12,18 Z" fill="${color}" stroke="#222" stroke-width="1.2"/>`,
+    boots:`<path d="M15,6 L25,6 L25,22 L31,26 L31,32 L11,32 L11,20 L15,20 Z" fill="${color}" stroke="#222" stroke-width="1.2"/>`,
+    ring:`<circle cx="20" cy="20" r="11" fill="none" stroke="${color}" stroke-width="4.5"/><circle cx="20" cy="10" r="3" fill="${color}"/>`,
+    amulet:`<path d="M20,6 L20,14" stroke="${color}" stroke-width="2.5"/><circle cx="20" cy="22" r="9" fill="${color}" stroke="#222" stroke-width="1.2"/><circle cx="20" cy="22" r="3.5" fill="#222" opacity="0.35"/>`,
+    belt:`<rect x="6" y="16" width="28" height="8" rx="2" fill="${color}" stroke="#222" stroke-width="1.2"/><rect x="17" y="15" width="6" height="10" fill="#222" opacity="0.4"/>`,
+  };
+  const body=shapes[inst.slot]||`<circle cx="20" cy="20" r="14" fill="${color}"/>`;
+  return `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">${body}</svg>`;
+}
+function gearIcon(inst,size=30){ return iconBadge(gearIconSvg(inst),size); }
 
 /* ---------- BALANCE ---------- */
 
@@ -210,7 +288,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.8-web",
+  GAME_VERSION:"v0.9-web",
   TOWN_1_NAME:"Emberroot Camp", NPC_BLACKSMITH_NAME:"Thane Ironvein", NPC_ALCHEMIST_NAME:"Ysolde Frostvine", NPC_MERCHANT_NAME:"Barnaby Fitch",
   ITEM_TIER_MAX:5, ITEM_STAT_PER_TIER:5, ITEM_TIER_ADJECTIVES:["Withered","Budding","Blooming","Ancient","Eternal"],
   RARITY_TABLE:[{name:"Common",slots:1,weight:60},{name:"Uncommon",slots:2,weight:25},{name:"Rare",slots:3,weight:10},{name:"Epic",slots:5,weight:4},{name:"Legendary",slots:8,weight:1}],
@@ -222,6 +300,9 @@ const Balance = {
   KILL_STREAK_STAT_GROWTH_PER_KILL:0.015, KILL_STREAK_LOOT_GROWTH_PER_KILL:0.02, KILL_STREAK_CAP:40,
   ADMIN_PASSWORD:"atldp0", MAX_CHARACTER_SLOTS:6,
   MASTER_TRIAL_LEVEL_REQUIREMENT:10, // temporarily lowered from LEVEL_CAP for early-access feedback; set back to LEVEL_CAP for the 1.0 launch
+  EYESIGHT_AFFIX_CHANCE:0.03, ELIXIR_EYESIGHT_STEPS:500, RARE_HERB_CHANCE:0.06,
+  BRIDGE_ROWS_PER_ATTEMPT:10,
+  GAMBLE_MIN_BET:5, GAMBLE_WIN_CHANCE:0.46,
 
   killStreakStatMult(s){return 1.0+this.KILL_STREAK_STAT_GROWTH_PER_KILL*Math.min(s,this.KILL_STREAK_CAP);},
   killStreakLootMult(s){return 1.0+this.KILL_STREAK_LOOT_GROWTH_PER_KILL*Math.min(s,this.KILL_STREAK_CAP);},
@@ -266,6 +347,11 @@ const DL = {
   getMonster(id){return MONSTERS.find(m=>m.id===id)||{};},
   getHerb(id){return HERBS[id]||{};},
   allHerbIds(){return Object.keys(HERBS);},
+  commonHerbIds(){return Object.keys(HERBS).filter(id=>!HERBS[id].rare);},
+  pickHerbForNode(){
+    if(Math.random()<Balance.RARE_HERB_CHANCE) return "starveil";
+    return pick(DL.commonHerbIds());
+  },
   allRecipes(){return RECIPES;},
   pickRandomMonsterForArea(areaLevel){
     let pool=MONSTERS.filter(m=>{
@@ -333,6 +419,9 @@ const IF = {
     for(let i=0;i<affixCount;i++){
       affixes.push({stat:pool[i], value:randIntRange(lo,hi)});
     }
+    if(Math.random()<Balance.EYESIGHT_AFFIX_CHANCE){
+      affixes.push({stat:"eyesight", value:2});
+    }
     return {instance_id:`${Date.now()}_${randi(999999)}`, slot:chosenSlot, base_name:baseName, tier, rarity:rarity.name, affixes, element};
   },
   displayName(inst){
@@ -351,7 +440,7 @@ const IF = {
     switch(stat){
       case "damage": return "Damage"; case "hp": return "Hit Points"; case "crit": return "Critical Strike";
       case "armor": return "Armor"; case "regen": return "Regeneration"; case "gold_find": return "Gold Found";
-      case "xp_find": return "Experience Gained"; case "stamina_max": return "Stamina";
+      case "xp_find": return "Experience Gained"; case "stamina_max": return "Stamina"; case "eyesight": return "Eyesight";
       default: return stat;
     }
   },
@@ -475,11 +564,10 @@ const Net = {
     const json=await res.json().catch(()=>({entries:[]}));
     this.graveyardCache=json.entries||[];
   },
-  async fetchLeaderboard(hardcore){
-    const res=await fetch(this.apiBase()+"/api/leaderboard"+(hardcore?"?hardcore=1":""));
+  async fetchLeaderboard(){
+    const res=await fetch(this.apiBase()+"/api/leaderboard");
     const json=await res.json().catch(()=>({entries:[]}));
-    if(hardcore) this.leaderboardCacheHardcore=json.entries||[];
-    else this.leaderboardCache=json.entries||[];
+    this.leaderboardCache=json.entries||[];
   },
   async announceTrialResult(payload){
     if(!this.online) return;
@@ -589,7 +677,7 @@ const PS = {
   consumables:{}, materials:0, herbs:{}, pending_scroll_bonus:0,
   xp_buff_multiplier:1.0, xp_buff_encounters_left:0, stamina_shrine_buff:0.0,
   highest_tier_reached:1, season_won:false, kill_streak:0, hardcore:false, current_slot:-1,
-  lifetime_xp:0, isRestingAtCampfire:false,
+  lifetime_xp:0, isRestingAtCampfire:false, eyesight_potion_steps_left:0,
 
   getClassData(){return DL.getClass(this.class_id);},
   gearBonus(stat){
@@ -641,6 +729,14 @@ const PS = {
     return leveled;
   },
   canAttemptTrial(){return this.level>=Balance.MASTER_TRIAL_LEVEL_REQUIREMENT;},
+  gamblingUnlocked(){return this.highest_tier_reached>=2 || this.season_won;},
+  getEyesightRadius(){
+    let r=1;
+    const gearBonus=this.gearBonus("eyesight");
+    if(gearBonus>0) r=Math.max(r,gearBonus);
+    if(this.eyesight_potion_steps_left>0) r=Math.max(r,2);
+    return r;
+  },
   resolveMasterTrial(success){
     const currentTier=this.getClassData().tier||1;
     const nextId=DL.getNextClassId(this.class_id);
@@ -695,6 +791,7 @@ const PS = {
     const item=DL.getItem(itemId); let used=false;
     if((item.heal_amount||0)>0 && this.current_hp<this.getMaxHp()){ this.current_hp=Math.min(this.getMaxHp(),this.current_hp+item.heal_amount); used=true; }
     if((item.stamina_amount||0)>0 && this.current_stamina<this.getMaxStamina()){ this.current_stamina=Math.min(this.getMaxStamina(),this.current_stamina+item.stamina_amount); used=true; }
+    if((item.eyesight_steps||0)>0){ this.eyesight_potion_steps_left=item.eyesight_steps; used=true; }
     if(used) this._removeConsumableOne(itemId);
     return used;
   },
@@ -703,6 +800,7 @@ const PS = {
     const item=DL.getItem(itemId);
     if((item.heal_amount||0)>0 && this.current_hp<this.getMaxHp()) return true;
     if((item.stamina_amount||0)>0 && this.current_stamina<this.getMaxStamina()) return true;
+    if((item.eyesight_steps||0)>0) return true;
     return false;
   },
   bestAvailableConsumable(kind){
@@ -764,6 +862,10 @@ const PS = {
     this.current_hp=Math.min(this.current_hp,this.getMaxHp());
   },
   unequipSlot(slot){ if(!this.equipped[slot]) return; this.gear_instances.push(this.equipped[slot]); this.equipped[slot]=null; },
+  wouldSwap(inst){
+    if(inst.slot==="ring") return !!(this.equipped["ring1"] && this.equipped["ring2"]);
+    return !!this.equipped[inst.slot];
+  },
   salvageGear(instanceId){
     const idx=this.findGearIndex(instanceId); if(idx===-1) return;
     const inst=this.gear_instances[idx];
@@ -777,11 +879,11 @@ const PS = {
     this.gear_instances.splice(idx,1);
   },
   rerollGear(instanceId){
-    const idx=this.findGearIndex(instanceId); if(idx===-1) return false;
+    const idx=this.findGearIndex(instanceId); if(idx===-1) return null;
     const inst=this.gear_instances[idx];
     const cost=Balance.rerollCost(inst.tier, IF.slotCount(inst));
-    if(this.materials<cost) return false;
-    this.materials-=cost; this.gear_instances[idx]=IF.reroll(inst); return true;
+    if(this.materials<cost) return null;
+    this.materials-=cost; const rerolled=IF.reroll(inst); this.gear_instances[idx]=rerolled; return rerolled;
   },
   addHerb(herbId,count=1){ this.herbs[herbId]=(this.herbs[herbId]||0)+count; },
   canAffordRecipe(recipe){ for(const h in recipe.herbs) if((this.herbs[h]||0)<recipe.herbs[h]) return false; return true; },
@@ -801,7 +903,7 @@ const PS = {
     this.xp_buff_encounters_left=0; this.stamina_shrine_buff=0.0; this.highest_tier_reached=1;
     this.season_won=false; this.kill_streak=0; this.xp_to_next=Balance.xpRequiredForLevel(this.level);
     this.current_hp=this.getMaxHp(); this.current_stamina=this.getMaxStamina();
-    this.lifetime_xp=0; this.isRestingAtCampfire=false;
+    this.lifetime_xp=0; this.isRestingAtCampfire=false; this.eyesight_potion_steps_left=0;
   },
   saveGame(){
     if(this.current_slot<0) return;
@@ -810,7 +912,8 @@ const PS = {
       xp:this.xp,xp_to_next:this.xp_to_next,gold:this.gold,materials:this.materials,herbs:this.herbs,
       current_hp:this.current_hp,current_stamina:this.current_stamina,consumables:this.consumables,
       gear_instances:this.gear_instances,equipped:this.equipped,equipped_bags:this.equipped_bags,
-      highest_tier_reached:this.highest_tier_reached,season_won:this.season_won,lifetime_xp:this.lifetime_xp};
+      highest_tier_reached:this.highest_tier_reached,season_won:this.season_won,lifetime_xp:this.lifetime_xp,
+      eyesight_potion_steps_left:this.eyesight_potion_steps_left};
     if(Net.online) Net.saveCharacter(this.current_slot, data);
     else Storage_.setItem(SAVE_KEY(this.current_slot), JSON.stringify(data));
   },
@@ -828,6 +931,7 @@ const PS = {
     this.current_stamina=parsed.current_stamina!=null?parsed.current_stamina:this.getMaxStamina();
     this.pending_scroll_bonus=0; this.xp_buff_multiplier=1.0; this.xp_buff_encounters_left=0; this.stamina_shrine_buff=0.0;
     this.lifetime_xp=parsed.lifetime_xp||0; this.isRestingAtCampfire=false;
+    this.eyesight_potion_steps_left=parsed.eyesight_potion_steps_left||0;
     return true;
   },
   loadGame(slot){
@@ -851,6 +955,8 @@ const GF = {
   pending_chest_hits_required:3, pending_chest_tier:1, pending_chest_area_level:1,
   overworld_snapshot:null,
   chatOpen:false, inventory_return_to:"town",
+  brewing:null, brewInterval:null, crafting:null, craftInterval:null,
+  trialJustFailed:false, trialFailedSide:null, trialFailedStepIndex:-1,
   goto(screen, extra={}){
     Object.assign(this, extra);
     if(PS.isRestingAtCampfire && !NO_REGEN_SCREENS_ON_LEAVE.includes(screen)) PS.isRestingAtCampfire=false;
@@ -877,7 +983,7 @@ function h(tag, attrs={}, children=[]){
   }
   return e;
 }
-function bar(pct, cls){ return h("div",{class:"bar-bg"},[h("div",{class:"bar-fill "+cls, style:{width:clampf(pct,0,100)+"%"}})]); }
+function bar(pct, cls, compact){ return h("div",{class:"bar-bg"+(compact?" compact":"")},[h("div",{class:"bar-fill "+cls, style:{width:clampf(pct,0,100)+"%"}})]); }
 function iconBadge(svg, size){ const d=h("div",{class:"icon-badge",style:size?{width:size+"px",height:size+"px"}:{}}); d.innerHTML=svg; return d; }
 
 /* ---------- App root + render ---------- */
@@ -952,6 +1058,46 @@ function toastBox(){
 }
 function setToast(msg){ GF.toast=msg; }
 
+/* ---------- Autosave: there is no manual save button. Progress is persisted after every
+   meaningful action (combat rounds, maze steps/events, vendor transactions, campfire regen
+   ticks) instead of on a fixed timer, so idle sessions don't spam the server with no-op saves. ---------- */
+function autosave(){ if(PS.current_slot>=0) PS.saveGame(); }
+window.addEventListener("beforeunload",()=>{ if(PS.current_slot>=0) PS.saveGame(); });
+
+const BREW_CRAFT_MS=2000;
+function startBrew(recipe){
+  if(GF.brewing || !PS.canAffordRecipe(recipe)) return;
+  GF.brewing={recipeId:recipe.result_item, startedAt:Date.now(), recipe};
+  render();
+  GF.brewInterval=setInterval(()=>{
+    if(!GF.brewing){ clearInterval(GF.brewInterval); GF.brewInterval=null; return; }
+    if(Date.now()-GF.brewing.startedAt>=BREW_CRAFT_MS){
+      clearInterval(GF.brewInterval); GF.brewInterval=null;
+      const rec=GF.brewing.recipe; GF.brewing=null;
+      const result=DL.getItem(rec.result_item);
+      if(PS.brewRecipe(rec)){ autosave(); setToast(`Brewed ${result.name}!`); }
+      render();
+    } else render();
+  },100);
+}
+function startCraftBag(itemId){
+  const item=DL.getItem(itemId);
+  const cost=Balance.bagCraftCost(item.capacity||0);
+  if(GF.crafting || PS.materials<cost || PS.equipped_bags.length>=Balance.MAX_BAG_SLOTS) return;
+  GF.crafting={itemId, startedAt:Date.now()};
+  render();
+  GF.craftInterval=setInterval(()=>{
+    if(!GF.crafting){ clearInterval(GF.craftInterval); GF.craftInterval=null; return; }
+    if(Date.now()-GF.crafting.startedAt>=BREW_CRAFT_MS){
+      clearInterval(GF.craftInterval); GF.craftInterval=null;
+      const id=GF.crafting.itemId; GF.crafting=null;
+      const r=PS.craftBag(id);
+      if(r.success){ autosave(); setToast(`Crafted ${DL.getItem(id).name}!`); } else setToast(r.reason);
+      render();
+    } else render();
+  },100);
+}
+
 function inventoryPreview(){
   const equippedCount=IF.EQUIPPED_SLOT_KEYS.filter(s=>PS.equipped[s]).length;
   const consumableParts=Object.keys(PS.consumables).filter(k=>PS.consumables[k]>0).map(k=>`${DL.getItem(k).name} x${PS.consumables[k]}`);
@@ -968,9 +1114,10 @@ function inventoryPreview(){
   ]);
 }
 
-function statHeader(){
+function statHeader(opts={}){
+  const compact=!!opts.compact;
   const c=PS.getClassData();
-  return h("div",{class:"panel",style:{marginBottom:"14px"}},[
+  return h("div",{class:"panel",style:{marginBottom:compact?"0":"14px"}},[
     h("div",{class:"row",style:{justifyContent:"space-between"}},[
       h("div",{},[
         h("div",{},[`${PS.character_name} `,h("span",{class:"muted"},[`-- Lv ${PS.level} ${c.display_name||""}`]), PS.hardcore?h("span",{style:{color:"#e07a7a"}},[" [Hardcore]"]):null]),
@@ -982,13 +1129,13 @@ function statHeader(){
       ]),
     ]),
     h("div",{class:"row",style:{marginTop:"8px",alignItems:"flex-start",gap:"14px"}},[
-      h("div",{class:"col gap",style:{flex:"0 0 33%",maxWidth:"33%",minWidth:"0"}},[
+      h("div",{class:"col",style:{gap:compact?"3px":"8px",flex:"0 0 33%",maxWidth:"33%",minWidth:"0"}},[
         h("div",{},[h("span",{class:"xp-text"},[`XP ${PS.xp}/${PS.xp_to_next}`])]),
-        bar(PS.xp/PS.xp_to_next*100,"bar-xp"),
+        bar(PS.xp/PS.xp_to_next*100,"bar-xp",compact),
         h("div",{},[h("span",{class:"hp-text"},[`HP ${Math.round(PS.current_hp)}/${Math.round(PS.getMaxHp())}`])]),
-        bar(PS.current_hp/PS.getMaxHp()*100,"bar-hp"),
+        bar(PS.current_hp/PS.getMaxHp()*100,"bar-hp",compact),
         h("div",{},[h("span",{class:"stamina-text"},[`Stamina ${Math.round(PS.current_stamina)}/${Math.round(PS.getMaxStamina())}`])]),
-        bar(PS.current_stamina/PS.getMaxStamina()*100,"bar-stamina"),
+        bar(PS.current_stamina/PS.getMaxStamina()*100,"bar-stamina",compact),
       ]),
       inventoryPreview(),
     ]),
@@ -1055,7 +1202,7 @@ function screenRegister(){ return authForm("register"); }
 
 function screenMainMenuSlots(){
   const root=h("div",{style:{position:"relative"}});
-  const bgWrap=h("div",{style:{position:"absolute",left:"0",right:"0",bottom:"0",height:"200px",overflow:"hidden",pointerEvents:"none",opacity:"0.85",zIndex:"0"}});
+  const bgWrap=h("div",{style:{position:"absolute",left:"0",right:"0",bottom:"0",height:"200px",overflow:"hidden",pointerEvents:"none",opacity:"0.6",zIndex:"0"}});
   bgWrap.innerHTML=CHARSELECT_BG_SVG;
   root.appendChild(bgWrap);
   const content=h("div",{style:{position:"relative",zIndex:"1"}});
@@ -1095,23 +1242,23 @@ function screenMainMenuSlots(){
 
   const full=filled>=Balance.MAX_CHARACTER_SLOTS;
   content.appendChild(h("div",{class:"row",style:{marginTop:"10px",alignItems:"stretch"}},[
-    h("div",{style:{width:"300px"}},[
-      h("button",{class:"wide play",style:{display:"flex",alignItems:"center",justifyContent:"center",gap:"10px",padding:"18px",fontSize:"1.1em"},disabled:full,onClick:()=>{ if(firstEmpty!==-1) GF.goto("classPicker",{selected_slot:firstEmpty}); }},[
+    h("div",{style:{width:"300px",display:"flex"}},[
+      h("button",{class:"wide",style:{display:"flex",alignItems:"center",justifyContent:"center",gap:"10px",padding:"18px",fontSize:"1.1em",flex:"1"},disabled:full,onClick:()=>{ if(firstEmpty!==-1) GF.goto("classPicker",{selected_slot:firstEmpty}); }},[
         full?null:inlineIcon(PLUS_CIRCLE_SVG,28),
         full?"Character limit reached.":"Create New Character"
       ]),
     ]),
-    h("div",{style:{width:"240px"}},[
-      h("button",{class:"wide",style:{textAlign:"center",lineHeight:"1.3",padding:"10px 14px"},onClick:()=>GF.goto("graveyard")},[
+    h("div",{style:{width:"240px",display:"flex"}},[
+      h("button",{class:"wide",style:{textAlign:"center",lineHeight:"1.3",padding:"10px 14px",flex:"1"},onClick:()=>GF.goto("graveyard")},[
         h("div",{},["† Graveyard"]),
         h("div",{class:"dim-note",style:{marginTop:"2px"}},["Final resting place for our fallen heroes"]),
       ]),
     ]),
-    h("div",{style:{width:"240px"}},[
-      Net.online?h("button",{class:"wide",style:{textAlign:"center",lineHeight:"1.3",padding:"10px 14px"},onClick:()=>GF.goto("leaderboard")},[
+    h("div",{style:{width:"240px",display:"flex"}},[
+      Net.online?h("button",{class:"wide",style:{textAlign:"center",lineHeight:"1.3",padding:"10px 14px",flex:"1"},onClick:()=>{ Net.leaderboardCache=null; GF.goto("leaderboard"); }},[
         h("div",{},["🏆 Leaderboard"]),
         h("div",{class:"dim-note",style:{marginTop:"2px"}},["See how your heroes rank"]),
-      ]):h("button",{class:"wide",disabled:true,style:{textAlign:"center",lineHeight:"1.3",padding:"10px 14px"}},[
+      ]):h("button",{class:"wide",disabled:true,style:{textAlign:"center",lineHeight:"1.3",padding:"10px 14px",flex:"1"}},[
         h("div",{},["🏆 Leaderboard"]),
         h("div",{class:"dim-note",style:{marginTop:"2px"}},["Log in online to see rankings"]),
       ]),
@@ -1194,25 +1341,28 @@ function screenGraveyard(){
 function screenLeaderboard(){
   const root=h("div",{});
   root.appendChild(h("h2",{},["Leaderboard"]));
-  root.appendChild(h("div",{class:"lore"},["The furthest any traveler has made it, across every account on this server."]));
-  const tab=GF.leaderboard_tab||"regular";
-  root.appendChild(h("div",{class:"row gap",style:{marginBottom:"10px"}},[
-    h("button",{class:tab==="regular"?"play":"",onClick:()=>{ GF.leaderboard_tab="regular"; render(); }},["Regular"]),
-    h("button",{class:tab==="hardcore"?"play":"",onClick:()=>{ GF.leaderboard_tab="hardcore"; render(); }},["Hardcore"]),
-  ]));
-  const cache = tab==="hardcore" ? Net.leaderboardCacheHardcore : Net.leaderboardCache;
-  if(cache===null||cache===undefined){
+  root.appendChild(h("div",{class:"lore"},["The road is long, and in the end, it's only with yourself. But still, here is a list of players outperforming you."]));
+  if(Net.leaderboardCache===null||Net.leaderboardCache===undefined){
     root.appendChild(h("div",{class:"muted"},["Loading..."]));
-    Net.fetchLeaderboard(tab==="hardcore").then(render).catch(()=>{ setToast("Could not load the leaderboard."); render(); });
+    Net.fetchLeaderboard().then(render).catch(()=>{ setToast("Could not load the leaderboard."); render(); });
     root.appendChild(h("button",{onClick:()=>GF.goto("mainMenuSlots")},["← Back"]));
     return root;
   }
-  const entries=cache;
-  if(entries.length===0) root.appendChild(h("div",{class:"muted"},[tab==="hardcore"?"No hardcore travelers have made a mark yet -- be the first!":"No one has made a mark yet -- be the first!"]));
+  const entries=Net.leaderboardCache;
+  if(entries.length===0) root.appendChild(h("div",{class:"muted"},["No one has made a mark yet -- be the first!"]));
   entries.forEach((e,i)=>{
-    root.appendChild(h("div",{class:"tile row",style:{marginBottom:"6px",justifyContent:"space-between"}},[
-      h("div",{},[h("span",{class:"muted"},[`#${i+1} `]), h("span",{style:{fontWeight:"bold"}},[`${e.character_name}`]), h("span",{class:"muted"},[` (${e.player})`])]),
-      h("div",{class:"muted"},[`Lv ${e.level} ${e.class_name} -- ${e.lifetime_xp||0} Experience -- ${e.gold}g`]),
+    const isMine=e.player===Net.username;
+    const style={marginBottom:"6px",justifyContent:"space-between"};
+    if(e.hardcore){ style.borderColor="#e0b23d"; style.borderWidth="2px"; }
+    if(isMine){ style.background="#20304a"; }
+    root.appendChild(h("div",{class:"tile row",style},[
+      h("div",{},[
+        h("span",{class:"muted"},[`#${i+1} `]),
+        h("span",{style:{fontWeight:"bold"}},[`${e.character_name}`]),
+        h("span",{class:"muted"},[` (${e.player})`]),
+        e.hardcore?h("span",{style:{color:"#e0b23d",fontWeight:"bold"}},[" [Hardcore]"]):null,
+      ]),
+      h("div",{class:"muted"},[`Lv ${e.level} ${e.class_name} (Tier ${e.highest_tier_reached}) -- ${e.lifetime_xp||0} Experience -- ${e.gold} Gold`]),
     ]));
   });
   root.appendChild(h("button",{style:{marginTop:"10px"},onClick:()=>GF.goto("mainMenuSlots")},["← Back"]));
@@ -1230,30 +1380,36 @@ function screenTown(){
   root.appendChild(h("h2",{},[Balance.TOWN_1_NAME]));
   root.appendChild(h("div",{class:"lore"},["A quiet camp on the edge of a vast, overgrown forest. The fire needs protecting, but for now, all is calm."]));
   const t=toastBox(); if(t) root.appendChild(t);
-  root.appendChild(statHeader());
 
-  root.appendChild(h("div",{class:"row",style:{marginTop:"6px"}},[
-    h("button",{class:"wide play",onClick:()=>{ PS.resetKillStreak(); GF.overworld_snapshot=null; GF.goto("maze",{maze_depth: PS.level}); }},["🌳 Venture into the Woods"]),
-  ]));
-  root.appendChild(h("div",{class:"row",style:{marginTop:"8px",marginBottom:"6px"}},[
-    h("button",{class:"wide",disabled:PS.isRestingAtCampfire && PS.current_hp>=PS.getMaxHp() && PS.current_stamina>=PS.getMaxStamina(),onClick:()=>{
-      PS.isRestingAtCampfire=true; PS.saveGame();
-      setToast("You settle in by the campfire. HP and Stamina will recover gradually while you stay in camp.");
-      render();
-    }},[PS.isRestingAtCampfire?"Resting by the Campfire...":"Rest at the Campfire"]),
-  ]));
-
-  root.appendChild(h("div",{class:"services"},[
-    serviceButton(`Merchant (${Balance.NPC_MERCHANT_NAME})`,"💰",()=>GF.goto("merchant")),
-    serviceButton(`Blacksmith (${Balance.NPC_BLACKSMITH_NAME})`,"🔨",()=>GF.goto("blacksmith")),
-    serviceButton(`Alchemist (${Balance.NPC_ALCHEMIST_NAME})`,"⚗",()=>GF.goto("alchemist")),
-    serviceButton("Auction House","📜",()=>GF.goto("auctionHouse")),
-    PS.canAttemptTrial()?serviceButton("Master Trial","⭐",()=>GF.goto("masterTrial")):h("button",{disabled:true},[`Master Trial (reach Lv ${Balance.MASTER_TRIAL_LEVEL_REQUIREMENT})`]),
+  root.appendChild(h("div",{class:"town-quadrants",style:{marginBottom:"14px"}},[
+    // top-left: venture + rest
+    h("div",{class:"col gap"},[
+      h("button",{class:"wide",style:{padding:"16px"},onClick:()=>{ PS.resetKillStreak(); GF.overworld_snapshot=null; GF.goto("maze",{maze_depth: PS.level}); }},["🌳 Venture into the Woods"]),
+      h("button",{class:"wide",disabled:PS.isRestingAtCampfire && PS.current_hp>=PS.getMaxHp() && PS.current_stamina>=PS.getMaxStamina(),onClick:()=>{
+        PS.isRestingAtCampfire=true; autosave();
+        setToast("You settle in by the campfire. HP and Stamina will recover gradually while you stay in camp.");
+        render();
+      }},[PS.isRestingAtCampfire?"Resting by the Campfire...":"Rest at the Campfire"]),
+    ]),
+    // top-right: compact stat/inventory tile
+    statHeader({compact:true}),
+    // bottom-left: blacksmith + alchemist
+    h("div",{class:"col gap"},[
+      serviceButton(`Blacksmith (${Balance.NPC_BLACKSMITH_NAME})`,"🔨",()=>GF.goto("blacksmith")),
+      serviceButton(`Alchemist (${Balance.NPC_ALCHEMIST_NAME})`,"⚗",()=>GF.goto("alchemist")),
+    ]),
+    // bottom-right: merchant + auction house + master trial
+    h("div",{class:"col gap"},[
+      serviceButton(`Merchant (${Balance.NPC_MERCHANT_NAME})`,"💰",()=>GF.goto("merchant")),
+      serviceButton("Auction House","📜",()=>{ Net.auctionCache=null; GF.goto("auctionHouse"); }),
+      PS.gamblingUnlocked()?serviceButton("Gambling Goblin","🎲",()=>GF.goto("gamblingGoblin")):h("button",{disabled:true},["Gambling Goblin (pass a trial first)"]),
+      PS.canAttemptTrial()?serviceButton("Broken Bridge Challenge","⭐",()=>GF.goto("masterTrial")):h("button",{disabled:true},[`Broken Bridge Challenge (reach Lv ${Balance.MASTER_TRIAL_LEVEL_REQUIREMENT})`]),
+    ]),
   ]));
 
   root.appendChild(h("hr"));
   root.appendChild(h("div",{class:"row"},[
-    h("button",{onClick:()=>{ PS.saveGame(); GF.goto("mainMenuSlots"); }},["Save & Return to Menu"]),
+    h("span",{class:"linklike",onClick:()=>{ autosave(); GF.goto("mainMenuSlots"); }},["← Return to Menu"]),
     h("span",{class:"linklike",style:{marginLeft:"auto"},onClick:()=>GF.goto("adminPanel")},["dev tools"]),
   ]));
   return root;
@@ -1262,7 +1418,7 @@ function screenTown(){
 
 /* ================= MAZE / OVERWORLD ================= */
 
-const MAZE_SIZE=6;
+const MAZE_SIZE=20;
 
 function generateMaze(depth){
   const size=MAZE_SIZE;
@@ -1302,9 +1458,15 @@ function generateMaze(depth){
   const candidates=cells.filter(c=>c.type==="empty");
   shuffle(candidates);
   let ci=0;
-  if(Math.random()<Balance.CHEST_CHANCE_PER_MAZE && candidates[ci]) candidates[ci++].type="chest";
-  if(Math.random()<Balance.SHRINE_CHANCE_PER_MAZE && candidates[ci]) candidates[ci++].type="shrine";
-  for(let i=0;i<Balance.HERB_NODE_COUNT && candidates[ci]; i++) candidates[ci++].type="herb";
+  // Content density was tuned for the original 6x6 (36-cell) maze; scale proportionally
+  // for larger grids so a 20x20 maze doesn't feel emptied out.
+  const densityScale=(size*size)/36;
+  const chestCount=Math.max(1,Math.round(Balance.CHEST_CHANCE_PER_MAZE*densityScale));
+  const shrineCount=Math.max(1,Math.round(Balance.SHRINE_CHANCE_PER_MAZE*densityScale));
+  const herbCount=Math.max(1,Math.round(Balance.HERB_NODE_COUNT*densityScale));
+  for(let i=0;i<chestCount && candidates[ci]; i++) candidates[ci++].type="chest";
+  for(let i=0;i<shrineCount && candidates[ci]; i++) candidates[ci++].type="shrine";
+  for(let i=0;i<herbCount && candidates[ci]; i++) candidates[ci++].type="herb";
   for(let i=ci;i<candidates.length;i++){
     if(Math.random()<Balance.TRAP_CHANCE_PER_TILE) candidates[i].type="trap";
   }
@@ -1324,18 +1486,20 @@ function screenMaze(){
   const maze=ensureMaze(depth);
   const root=h("div",{});
   root.appendChild(h("h2",{},[`The Woods -- Depth ${depth}`]));
-  root.appendChild(h("div",{class:"lore"},["Overgrown paths wind between the trees. Move to an adjacent lit tile, or use the arrows."]));
+  root.appendChild(h("div",{class:"lore"},["Overgrown paths wind between the trees. Move with the arrow keys, on-screen arrows, or by clicking a lit tile."]));
   const t=toastBox(); if(t) root.appendChild(t);
   root.appendChild(statHeader());
 
   const px=maze.playerIdx%maze.size, py=Math.floor(maze.playerIdx/maze.size);
+  const sightRadius=PS.getEyesightRadius();
   const grid=h("div",{class:"maze-grid",style:{gridTemplateColumns:`repeat(${maze.size},34px)`}});
   for(let y=0;y<maze.size;y++){
     for(let x=0;x<maze.size;x++){
       const i=y*maze.size+x; const cell=maze.cells[i];
       const isPlayer=maze.playerIdx===i;
       const isWalkable=maze.cells[maze.playerIdx].conn.has(i);
-      const isGeoNeighbor=!isPlayer && (Math.abs(x-px)+Math.abs(y-py)===1);
+      const chebyshevDist=Math.max(Math.abs(x-px),Math.abs(y-py));
+      const isGeoNeighbor=!isPlayer && chebyshevDist<=sightRadius;
       let bg=TILE_COLOR.empty, label="", border="1px solid #222", opacity="1";
       if(isPlayer){ bg="#e0c96a"; }
       else if(cell.discovered || cell.type==="exit" || cell.type==="start"){
@@ -1384,14 +1548,34 @@ function screenMaze(){
   return root;
 }
 
+function revealAround(maze,centerIdx,radius){
+  const cx=centerIdx%maze.size, cy=Math.floor(centerIdx/maze.size);
+  for(let dy=-radius;dy<=radius;dy++){
+    for(let dx=-radius;dx<=radius;dx++){
+      const nx=cx+dx, ny=cy+dy;
+      if(nx<0||nx>=maze.size||ny<0||ny>=maze.size) continue;
+      maze.cells[ny*maze.size+nx].discovered=true;
+    }
+  }
+}
+
+function tickEyesightPotion(){
+  if(PS.eyesight_potion_steps_left>0){
+    PS.eyesight_potion_steps_left--;
+  }
+}
+
 function onStepMaze(maze,targetIdx){
   const cell=maze.cells[targetIdx];
   maze.playerIdx=targetIdx; cell.discovered=true; cell.visited=true;
   PS.spendStamina(Balance.STAMINA_COST_PER_STEP);
   PS.tickXpBuff();
+  tickEyesightPotion();
+  revealAround(maze,targetIdx,PS.getEyesightRadius());
   if(PS.current_stamina<=0){
     setToast("You're exhausted and stumble back to camp.");
     PS.restoreStamina(Balance.STAMINA_MAX_BASE*0.25);
+    autosave();
     GF.goto("town"); return;
   }
 
@@ -1399,6 +1583,7 @@ function onStepMaze(maze,targetIdx){
     cell.cleared=true;
     setToast(`You find the way deeper into the woods. (Depth ${maze.depth+Balance.EXIT_DEPTH_BONUS_PER_DESCENT})`);
     GF.overworld_snapshot=null;
+    autosave();
     GF.goto("maze",{maze_depth:maze.depth+Balance.EXIT_DEPTH_BONUS_PER_DESCENT});
     return;
   }
@@ -1410,23 +1595,21 @@ function onStepMaze(maze,targetIdx){
     setToast(`A hidden snare! You take ${Math.round(dmg)} damage.`);
     if(Math.random()<Balance.TRAP_REGENERATE_MAZE_CHANCE){
       GF.overworld_snapshot=null;
+      autosave();
       GF.goto("maze",{maze_depth:Math.max(1,maze.depth-Balance.TRAPDOOR_DEPTH_PENALTY)});
       return;
     }
-    render(); return;
+    autosave(); render(); return;
   }
   if(cell.type==="shrine" && !cell.cleared){
     cell.cleared=true;
     if(Math.random()<0.5){ PS.addStaminaShrineBuff(Balance.STAMINA_MAX_BASE*Balance.SHRINE_STAMINA_BUFF_PCT); setToast("A quiet shrine restores your stamina and grants a lasting reserve!"); }
     else { PS.applyXpShrineBuff(); setToast("A quiet shrine blesses you -- bonus experience for a while!"); }
-    render(); return;
+    autosave(); render(); return;
   }
   if(cell.type==="herb" && !cell.cleared){
-    cell.cleared=true;
-    const herbId=pick(DL.allHerbIds());
-    PS.addHerb(herbId,1);
-    setToast(`You gather ${(DL.getHerb(herbId).name)}.`);
-    render(); return;
+    GF.goto("herbEncounter",{maze_depth:maze.depth, herb_cell_idx:targetIdx});
+    return;
   }
   if(cell.type==="chest" && !cell.cleared){
     GF.goto("chestEncounter",{maze_depth:maze.depth, chest_cell_idx:targetIdx});
@@ -1438,8 +1621,23 @@ function onStepMaze(maze,targetIdx){
     GF.goto("combat",{maze_depth:maze.depth, pending_monster_id:monster.id});
     return;
   }
+  autosave();
   render();
 }
+
+window.addEventListener("keydown",(e)=>{
+  if(GF.screen!=="maze") return;
+  const keyMap={ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0]};
+  const d=keyMap[e.key]; if(!d) return;
+  const maze=GF.overworld_snapshot; if(!maze) return;
+  e.preventDefault();
+  const px=maze.playerIdx%maze.size, py=Math.floor(maze.playerIdx/maze.size);
+  const nx=px+d[0], ny=py+d[1];
+  if(nx<0||nx>=maze.size||ny<0||ny>=maze.size) return;
+  const ni=ny*maze.size+nx;
+  if(!maze.cells[maze.playerIdx].conn.has(ni)) return;
+  onStepMaze(maze,ni);
+});
 
 
 /* ================= COMBAT ================= */
@@ -1489,18 +1687,22 @@ function screenCombat(){
   const root=h("div",{});
   root.appendChild(h("h2",{},[cb.defeated?`The ${cb.name} lies defeated.`:`A wild ${cb.name} blocks the path!`]));
   root.appendChild(statHeader());
-  root.appendChild(h("div",{class:"panel"},[
-    h("div",{style:{fontWeight:"bold"}},[cb.name]),
-    h("div",{},[`HP ${Math.round(Math.max(0,cb.hp))}/${Math.round(cb.maxHp)}`]),
+
+  const portraitWrap=h("div",{style:{width:"140px",height:"140px",margin:"0 auto 8px"}});
+  portraitWrap.innerHTML=monsterPortrait(cb.monster_id,{slain:cb.defeated});
+  const mobPanel=h("div",{class:"panel",style:{flex:"0 0 50%",maxWidth:"50%"}},[
+    portraitWrap,
+    h("div",{style:{fontWeight:"bold",textAlign:"center"}},[cb.name]),
+    h("div",{style:{textAlign:"center"}},[`HP ${Math.round(Math.max(0,cb.hp))}/${Math.round(cb.maxHp)}`]),
     bar(Math.max(0,cb.hp)/cb.maxHp*100,"bar-hp"),
-  ]));
-  const logDiv=h("div",{class:"muted",style:{margin:"8px 0",minHeight:"70px"}},cb.log.map(l=>h("div",{},[l])));
-  root.appendChild(logDiv);
+  ]);
+  const logDiv=h("div",{class:"muted panel",style:{flex:"1",minWidth:"0",minHeight:"70px"}},cb.log.map(l=>h("div",{},[l])));
+  root.appendChild(h("div",{class:"row",style:{alignItems:"flex-start",gap:"14px"}},[mobPanel,logDiv]));
 
   if(cb.defeated){
-    root.appendChild(h("div",{class:"panel",style:{background:"#2a3a20",borderColor:"#5a7a3a",marginBottom:"12px"}},[cb.result_text]));
+    root.appendChild(h("div",{class:"panel",style:{background:"#2a3a20",borderColor:"#5a7a3a",margin:"12px 0"}},[cb.result_text]));
     root.appendChild(h("div",{class:"row"},[
-      h("button",{class:"play",onClick:()=>{ GF.combat=null; GF.goto("maze",{maze_depth:GF.maze_depth}); }},["Continue Wandering"]),
+      h("button",{onClick:()=>{ GF.combat=null; GF.goto("maze",{maze_depth:GF.maze_depth}); }},["Continue Wandering"]),
     ]));
     return root;
   }
@@ -1522,7 +1724,7 @@ function screenCombat(){
       const lootMsg=grantLoot(cb.loot_table, streakMult);
       cb.defeated=true;
       cb.result_text=`${cb.name} defeated! +${Math.round(cb.xp*streakMult)} XP, +${Math.round(gold)} gold. ${lootMsg}`;
-      PS.saveGame();
+      autosave();
       render();
       return;
     }
@@ -1532,13 +1734,14 @@ function screenCombat(){
     PS.current_hp-=mdmg;
     combatLog(cb,`The ${cb.name} hits you for ${Math.round(mdmg)}.`);
     if(PS.current_hp<=0){ endCombatDeath(); return; }
+    autosave();
     render();
   }
 
-  root.appendChild(h("div",{class:"row"},[
+  root.appendChild(h("div",{class:"row",style:{marginTop:"10px"}},[
     h("button",{class:"play",onClick:playerTurn},["Attack"]),
-    h("button",{disabled:!PS.canUseConsumable(PS.bestAvailableConsumable("health")),onClick:()=>{ PS.useConsumable(PS.bestAvailableConsumable("health")); render(); }},["Use Health Potion"]),
-    h("button",{disabled:!PS.canUseConsumable(PS.bestAvailableConsumable("stamina")),onClick:()=>{ PS.useConsumable(PS.bestAvailableConsumable("stamina")); render(); }},["Use Stamina Potion"]),
+    h("button",{disabled:!PS.canUseConsumable(PS.bestAvailableConsumable("health")),onClick:()=>{ PS.useConsumable(PS.bestAvailableConsumable("health")); autosave(); render(); }},["Use Health Potion"]),
+    h("button",{disabled:!PS.canUseConsumable(PS.bestAvailableConsumable("stamina")),onClick:()=>{ PS.useConsumable(PS.bestAvailableConsumable("stamina")); autosave(); render(); }},["Use Stamina Potion"]),
     h("button",{class:"danger",onClick:()=>{ GF.combat=null; setToast("You flee back toward camp."); GF.goto("maze",{maze_depth:GF.maze_depth}); }},["Flee"]),
   ]));
   return root;
@@ -1589,14 +1792,55 @@ function screenChest(){
   return root;
 }
 
+/* ================= HERB GATHERING ================= */
+
+function ensureHerbNode(){
+  if(!GF.herbNode || GF.herbNode.cell_idx!==GF.herb_cell_idx){
+    GF.herbNode={cell_idx:GF.herb_cell_idx, herb_id:DL.pickHerbForNode(), ticks_required:randIntRange(2,4), ticks_done:0};
+  }
+  return GF.herbNode;
+}
+
+function screenHerbEncounter(){
+  const node=ensureHerbNode();
+  const herb=DL.getHerb(node.herb_id);
+  const root=h("div",{});
+  root.appendChild(h("h2",{},[herb.rare?`A rare bloom -- ${herb.name}`:`Gathering ${herb.name}`]));
+  root.appendChild(h("div",{class:"lore"},["Careful hands find more than hasty ones. No danger here -- just patience."]));
+  root.appendChild(statHeader());
+  root.appendChild(h("div",{class:"panel"},[
+    h("div",{},[`Gathering: ${node.ticks_done}/${node.ticks_required}`]),
+    bar(node.ticks_done/node.ticks_required*100,"bar-xp"),
+  ]));
+  root.appendChild(h("div",{class:"row"},[
+    h("button",{onClick:()=>{
+      node.ticks_done++;
+      if(node.ticks_done>=node.ticks_required){
+        PS.addHerb(node.herb_id,1);
+        if(GF.overworld_snapshot) GF.overworld_snapshot.cells[node.cell_idx].cleared=true;
+        GF.herbNode=null; autosave();
+        setToast(`You gather ${herb.name}.`);
+        GF.goto("maze",{maze_depth:GF.maze_depth});
+        return;
+      }
+      render();
+    }},["Gather"]),
+    h("button",{onClick:()=>{ GF.herbNode=null; GF.goto("maze",{maze_depth:GF.maze_depth}); }},["Leave it"]),
+  ]));
+  return root;
+}
+
 
 /* ================= INVENTORY ================= */
 
 function gearRow(inst, actions){
-  return h("div",{class:"tile",style:{marginBottom:"6px"}},[
-    h("div",{class:"tooltip",style:{fontWeight:"bold"},"data-tip":IF.tooltipText(inst)},[IF.displayName(inst)+` (T${inst.tier})`]),
-    h("div",{class:"muted"},[IF.affixSummary(inst)]),
-    h("div",{class:"row",style:{marginTop:"6px"}},actions),
+  return h("div",{class:"tile gear-row",style:{marginBottom:"6px"}},[
+    gearIcon(inst),
+    h("div",{class:"col",style:{flex:"1",minWidth:"0",gap:"2px"}},[
+      h("div",{class:"tooltip rarity-"+inst.rarity,style:{fontWeight:"bold"},"data-tip":IF.tooltipText(inst)},[IF.displayName(inst)+` (T${inst.tier})`]),
+      h("div",{class:"muted"},[IF.affixSummary(inst)]),
+    ]),
+    h("div",{class:"gear-row-actions"},actions),
   ]);
 }
 
@@ -1613,8 +1857,8 @@ function screenInventory(){
     const inst=PS.equipped[slot];
     eqGrid.appendChild(h("div",{class:"tile"},[
       h("div",{class:"muted"},[IF.slotLabel(slot)]),
-      inst?h("div",{class:"tooltip","data-tip":IF.tooltipText(inst)},[IF.displayName(inst)]):h("div",{class:"muted"},["(empty)"]),
-      inst?h("button",{style:{marginTop:"6px"},onClick:()=>{PS.unequipSlot(slot);PS.saveGame();render();}},["Unequip"]):null,
+      inst?h("div",{class:"row gap",style:{alignItems:"center"}},[gearIcon(inst,26), h("div",{class:"tooltip rarity-"+inst.rarity,"data-tip":IF.tooltipText(inst)},[IF.displayName(inst)+` (T${inst.tier})`])]):h("div",{class:"muted"},["(empty)"]),
+      inst?h("button",{style:{marginTop:"6px"},onClick:()=>{PS.unequipSlot(slot);autosave();render();}},["Unequip"]):null,
     ]));
   }
   root.appendChild(eqGrid);
@@ -1623,9 +1867,9 @@ function screenInventory(){
   if(PS.gear_instances.length===0) root.appendChild(h("div",{class:"muted"},["Empty. Go find some loot in the woods."]));
   for(const inst of [...PS.gear_instances]){
     root.appendChild(gearRow(inst,[
-      h("button",{onClick:()=>{PS.equipGear(inst.instance_id);PS.saveGame();render();}},["Equip"]),
-      h("button",{onClick:()=>{PS.salvageGear(inst.instance_id);PS.saveGame();render();}},[`Salvage (+${Balance.salvageValue(inst.tier,IF.slotCount(inst))} mat)`]),
-      h("button",{onClick:()=>{PS.sellGear(inst.instance_id);PS.saveGame();render();}},[`Sell (+${Balance.sellValue(inst.tier,IF.slotCount(inst))}g)`]),
+      h("button",{onClick:()=>{PS.equipGear(inst.instance_id);autosave();render();}},[PS.wouldSwap(inst)?"Swap":"Equip"]),
+      h("button",{onClick:()=>{PS.salvageGear(inst.instance_id);autosave();render();}},[`Salvage (+${Balance.salvageValue(inst.tier,IF.slotCount(inst))} mat)`]),
+      h("button",{onClick:()=>{PS.sellGear(inst.instance_id);autosave();render();}},[`Sell (+${Balance.sellValue(inst.tier,IF.slotCount(inst))}g)`]),
     ]));
   }
 
@@ -1640,10 +1884,10 @@ function screenInventory(){
   if(consEntries.length===0) root.appendChild(h("div",{class:"muted"},["None."]));
   for(const itemId of consEntries){
     const item=DL.getItem(itemId);
-    root.appendChild(h("div",{class:"row",style:{marginBottom:"4px"}},[
-      `${item.name} x${PS.consumables[itemId]}`,
-      item.type==="consumable"?h("button",{disabled:!PS.canUseConsumable(itemId),onClick:()=>{PS.useConsumable(itemId);PS.saveGame();render();}},["Use"]):
-        h("button",{onClick:()=>{PS.useScroll(itemId);PS.saveGame();setToast(`${item.name} will boost your next descent by ${item.level_bonus} levels.`);render();}},["Use"]),
+    root.appendChild(h("div",{class:"row gap",style:{marginBottom:"4px",alignItems:"center",justifyContent:"space-between"}},[
+      h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId,22), `${item.name} x${PS.consumables[itemId]}`]),
+      item.type==="consumable"?h("button",{disabled:!PS.canUseConsumable(itemId),onClick:()=>{PS.useConsumable(itemId);autosave();render();}},["Use"]):
+        h("button",{onClick:()=>{PS.useScroll(itemId);autosave();setToast(`${item.name} will boost your next descent by ${item.level_bonus} levels.`);render();}},["Use"]),
     ]));
   }
 
@@ -1669,8 +1913,8 @@ function screenBlacksmith(){
   for(const inst of PS.gear_instances){
     const cost=Balance.rerollCost(inst.tier,IF.slotCount(inst));
     root.appendChild(gearRow(inst,[
-      h("button",{disabled:PS.materials<cost,onClick:()=>{ if(PS.rerollGear(inst.instance_id)){PS.saveGame(); setToast("Rerolled!");} render(); }},[`Reroll (${cost} mat)`]),
-      h("button",{onClick:()=>{PS.salvageGear(inst.instance_id);PS.saveGame();render();}},[`Salvage (+${Balance.salvageValue(inst.tier,IF.slotCount(inst))} mat)`]),
+      h("button",{disabled:PS.materials<cost,onClick:()=>{ const result=PS.rerollGear(inst.instance_id); if(result){autosave(); setToast(`Rerolled! You got a ${IF.displayName(result)}.`);} render(); }},[`Reroll (${cost} mat)`]),
+      h("button",{onClick:()=>{PS.salvageGear(inst.instance_id);autosave();render();}},[`Salvage (+${Balance.salvageValue(inst.tier,IF.slotCount(inst))} mat)`]),
     ]));
   }
 
@@ -1680,13 +1924,18 @@ function screenBlacksmith(){
   for(const itemId in ITEMS){
     const item=ITEMS[itemId]; if(item.type!=="bag") continue;
     const cost=Balance.bagCraftCost(item.capacity);
-    bagGrid.appendChild(h("div",{class:"tile"},[
-      h("div",{style:{fontWeight:"bold"}},[item.name]),
+    const craftingThis=GF.crafting && GF.crafting.itemId===itemId;
+    const tileKids=[
+      h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId), h("div",{style:{fontWeight:"bold"}},[item.name])]),
       h("div",{class:"muted"},[`Capacity +${item.capacity}`]),
-      h("button",{style:{marginTop:"6px"},disabled:PS.materials<cost||PS.equipped_bags.length>=Balance.MAX_BAG_SLOTS,onClick:()=>{
-        const r=PS.craftBag(itemId); if(r.success){PS.saveGame(); setToast(`Crafted ${item.name}!`);} else setToast(r.reason); render();
-      }},[`Craft (${cost} mat)`]),
-    ]));
+    ];
+    if(craftingThis){
+      const elapsed=Date.now()-GF.crafting.startedAt;
+      tileKids.push(h("div",{style:{marginTop:"6px"}},[bar(Math.min(100,elapsed/BREW_CRAFT_MS*100),"bar-brew")]));
+    } else {
+      tileKids.push(h("button",{style:{marginTop:"6px"},disabled:PS.materials<cost||PS.equipped_bags.length>=Balance.MAX_BAG_SLOTS||!!GF.crafting,onClick:()=>startCraftBag(itemId)},[`Craft (${cost} mat)`]));
+    }
+    bagGrid.appendChild(h("div",{class:"tile"},tileKids));
   }
   root.appendChild(bagGrid);
   root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
@@ -1710,11 +1959,18 @@ function screenAlchemist(){
   for(const recipe of RECIPES){
     const result=DL.getItem(recipe.result_item);
     const can=PS.canAffordRecipe(recipe);
-    grid.appendChild(h("div",{class:"tile"},[
-      h("div",{style:{fontWeight:"bold"}},[result.name]),
+    const brewingThis=GF.brewing && GF.brewing.recipeId===recipe.result_item;
+    const tileKids=[
+      h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(recipe.result_item), h("div",{style:{fontWeight:"bold"}},[result.name])]),
       h("div",{class:"muted"},[Object.keys(recipe.herbs).map(h2=>`${DL.getHerb(h2).name} x${recipe.herbs[h2]}`).join(", ")]),
-      h("button",{style:{marginTop:"6px"},disabled:!can,onClick:()=>{ if(PS.brewRecipe(recipe)){PS.saveGame(); setToast(`Brewed ${result.name}!`);} render(); }},["Brew"]),
-    ]));
+    ];
+    if(brewingThis){
+      const elapsed=Date.now()-GF.brewing.startedAt;
+      tileKids.push(h("div",{style:{marginTop:"6px"}},[bar(Math.min(100,elapsed/BREW_CRAFT_MS*100),"bar-brew")]));
+    } else {
+      tileKids.push(h("button",{style:{marginTop:"6px"},disabled:!can||!!GF.brewing,onClick:()=>startBrew(recipe)},["Brew"]));
+    }
+    grid.appendChild(h("div",{class:"tile"},tileKids));
   }
   root.appendChild(grid);
   root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
@@ -1735,9 +1991,9 @@ function screenMerchant(){
     const item=ITEMS[itemId]; if(item.type==="bag") continue;
     const price=Math.round((item.sell_value||1)*Balance.VENDOR_MARKUP);
     grid.appendChild(h("div",{class:"tile"},[
-      h("div",{style:{fontWeight:"bold"}},[item.name]),
+      h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId), h("div",{style:{fontWeight:"bold"}},[item.name])]),
       h("div",{class:"muted"},[`${price} gold`]),
-      h("button",{style:{marginTop:"6px"},disabled:PS.gold<price,onClick:()=>{ if(PS.buyConsumable(itemId)){PS.saveGame(); setToast(`Bought ${item.name}.`);} render(); }},["Buy"]),
+      h("button",{style:{marginTop:"6px"},disabled:PS.gold<price,onClick:()=>{ if(PS.buyConsumable(itemId)){autosave(); setToast(`Bought ${item.name}.`);} render(); }},["Buy"]),
     ]));
   }
   root.appendChild(grid);
@@ -1748,10 +2004,10 @@ function screenMerchant(){
     const item=ITEMS[itemId]; if(item.type!=="bag") continue;
     const price=Balance.bagBuyPrice(item.capacity);
     bagGrid.appendChild(h("div",{class:"tile"},[
-      h("div",{style:{fontWeight:"bold"}},[item.name]),
+      h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId), h("div",{style:{fontWeight:"bold"}},[item.name])]),
       h("div",{class:"muted"},[`Capacity +${item.capacity} -- ${price} gold`]),
       h("button",{style:{marginTop:"6px"},disabled:PS.gold<price||PS.equipped_bags.length>=Balance.MAX_BAG_SLOTS,onClick:()=>{
-        const r=PS.buyBag(itemId); if(r.success){PS.saveGame(); setToast(`Bought ${item.name}!`);} else setToast(r.reason); render();
+        const r=PS.buyBag(itemId); if(r.success){autosave(); setToast(`Bought ${item.name}!`);} else setToast(r.reason); render();
       }},["Buy"]),
     ]));
   }
@@ -1857,9 +2113,11 @@ function screenAuctionHouse(){
                 else if(r.refund.type==="herb") PS.addHerb(r.refund.item_key,r.refund.quantity);
                 PS.saveGame();
               }
-              Net.auctionCache=null; setToast("Listing cancelled -- item returned to your bags.");
+              setToast("Listing cancelled -- item returned to your bags.");
             }
-            catch(e){ setToast(e.message); }
+            catch(e){ setToast(e.message+" (refreshing listings...)"); }
+            Net.auctionCache=null;
+            await Net.fetchAuction();
             render();
           }},["Cancel"]):h("button",{disabled:PS.gold<listing.price,onClick:async ()=>{
             try{
@@ -1868,13 +2126,60 @@ function screenAuctionHouse(){
               if(listing.type==="gear") PS.addGear(listing.item);
               else if(listing.type==="consumable") PS.addConsumable(listing.item_key,listing.quantity);
               else if(listing.type==="herb") PS.addHerb(listing.item_key,listing.quantity);
-              PS.saveGame(); Net.auctionCache=null;
+              PS.saveGame();
               setToast(`Bought ${label} for ${listing.price} gold.`);
-            }catch(e){ setToast(e.message); }
+            }catch(e){ setToast(e.message+" (refreshing listings...)"); }
+            Net.auctionCache=null;
+            await Net.fetchAuction();
             render();
           }},["Buy"]),
         ]),
       ]));
+    }
+  }
+
+  root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
+  return root;
+}
+
+/* ================= GAMBLING GOBLIN ================= */
+
+function screenGamblingGoblin(){
+  const root=h("div",{});
+  root.appendChild(h("div",{class:"row gap"},[iconBadge(`<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="19" fill="#2a4a1a"/><circle cx="14" cy="18" r="3" fill="#eee"/><circle cx="26" cy="18" r="3" fill="#eee"/><circle cx="14" cy="18" r="1.2" fill="#111"/><circle cx="26" cy="18" r="1.2" fill="#111"/><path d="M14,27 Q20,32 26,27" stroke="#eee" stroke-width="2" fill="none"/></svg>`,52),h("div",{},[h("h2",{},["The Gambling Goblin"]),h("div",{class:"flavor"},["\"Double or nothing, friend? The bones don't lie -- much.\""])])]));
+  const t=toastBox(); if(t) root.appendChild(t);
+  root.appendChild(statHeader());
+
+  if(!PS.gamblingUnlocked()){
+    root.appendChild(h("div",{class:"lore"},["The goblin only deals with travelers who've proven themselves at the Broken Bridge Challenge. Come back once you've passed your first trial."]));
+    root.appendChild(h("button",{onClick:()=>GF.goto("town")},["← Back to Town"]));
+    return root;
+  }
+
+  root.appendChild(h("div",{class:"lore"},[`Wager gold on a roll of the bones. Win, and the goblin pays double. Lose, and he keeps it. Odds: ${Math.round(Balance.GAMBLE_WIN_CHANCE*100)}% to win.`]));
+
+  const betInput=h("input",{type:"number",min:String(Balance.GAMBLE_MIN_BET),step:"5",value:String(Math.max(Balance.GAMBLE_MIN_BET,10)),style:{width:"100px"}});
+  root.appendChild(h("div",{class:"row gap",style:{marginBottom:"14px",alignItems:"center"}},[
+    h("span",{},["Bet:"]), betInput, h("span",{class:"muted"},[`(min ${Balance.GAMBLE_MIN_BET}g -- you have ${PS.gold}g)`]),
+    h("button",{onClick:()=>{
+      const bet=parseInt(betInput.value,10);
+      if(!bet||bet<Balance.GAMBLE_MIN_BET){ setToast(`Bet at least ${Balance.GAMBLE_MIN_BET} gold.`); render(); return; }
+      if(bet>PS.gold){ setToast("You don't have that much gold."); render(); return; }
+      const win=Math.random()<Balance.GAMBLE_WIN_CHANCE;
+      if(win){ PS.gold+=bet; setToast(`The bones favor you! You win ${bet} gold.`); }
+      else { PS.gold-=bet; setToast(`Snake eyes. You lose ${bet} gold.`); }
+      if(!GF.gambleLog) GF.gambleLog=[];
+      GF.gambleLog.unshift({win,bet});
+      GF.gambleLog=GF.gambleLog.slice(0,8);
+      autosave();
+      render();
+    }},["Roll the Bones"]),
+  ]));
+
+  if(GF.gambleLog && GF.gambleLog.length){
+    root.appendChild(h("h3",{},["Recent Rolls"]));
+    for(const entry of GF.gambleLog){
+      root.appendChild(h("div",{class:entry.win?"muted":"muted",style:{color:entry.win?"#9fe89f":"#e89f9f"}},[entry.win?`Won ${entry.bet} gold`:`Lost ${entry.bet} gold`]));
     }
   }
 
@@ -1887,7 +2192,8 @@ function screenAuctionHouse(){
 
 function getTrialProgress(){
   if(!PS.trial_progress) PS.trial_progress={};
-  if(!PS.trial_progress[PS.class_id]) PS.trial_progress[PS.class_id]={stage:0,discovered:0};
+  if(!PS.trial_progress[PS.class_id]) PS.trial_progress[PS.class_id]={stage:0,discoveredSides:[]};
+  if(!PS.trial_progress[PS.class_id].discoveredSides) PS.trial_progress[PS.class_id].discoveredSides=[];
   return PS.trial_progress[PS.class_id];
 }
 
@@ -1895,8 +2201,11 @@ function screenMasterTrial(){
   const root=h("div",{});
   const c=PS.getClassData();
   const nextId=DL.getNextClassId(PS.class_id);
-  root.appendChild(h("h2",{},["The Master Trial"]));
-  if(!PS.canAttemptTrial()){
+  root.appendChild(h("h2",{},["Broken Bridge Challenge"]));
+  // A failed attempt resets the player to level 1, which would normally fall back below
+  // the level gate below -- but the failed board must stay visible until the player
+  // acknowledges it and leaves, so the gate is skipped for that one render.
+  if(!PS.canAttemptTrial() && !GF.trialJustFailed){
     root.appendChild(h("div",{class:"lore"},[`You must reach Level ${Balance.MASTER_TRIAL_LEVEL_REQUIREMENT} as a ${c.display_name} before the elders will test you.`]));
     root.appendChild(h("button",{onClick:()=>GF.goto("town")},["← Back to Town"]));
     return root;
@@ -1907,51 +2216,69 @@ function screenMasterTrial(){
     return root;
   }
   const t=toastBox(); if(t) root.appendChild(t);
-  root.appendChild(h("div",{class:"lore"},[`Cross the ancient plank bridge to prove yourself worthy of becoming a ${DL.getClass(nextId).display_name}. Fall, and you must try again -- but the bridge remembers every safe step you've already found.`]));
+  root.appendChild(h("div",{class:"lore"},[`Cross the ancient plank bridge to prove yourself worthy of becoming a ${DL.getClass(nextId).display_name}. Each step has a safe plank and a false one -- choose top or bottom. Fall, and the attempt ends there -- but the bridge remembers every safe step you've already found.`]));
 
   const trialIndex=c.tier||1;
   const stagesRequired=Balance.trialStagesRequired(trialIndex);
   const rows=Balance.BRIDGE_ROWS_PER_STAGE;
   const rowChance=Balance.bridgeRowSurvivalChance(Balance.TRIAL_STAGE_PASS_CHANCE, rows);
   const progress=getTrialProgress();
+  const failed=!!GF.trialJustFailed;
 
   root.appendChild(h("div",{class:"panel"},[
     h("div",{},[`Stage ${progress.stage+1} of ${stagesRequired}`]),
     h("div",{class:"muted"},[`Odds per unknown plank: ${Math.round(rowChance*100)}%`]),
   ]));
 
-  const plankRow=h("div",{class:"plank-row"});
-  for(let i=0;i<rows;i++){
-    const known=i<progress.discovered;
-    plankRow.appendChild(h("button",{class:known?"locked-safe":"",disabled:true},[known?`✓ ${i+1}`:`${i+1}`]));
-  }
-  root.appendChild(plankRow);
-
-  root.appendChild(h("div",{class:"row"},[
-    h("button",{class:"play",onClick:()=>{
-      if(Math.random()<rowChance){
-        progress.discovered++;
-        if(progress.discovered>=rows){
-          progress.stage++; progress.discovered=0;
-          if(progress.stage>=stagesRequired){
-            const nameBefore=c.display_name, levelBefore=PS.level;
-            const result=PS.resolveMasterTrial(true);
-            delete PS.trial_progress[c.chain+"_done_marker"];
-            PS.trial_progress[PS.class_id]={stage:0,discovered:0};
-            PS.saveGame();
-            Net.announceTrialResult({character_name:PS.character_name, level:levelBefore, class_name:nameBefore, result:"passed"});
-            setToast(result.final_tier?`You have mastered the ${c.chain} path completely!`:`You are promoted to ${DL.getClass(PS.class_id).display_name}!`);
-            GF.goto("town"); return;
-          } else setToast(`Stage ${progress.stage} cleared! Onward.`);
-        }
-      } else {
-        setToast("The plank gives way beneath you! You fall back to camp -- but you remember the safe planks you'd already found.");
-        PS.current_hp=Math.max(1,PS.current_hp-15);
-        Net.announceTrialResult({character_name:PS.character_name, level:PS.level, class_name:c.display_name, result:"failed"});
+  function attemptStep(side){
+    if(failed) return;
+    const passed=Math.random()<rowChance;
+    if(passed){
+      progress.discoveredSides.push(side);
+      autosave();
+      if(progress.discoveredSides.length>=rows){
+        progress.stage++; progress.discoveredSides=[];
+        if(progress.stage>=stagesRequired){
+          const nameBefore=c.display_name, levelBefore=PS.level;
+          const result=PS.resolveMasterTrial(true);
+          PS.trial_progress[PS.class_id]={stage:0,discoveredSides:[]};
+          autosave();
+          Net.announceTrialResult({character_name:PS.character_name, level:levelBefore, class_name:nameBefore, result:"passed", new_class_name:DL.getClass(PS.class_id).display_name});
+          setToast(result.final_tier?`You have mastered the ${c.chain} path completely!`:`You are promoted to ${DL.getClass(PS.class_id).display_name}!`);
+          GF.goto("town"); return;
+        } else setToast(`Stage ${progress.stage} cleared! Onward.`);
       }
-      PS.saveGame(); render();
-    }},["Step onto the next plank"]),
-    h("button",{onClick:()=>GF.goto("town")},["← Retreat to Town"]),
+      render();
+    } else {
+      GF.trialJustFailed=true; GF.trialFailedSide=side; GF.trialFailedStepIndex=progress.discoveredSides.length;
+      setToast("The plank gives way beneath you! The attempt ends here.");
+      Net.announceTrialResult({character_name:PS.character_name, level:PS.level, class_name:c.display_name, result:"failed"});
+      PS.resolveMasterTrial(false);
+      autosave();
+      render();
+    }
+  }
+
+  const plankRows=h("div",{class:"col gap"});
+  for(let i=0;i<rows;i++){
+    const discoveredSide=progress.discoveredSides[i];
+    const isCurrent=i===progress.discoveredSides.length && !failed;
+    const isFailedStep=failed && i===GF.trialFailedStepIndex;
+    const row=h("div",{class:"row gap"},[
+      h("div",{class:"muted",style:{width:"36px"}},[`${i+1}.`]),
+      h("button",{class:"plank-btn"+(discoveredSide==="top"?" safe":(isFailedStep&&GF.trialFailedSide==="top"?" unsafe":"")),
+        disabled:!isCurrent,
+        onClick:()=>attemptStep("top")},[discoveredSide==="top"?"✓ Top":"Top"]),
+      h("button",{class:"plank-btn"+(discoveredSide==="bottom"?" safe":(isFailedStep&&GF.trialFailedSide==="bottom"?" unsafe":"")),
+        disabled:!isCurrent,
+        onClick:()=>attemptStep("bottom")},[discoveredSide==="bottom"?"✓ Bottom":"Bottom"]),
+    ]);
+    plankRows.appendChild(row);
+  }
+  root.appendChild(plankRows);
+
+  root.appendChild(h("div",{class:"row",style:{marginTop:"10px"}},[
+    h("button",{onClick:()=>{ GF.trialJustFailed=false; GF.trialFailedSide=null; GF.goto("town"); }},[failed?"Return to Town":"← Retreat to Town"]),
   ]));
   return root;
 }
@@ -1997,11 +2324,13 @@ const SCREENS={
   maze: screenMaze,
   combat: screenCombat,
   chestEncounter: screenChest,
+  herbEncounter: screenHerbEncounter,
   inventory: screenInventory,
   blacksmith: screenBlacksmith,
   alchemist: screenAlchemist,
   merchant: screenMerchant,
   auctionHouse: screenAuctionHouse,
+  gamblingGoblin: screenGamblingGoblin,
   masterTrial: screenMasterTrial,
   adminPanel: screenAdminPanel,
 };
