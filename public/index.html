@@ -87,12 +87,24 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 .maze-overlay-grid{position:absolute;top:0;left:0;width:100%;height:100%;background:#000;display:flex;align-items:center;justify-content:center;z-index:20;opacity:1;transition:opacity 1.3s ease;text-align:center;}
 .maze-overlay-grid.fade{opacity:0;}
 .maze-overlay-text{color:#e8d24a;font-size:1.8em;font-weight:bold;letter-spacing:1.5px;text-shadow:0 0 18px rgba(232,210,74,.6);padding:0 10px;}
-.depth-stepper{display:flex;align-items:center;gap:8px;}
-.depth-stepper button{padding:4px 12px;font-size:1.1em;}
 .venture-card{padding:18px;display:flex;flex-direction:column;gap:12px;}
-.venture-action{cursor:pointer;padding:2px;border-radius:5px;transition:.12s;}
-.venture-action:hover{background:#3a4a2a;}
 .venture-title{font-size:1.25em;font-weight:bold;}
+.venture-row{align-items:stretch;}
+.venture-clickable{flex:1;cursor:pointer;transition:.12s;}
+.venture-clickable:hover{background:#28331e;}
+.venture-chevrons{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:6px 10px;}
+.venture-chevrons button{padding:2px 10px;font-size:1em;line-height:1;}
+.class-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:0 14px;position:relative;}
+.class-grid>*{min-width:0;}
+.class-path-bg{background:var(--panel2);border:1px solid var(--border);border-radius:10px;}
+.plank-btn{min-width:52px;border-radius:4px;}
+.equip-doll{display:flex;flex-direction:column;gap:6px;}
+.equip-doll-row{display:flex;gap:6px;justify-content:center;}
+.equip-doll-row>.tile{flex:1;min-width:0;}
+.attr-collapse-btn{background:none;border:none;color:var(--text);cursor:pointer;font-size:1.1em;padding:2px 6px;}
+.attr-collapse-btn:hover{color:#cbd9a0;}
+.stat-point-cta{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;background:var(--gold);color:#2a2210;font-weight:bold;border-radius:5px;cursor:pointer;font-size:1.1em;line-height:1;}
+.stat-point-cta:hover{background:#f0c85a;}
 </style>
 </head>
 <body>
@@ -119,21 +131,21 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 // leans Strength+Vitality, Windrider leans Dexterity, Wizard leans Intelligence, see
 // PS.getTotalAttr()/getDamageRange()/getBlockChance() for what each attribute actually does.
 const CLASSES = {
-  wizard:{display_name:"Wizard",chain:"wizard",tier:1,next_class:"sorcerer",role:"damage",description:"Fragile but hits hard with raw magic.",base_hp:60,hp_per_level:8,base_damage_min:8,base_damage_max:14,damage_per_level:1.4,base_crit:0.05,armor:0.0,regen:0.0,base_str:5,base_dex:5,base_vit:6,base_int:16},
-  thornguard:{display_name:"Thornguard",chain:"thornguard",tier:1,next_class:"stonewarden",role:"tank",description:"Bark-skinned front-liner who shrugs off damage like rain off leaves.",base_hp:100,hp_per_level:14,base_damage_min:6,base_damage_max:10,damage_per_level:1.1,base_crit:0.05,armor:0.15,regen:0.0,base_str:16,base_dex:5,base_vit:16,base_int:5},
-  windrider:{display_name:"Windrider",chain:"windrider",tier:1,next_class:"galestrider",role:"damage",description:"Balanced fighter, quick as a gust through the canopy, high crit chance.",base_hp:75,hp_per_level:10,base_damage_min:7,base_damage_max:12,damage_per_level:1.2,base_crit:0.20,armor:0.0,regen:0.0,base_str:6,base_dex:16,base_vit:9,base_int:5},
-  sorcerer:{display_name:"Sorcerer",chain:"wizard",tier:2,next_class:"warlock",role:"damage",description:"Channels bigger, wilder spells than a Wizard ever could.",base_hp:80,hp_per_level:10,base_damage_min:12,base_damage_max:20,damage_per_level:1.9,base_crit:0.08,armor:0.0,regen:0.0,base_str:5,base_dex:6,base_vit:8,base_int:21},
-  stonewarden:{display_name:"Stonewarden",chain:"thornguard",tier:2,next_class:"treesinger",role:"tank",description:"Trades a little bark for a lot of stone, heavier, harder to put down.",base_hp:140,hp_per_level:18,base_damage_min:10,base_damage_max:16,damage_per_level:1.6,base_crit:0.10,armor:0.12,regen:0.0,base_str:20,base_dex:6,base_vit:21,base_int:5},
-  galestrider:{display_name:"Galestrider",chain:"windrider",tier:2,next_class:"shadowbloom",role:"stealth",description:"Faster, sharper, deadlier with every shot on the wind.",base_hp:100,hp_per_level:13,base_damage_min:11,base_damage_max:18,damage_per_level:1.7,base_crit:0.25,armor:0.0,regen:0.0,base_str:7,base_dex:21,base_vit:11,base_int:5},
-  warlock:{display_name:"Warlock",chain:"wizard",tier:3,next_class:"necromancer",role:"summoner",description:"Dark pacts trade a little self-healing for serious power.",base_hp:105,hp_per_level:13,base_damage_min:16,base_damage_max:26,damage_per_level:2.4,base_crit:0.10,armor:0.0,regen:1.0,base_str:6,base_dex:7,base_vit:10,base_int:27},
-  treesinger:{display_name:"Treesinger",chain:"thornguard",tier:3,next_class:"rootbinder",role:"hybrid",description:"Calls the grove to its side, disciplined, and mends wounds mid-fight.",base_hp:160,hp_per_level:20,base_damage_min:14,base_damage_max:22,damage_per_level:2.0,base_crit:0.15,armor:0.18,regen:2.5,base_str:23,base_dex:8,base_vit:25,base_int:8},
-  shadowbloom:{display_name:"Shadowbloom",chain:"windrider",tier:3,next_class:"druid",role:"stealth",description:"Blooms in the shadows between strikes, pure burst damage built around crits.",base_hp:125,hp_per_level:16,base_damage_min:18,base_damage_max:28,damage_per_level:2.4,base_crit:0.35,armor:0.0,regen:0.0,base_str:8,base_dex:27,base_vit:13,base_int:6},
-  necromancer:{display_name:"Necromancer",chain:"wizard",tier:4,next_class:"archmage",role:"summoner",description:"Commands dark power and a steady drain of life.",base_hp:135,hp_per_level:17,base_damage_min:22,base_damage_max:34,damage_per_level:3.0,base_crit:0.12,armor:0.0,regen:1.5,base_str:7,base_dex:8,base_vit:12,base_int:33},
-  rootbinder:{display_name:"Rootbinder",chain:"thornguard",tier:4,next_class:"emberpriest",role:"hybrid",description:"Binds foes in living roots to shield its allies, heals as reliably as it blocks.",base_hp:210,hp_per_level:26,base_damage_min:18,base_damage_max:28,damage_per_level:2.6,base_crit:0.12,armor:0.25,regen:3.5,base_str:27,base_dex:9,base_vit:31,base_int:10},
-  druid:{display_name:"Druid",chain:"windrider",tier:4,next_class:"galeshaper",role:"hybrid",description:"Nature's balance of bite and resilience.",base_hp:160,hp_per_level:20,base_damage_min:24,base_damage_max:36,damage_per_level:3.1,base_crit:0.20,armor:0.08,regen:2.0,base_str:9,base_dex:31,base_vit:16,base_int:8},
-  emberpriest:{display_name:"Emberpriest",chain:"thornguard",tier:5,next_class:null,role:"healer",description:"Thornguard chain's endgame form, carries the last ember, trades raw damage for huge sustain.",base_hp:190,hp_per_level:24,base_damage_min:16,base_damage_max:24,damage_per_level:2.3,base_crit:0.10,armor:0.20,regen:6.0,base_str:29,base_dex:10,base_vit:37,base_int:14},
-  archmage:{display_name:"Archmage",chain:"wizard",tier:5,next_class:null,role:"damage",description:"Wizard chain's endgame form, raw magic mastered to its limit.",base_hp:165,hp_per_level:21,base_damage_min:28,base_damage_max:42,damage_per_level:3.6,base_crit:0.15,armor:0.0,regen:2.0,base_str:8,base_dex:9,base_vit:14,base_int:41},
-  galeshaper:{display_name:"Galeshaper",chain:"windrider",tier:5,next_class:null,role:"hybrid",description:"Windrider chain's endgame form, moves as one with the wind itself.",base_hp:195,hp_per_level:25,base_damage_min:30,base_damage_max:44,damage_per_level:3.8,base_crit:0.28,armor:0.10,regen:2.4,base_str:10,base_dex:37,base_vit:19,base_int:10},
+  wizard:{display_name:"Wizard",chain:"wizard",tier:1,next_class:"sorcerer",role:"damage",description:"Fragile but hits hard with raw magic.",base_hp:60,hp_per_level:8,base_damage_min:8,base_damage_max:14,damage_per_level:1.4,base_crit:0.05,armor:0.0,regen:0.0,base_str:2,base_dex:6,base_vit:16,base_int:16},
+  thornguard:{display_name:"Thornguard",chain:"thornguard",tier:1,next_class:"stonewarden",role:"tank",description:"Bark-skinned front-liner who shrugs off damage like rain off leaves.",base_hp:100,hp_per_level:14,base_damage_min:6,base_damage_max:10,damage_per_level:1.1,base_crit:0.05,armor:0.15,regen:0.0,base_str:16,base_dex:6,base_vit:16,base_int:2},
+  windrider:{display_name:"Windrider",chain:"windrider",tier:1,next_class:"galestrider",role:"damage",description:"Balanced fighter, quick as a gust through the canopy, high crit chance.",base_hp:75,hp_per_level:10,base_damage_min:7,base_damage_max:12,damage_per_level:1.2,base_crit:0.20,armor:0.0,regen:0.0,base_str:4,base_dex:16,base_vit:16,base_int:4},
+  sorcerer:{display_name:"Sorcerer",chain:"wizard",tier:2,next_class:"warlock",role:"damage",description:"Channels bigger, wilder spells than a Wizard ever could.",base_hp:80,hp_per_level:10,base_damage_min:12,base_damage_max:20,damage_per_level:1.9,base_crit:0.08,armor:0.0,regen:0.0,base_str:3,base_dex:8,base_vit:20,base_int:21},
+  stonewarden:{display_name:"Stonewarden",chain:"thornguard",tier:2,next_class:"treesinger",role:"tank",description:"Trades a little bark for a lot of stone, heavier, harder to put down.",base_hp:140,hp_per_level:18,base_damage_min:10,base_damage_max:16,damage_per_level:1.6,base_crit:0.10,armor:0.12,regen:0.0,base_str:20,base_dex:8,base_vit:21,base_int:3},
+  galestrider:{display_name:"Galestrider",chain:"windrider",tier:2,next_class:"shadowbloom",role:"stealth",description:"Faster, sharper, deadlier with every shot on the wind.",base_hp:100,hp_per_level:13,base_damage_min:11,base_damage_max:18,damage_per_level:1.7,base_crit:0.25,armor:0.0,regen:0.0,base_str:5,base_dex:21,base_vit:21,base_int:5},
+  warlock:{display_name:"Warlock",chain:"wizard",tier:3,next_class:"necromancer",role:"summoner",description:"Dark pacts trade a little self-healing for serious power.",base_hp:105,hp_per_level:13,base_damage_min:16,base_damage_max:26,damage_per_level:2.4,base_crit:0.10,armor:0.0,regen:1.0,base_str:3,base_dex:10,base_vit:27,base_int:26},
+  treesinger:{display_name:"Treesinger",chain:"thornguard",tier:3,next_class:"rootbinder",role:"hybrid",description:"Calls the grove to its side, disciplined, and mends wounds mid-fight.",base_hp:160,hp_per_level:20,base_damage_min:14,base_damage_max:22,damage_per_level:2.0,base_crit:0.15,armor:0.18,regen:2.5,base_str:27,base_dex:10,base_vit:26,base_int:3},
+  shadowbloom:{display_name:"Shadowbloom",chain:"windrider",tier:3,next_class:"druid",role:"stealth",description:"Blooms in the shadows between strikes, pure burst damage built around crits.",base_hp:125,hp_per_level:16,base_damage_min:18,base_damage_max:28,damage_per_level:2.4,base_crit:0.35,armor:0.0,regen:0.0,base_str:7,base_dex:26,base_vit:26,base_int:7},
+  necromancer:{display_name:"Necromancer",chain:"wizard",tier:4,next_class:"archmage",role:"summoner",description:"Commands dark power and a steady drain of life.",base_hp:135,hp_per_level:17,base_damage_min:22,base_damage_max:34,damage_per_level:3.0,base_crit:0.12,armor:0.0,regen:1.5,base_str:4,base_dex:12,base_vit:33,base_int:33},
+  rootbinder:{display_name:"Rootbinder",chain:"thornguard",tier:4,next_class:"emberpriest",role:"hybrid",description:"Binds foes in living roots to shield its allies, heals as reliably as it blocks.",base_hp:210,hp_per_level:26,base_damage_min:18,base_damage_max:28,damage_per_level:2.6,base_crit:0.12,armor:0.25,regen:3.5,base_str:33,base_dex:12,base_vit:33,base_int:4},
+  druid:{display_name:"Druid",chain:"windrider",tier:4,next_class:"galeshaper",role:"hybrid",description:"Nature's balance of bite and resilience.",base_hp:160,hp_per_level:20,base_damage_min:24,base_damage_max:36,damage_per_level:3.1,base_crit:0.20,armor:0.08,regen:2.0,base_str:8,base_dex:33,base_vit:33,base_int:8},
+  emberpriest:{display_name:"Emberpriest",chain:"thornguard",tier:5,next_class:null,role:"healer",description:"Thornguard chain's endgame form, carries the last ember, trades raw damage for huge sustain.",base_hp:190,hp_per_level:24,base_damage_min:16,base_damage_max:24,damage_per_level:2.3,base_crit:0.10,armor:0.20,regen:6.0,base_str:40,base_dex:15,base_vit:40,base_int:5},
+  archmage:{display_name:"Archmage",chain:"wizard",tier:5,next_class:null,role:"damage",description:"Wizard chain's endgame form, raw magic mastered to its limit.",base_hp:165,hp_per_level:21,base_damage_min:28,base_damage_max:42,damage_per_level:3.6,base_crit:0.15,armor:0.0,regen:2.0,base_str:5,base_dex:15,base_vit:40,base_int:40},
+  galeshaper:{display_name:"Galeshaper",chain:"windrider",tier:5,next_class:null,role:"hybrid",description:"Windrider chain's endgame form, moves as one with the wind itself.",base_hp:195,hp_per_level:25,base_damage_min:30,base_damage_max:44,damage_per_level:3.8,base_crit:0.28,armor:0.10,regen:2.4,base_str:10,base_dex:40,base_vit:40,base_int:10},
 };
 
 const MONSTERS = [
@@ -197,7 +209,7 @@ const LOOT_TABLES = {
 };
 
 const PORTRAITS = {
-wizard:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><path d="M100,20 L150,90 L50,90 Z" fill="#4a6fd0" stroke="#2b2b2b" stroke-width="4"/><circle cx="135" cy="35" r="7" fill="#f4d94a"/><path d="M60,95 C60,150 60,175 100,180 C140,175 140,150 140,95 Z" fill="#5d7fe0" stroke="#2b2b2b" stroke-width="4"/><circle cx="84" cy="118" r="9" fill="#ffffff"/><circle cx="116" cy="118" r="9" fill="#ffffff"/><circle cx="86" cy="120" r="4" fill="#222"/><circle cx="118" cy="120" r="4" fill="#222"/><path d="M88,140 Q100,150 112,140" stroke="#2b2b2b" stroke-width="3" fill="none" stroke-linecap="round"/></svg>`,
+wizard:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#ccd6ec"/><ellipse cx="70" cy="88" rx="32" ry="36" fill="#3f5cae"/><circle cx="70" cy="50" r="19" fill="#e8c9a0"/><circle cx="63" cy="49" r="2.4" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.4" fill="#2a2a2a"/><path d="M 40,94 Q 70,76 100,94 L 94,116 Q 70,126 46,116 Z" fill="#33478a"/><path d="M 70,8 L 94,50 Q 70,42 46,50 Z" fill="#4a6fd0"/><circle cx="70" cy="16" r="4" fill="#f4d94a"/><circle cx="98" cy="86" r="9" fill="#9db8ff" opacity="0.75"/><circle cx="98" cy="86" r="14" fill="#9db8ff" opacity="0.3"/></svg>`,
 thornguard:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#e7dcc2"/><ellipse cx="70" cy="86.8" rx="30" ry="34" fill="#6b4a2f"/><circle cx="70" cy="50.4" r="20" fill="#e8c9a0"/><circle cx="63" cy="49" r="2.5" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.5" fill="#2a2a2a"/><path d="M 40,92 Q 70,72 100,92 L 96,110 Q 70,122 44,110 Z" fill="#4b3524"/><ellipse cx="70" cy="45" rx="22" ry="10" fill="#2e4526"/><polygon points="55,42 60,20 65,42" fill="#3f6b3f"/><polygon points="70,42 75,16 80,42" fill="#3f6b3f"/><polygon points="85,42 88,22 92,42" fill="#3f6b3f"/></svg>`,
 windrider:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#d7ede6"/><ellipse cx="70" cy="86.8" rx="30" ry="34" fill="#3f7d4e"/><circle cx="70" cy="50.4" r="20" fill="#e8c9a0"/><circle cx="63" cy="49" r="2.5" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.5" fill="#2a2a2a"/><path d="M 42,95 Q 70,80 98,95 L 92,112 Q 70,120 48,112 Z" fill="#255530"/><path d="M 30,70 Q 70,52 110,70" stroke="#8fd0c4" stroke-width="5" fill="none" opacity="0.8"/><ellipse cx="70" cy="40" rx="24" ry="11" fill="#3f7d4e"/><path d="M 100,70 Q 118,60 112,88" stroke="#5f9f68" stroke-width="4" fill="none"/></svg>`,
 sorcerer:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#dcd4ea"/><ellipse cx="70" cy="88" rx="32" ry="36" fill="#3a2c6b"/><circle cx="70" cy="50" r="19" fill="#e8c9a0"/><circle cx="63" cy="49" r="2.4" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.4" fill="#2a2a2a"/><path d="M 40,94 Q 70,76 100,94 L 94,116 Q 70,126 46,116 Z" fill="#4a3a8a"/><path d="M 70,10 L 92,48 Q 70,40 48,48 Z" fill="#5a3fa0"/><circle cx="70" cy="18" r="4" fill="#e8c96a"/><circle cx="100" cy="86" r="10" fill="#b39cff" opacity="0.85"/><circle cx="100" cy="86" r="15" fill="#b39cff" opacity="0.3"/></svg>`,
@@ -243,6 +255,10 @@ const PLUS_CIRCLE_SVG = `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/
 const CHAT_BUBBLE_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>`;
 const BOULDER_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M4 16c-1.2-1.6-1-4 .8-5.4 .3-2.4 2.3-4.2 4.7-4.2 .9 0 1.7.3 2.4.7 .9-1.1 2.3-1.8 3.8-1.8 2.7 0 4.9 2.2 4.9 4.9 0 .3 0 .6-.1.9 1.4.8 2.4 2.3 2.4 4.1 0 2.6-2.1 4.6-4.6 4.6H6.9C5.3 19.8 4 18.5 4 16z" fill="#6b6b64" stroke="#3a3a34" stroke-width="1"/></svg>`;
 const BONFIRE_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2c1 3-2 4-2 7a2 2 0 0 0 4 0c1 1 1.5 2.5 1.5 4a5.5 5.5 0 0 1-11 0C4.5 8 8 7 12 2z" fill="#ff9d3d"/><path d="M12 8c.4 1.4-1 2-1 3.5a1 1 0 0 0 2 0c.4.5.6 1.2.6 2a1.6 1.6 0 0 1-3.2 0c0-2.3 1-3.5 1.6-5.5z" fill="#ffdd9a"/><ellipse cx="12" cy="20.5" rx="6" ry="1.3" fill="#4a3018" opacity="0.6"/></svg>`;
+// A single generic footstep glyph used on every Broken Bridge Challenge plank button --
+// with 2 to 5 planks per step now (see Balance.bridgePlankCount), "Top"/"Bottom" text
+// labels stopped making sense, so every plank just shows this icon instead.
+const FOOTSTEP_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><ellipse cx="10" cy="6" rx="2.6" ry="3.4" transform="rotate(-18 10 6)"/><ellipse cx="14" cy="17" rx="2.6" ry="3.4" transform="rotate(12 14 17)"/></svg>`;
 const CHARSELECT_BG_SVG = `<svg width="100%" height="100%" viewBox="0 0 900 200" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMax slice"><rect width="900" height="200" fill="none"/><path d="M0,200 L0,140 Q60,115 120,140 L120,200 Z" fill="#152016"/><path d="M780,200 L780,140 Q840,115 900,140 L900,200 Z" fill="#152016"/><circle cx="450" cy="160" r="22" fill="#ff9d3d" opacity="0.14"/><circle cx="450" cy="160" r="10" fill="#ffcf7a" opacity="0.22"/><path d="M425,200 Q450,180 475,200 Z" fill="#241a12"/></svg>`;
 
 function inlineIcon(svg,size=18){ const d=h("span",{style:{display:"inline-flex",alignItems:"center",justifyContent:"center",width:size+"px",height:size+"px",verticalAlign:"middle"}}); d.innerHTML=svg; return d; }
@@ -268,6 +284,13 @@ function itemIconSvg(itemId){
   return `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="14" fill="#666"/></svg>`;
 }
 function itemIcon(itemId,size=26){ return iconBadge(itemIconSvg(itemId),size); }
+
+function herbIconSvg(herbId){
+  const hue=hashHue(herbId);
+  const leaf=`hsl(${hue},55%,42%)`;
+  return `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><path d="M20,6 Q32,14 32,26 Q20,34 8,26 Q8,14 20,6 Z" fill="${leaf}" stroke="#2a2a2a" stroke-width="1.2"/><path d="M20,9 L20,31" stroke="#1a1a1a" stroke-width="1" opacity="0.45"/></svg>`;
+}
+function herbIcon(herbId,size=22){ return iconBadge(herbIconSvg(herbId),size); }
 
 /* Procedural placeholder art for equippable gear, shape varies by slot type, color
    follows the Diablo-style rarity palette (grey/white/blue/yellow/gold) so different
@@ -296,7 +319,14 @@ function gearIcon(inst,size=30){ return iconBadge(gearIconSvg(inst),size); }
 
 const Balance = {
   LEVEL_CAP:60, KILLS_PER_LEVEL_TARGET:20, MONSTER_BASE_XP:8.0, AREA_XP_GROWTH:0.062,
-  AREA_LEVEL_MIN:1, AREA_LEVEL_MAX:100, AREA_HP_GROWTH:0.07, AREA_DAMAGE_GROWTH:0.05, AREA_LOOT_GROWTH:0.05,
+  AREA_LEVEL_MIN:1, AREA_LEVEL_MAX:100, AREA_HP_GROWTH:0.15, AREA_DAMAGE_GROWTH:0.12, AREA_LOOT_GROWTH:0.05,
+  // v0.11 difficulty pass: combat was too easy (1-3 shotting things several area levels
+  // above character level with only common gear). MONSTER_HP_MULT/MONSTER_DAMAGE_MULT
+  // double every monster's level-1 baseline in one place (rather than editing each row
+  // in MONSTERS below), and AREA_HP_GROWTH/AREA_DAMAGE_GROWTH more than doubled on top of
+  // that, so venturing several area levels above your own level gets punishing fast.
+  // This is a first pass, expect further tuning as real playtesting comes in.
+  MONSTER_HP_MULT:2.0, MONSTER_DAMAGE_MULT:2.0,
   CRIT_MULTIPLIER:1.75, DEATH_GOLD_LOSS_PCT:0.10,
   ENCOUNTER_CHANCE_PER_STEP:0.12, TRAP_CHANCE_PER_TILE:0.05,
   OBSTACLE_DENSITY:0.25, GRASS_PATCH_COUNT:18,
@@ -315,7 +345,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.10-web",
+  GAME_VERSION:"v0.11-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   NPC_BLACKSMITH_NAME:"Grondar Emberhand", NPC_ALCHEMIST_NAME:"Maren Thistlebrew", NPC_MERCHANT_NAME:"Cassius Wraithcoin",
@@ -326,12 +356,18 @@ const Balance = {
   BASE_INVENTORY_SLOTS:16, MAX_BAG_SLOTS:3, BAG_BUY_GOLD_PER_CAPACITY:4, BAG_CRAFT_MATERIALS_PER_CAPACITY:3,
   VENDOR_MARKUP:3,
   SALVAGE_MATERIALS_PER_SLOT:3, REROLL_MATERIAL_COST_MULT:2, SELL_GOLD_PER_TIER:8, SELL_GOLD_PER_SLOT:4,
-  TRIAL_STAGE_PASS_CHANCE:0.65, TRIAL_MAX_STAGES:3, BRIDGE_ROWS_PER_STAGE:10,
+  // Broken Bridge Challenge (v0.11 rework): one continuous 10-step crossing per
+  // promotion attempt (no more sub-"stages"). The number of planks hidden at each step
+  // -- and so the per-step pass chance -- scales with the tier being climbed FROM:
+  // tier1->2 is a 2-plank row (50%/step), tier2->3 a 3-plank row (33.33%/step), tier3->4
+  // a 4-plank row (25%/step), tier4->5 a 5-plank row (20%/step). Levelling requirement
+  // scales with tier too (10/20/30/40); tier5 has no further promotion, see
+  // screenMasterTrial()'s "not yet implemented" branch for what happens after that.
+  BRIDGE_ROWS:10, BRIDGE_MIN_PLANKS:2, BRIDGE_MAX_PLANKS:5,
+  TRIAL_LEVEL_REQUIREMENT_PER_TIER:10,
   KILL_STREAK_STAT_GROWTH_PER_KILL:0.015, KILL_STREAK_LOOT_GROWTH_PER_KILL:0.02, KILL_STREAK_CAP:40,
   MAX_CHARACTER_SLOTS:6,
-  MASTER_TRIAL_LEVEL_REQUIREMENT:10, // temporarily lowered from LEVEL_CAP for early-access feedback; set back to LEVEL_CAP for the 1.0 launch
   EYESIGHT_AFFIX_CHANCE:0.03, ELIXIR_EYESIGHT_STEPS:500, RARE_HERB_CHANCE:0.06,
-  BRIDGE_ROWS_PER_ATTEMPT:10,
   GAMBLE_ITEM_COST:800, GAMBLE_REVEAL_MS:2000,
 
   // Stat Points / Attributes (v0.10): +3 points per level-up, spent on Strength/Dexterity/
@@ -339,14 +375,14 @@ const Balance = {
   // for exactly how each attribute is used per class chain, summarized on the Player
   // Classes screen too.
   STAT_POINTS_PER_LEVEL:3,
-  BLOCK_CHANCE_PER_DEX:0.005, BLOCK_CHANCE_MAX:0.60,
+  BLOCK_CHANCE_PER_DEX:0.01, BLOCK_CHANCE_MAX:0.60,
 
   killStreakStatMult(s){return 1.0+this.KILL_STREAK_STAT_GROWTH_PER_KILL*Math.min(s,this.KILL_STREAK_CAP);},
   killStreakLootMult(s){return 1.0+this.KILL_STREAK_LOOT_GROWTH_PER_KILL*Math.min(s,this.KILL_STREAK_CAP);},
   xpRequiredForLevel(level){return Math.round(this.KILLS_PER_LEVEL_TARGET*this.monsterXpReward(this.MONSTER_BASE_XP,level));},
   monsterXpReward(baseXp,areaLevel){return baseXp*Math.pow(1.0+this.AREA_XP_GROWTH,areaLevel);},
-  monsterHp(baseHp,areaLevel){return baseHp*Math.pow(1.0+this.AREA_HP_GROWTH,areaLevel);},
-  monsterDamage(baseDmg,areaLevel){return baseDmg*Math.pow(1.0+this.AREA_DAMAGE_GROWTH,areaLevel);},
+  monsterHp(baseHp,areaLevel){return baseHp*this.MONSTER_HP_MULT*Math.pow(1.0+this.AREA_HP_GROWTH,areaLevel);},
+  monsterDamage(baseDmg,areaLevel){return baseDmg*this.MONSTER_DAMAGE_MULT*Math.pow(1.0+this.AREA_DAMAGE_GROWTH,areaLevel);},
   lootMultiplier(areaLevel){return Math.pow(1.0+this.AREA_LOOT_GROWTH,areaLevel);},
   itemTierForAreaLevel(areaLevel){return clampi(1+Math.floor(areaLevel/15.0),1,this.ITEM_TIER_MAX);},
   itemTierStatRange(tier){const t=clampi(tier,1,this.ITEM_TIER_MAX);return [(t-1)*this.ITEM_STAT_PER_TIER+1,t*this.ITEM_STAT_PER_TIER];},
@@ -357,9 +393,9 @@ const Balance = {
     for(const r of this.RARITY_TABLE){cum+=r.weight; if(roll<cum) return r;}
     return this.RARITY_TABLE[0];
   },
-  trialStagesRequired(trialIndex){return clampi(1+Math.floor((trialIndex-1)/2.0),1,this.TRIAL_MAX_STAGES);},
-  trialOverallOdds(trialIndex){return Math.pow(this.TRIAL_STAGE_PASS_CHANCE,this.trialStagesRequired(trialIndex));},
-  bridgeRowSurvivalChance(stagePassChance,rows){return Math.pow(stagePassChance,1.0/rows);},
+  bridgePlankCount(tier){return clampi((tier||1)+1,this.BRIDGE_MIN_PLANKS,this.BRIDGE_MAX_PLANKS);},
+  bridgeStepPassChance(tier){return 1.0/this.bridgePlankCount(tier);},
+  trialLevelRequirement(tier){return clampi(tier||1,1,4)*this.TRIAL_LEVEL_REQUIREMENT_PER_TIER;},
   salvageValue(tier,slots){return tier*slots*this.SALVAGE_MATERIALS_PER_SLOT;},
   rerollCost(tier,slots){return this.salvageValue(tier,slots)*this.REROLL_MATERIAL_COST_MULT;},
   sellValue(tier,slots){return tier*this.SELL_GOLD_PER_TIER+slots*this.SELL_GOLD_PER_SLOT;},
@@ -534,6 +570,7 @@ const Net = {
   graveyardCache:null,
   leaderboardCache:null, leaderboardCacheHardcore:null,
   auctionCache:null,
+  vaultCache:null, vaultCapacity:200,
   chatMessages:[], privateMessages:[], chatSocket:null,
   apiBase(){
     const params=new URLSearchParams(location.search);
@@ -581,7 +618,7 @@ const Net = {
   logout(){
     this.online=false; this.token=null; this.username=null; this.cache=null;
     this.graveyardCache=null; this.leaderboardCache=null; this.leaderboardCacheHardcore=null;
-    this.auctionCache=null; this.chatMessages=[]; this.privateMessages=[];
+    this.auctionCache=null; this.vaultCache=null; this.chatMessages=[]; this.privateMessages=[];
     if(this.chatSocket){ try{this.chatSocket.close();}catch(e){} this.chatSocket=null; }
     this.clearPersistedSession();
   },
@@ -633,6 +670,20 @@ const Net = {
   async announceDeath(payload){
     if(!this.online) return;
     try{ await fetch(this.apiBase()+"/api/announce/death",{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify(payload)}); }catch(e){}
+  },
+  // Storage Vault (v0.11): one shared 200-slot chest per account, so every character
+  // slot on the account can deposit into and withdraw from the same stash server-side.
+  async fetchVault(){
+    const res=await fetch(this.apiBase()+"/api/vault",{headers:this.authHeaders()});
+    const json=await res.json().catch(()=>({items:[],capacity:200}));
+    this.vaultCache=json.items||[];
+    this.vaultCapacity=json.capacity||200;
+  },
+  async saveVault(items){
+    const res=await fetch(this.apiBase()+"/api/vault",{method:"PUT",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({items})});
+    const json=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(json.error||"Could not save the vault.");
+    return json;
   },
   async fetchAuction(){
     const res=await fetch(this.apiBase()+"/api/auction",{headers:this.authHeaders()});
@@ -794,7 +845,9 @@ const PS = {
   getGoldFindMult(){return 1.0+this.gearBonus("gold_find")/100.0;},
   getXpFindMult(){return 1.0+this.gearBonus("xp_find")/100.0;},
 
-  getGearBonusSummary(){
+  // Returns one line per active bonus (rather than one joined sentence) so the
+  // Inventory screen can list each on its own row -- see gearBonusPanel().
+  getGearBonusLines(){
     const parts=[];
     const dmg=this.gearBonus("damage"); if(dmg) parts.push(`+${Math.round(dmg)} Damage`);
     const hp=this.gearBonus("hp"); if(hp) parts.push(`+${Math.round(hp)} Hit Points`);
@@ -808,8 +861,7 @@ const PS = {
     const dex=this.gearBonus("dexterity"); if(dex) parts.push(`+${Math.round(dex)} Dexterity`);
     const vit=this.gearBonus("vitality"); if(vit) parts.push(`+${Math.round(vit)} Vitality`);
     const intl=this.gearBonus("intelligence"); if(intl) parts.push(`+${Math.round(intl)} Intelligence`);
-    if(parts.length===0) return "No gear bonuses yet.";
-    return "Gear bonuses: "+parts.join(", ");
+    return parts;
   },
 
   addXp(amount){
@@ -821,20 +873,19 @@ const PS = {
     while(this.xp>=this.xp_to_next && this.level<Balance.LEVEL_CAP){
       this.xp-=this.xp_to_next; this.level++; this.xp_to_next=Balance.xpRequiredForLevel(this.level);
       this.unspent_stat_points+=Balance.STAT_POINTS_PER_LEVEL;
-      // Vitality always adds to both pools; Strength only adds to the HP pool for the
-      // two chains whose Strength doesn't already scale their damage (Thornguard gets
-      // damage from Strength instead, see getDamageRange()). Both use base+points only,
-      // never gear, see the attributes/bonus_* fields' comment for why.
-      const chain=this.getClassData().chain;
+      // Vitality always adds to both pools (base+points only, never gear, see the
+      // attributes/bonus_* fields' comment for why). Strength has no effect at all for
+      // Wizard or Windrider (only Thornguard uses Strength, for damage, see
+      // getDamageRange()) -- as of v0.11 it no longer grants HP for those two paths
+      // either, so there's a real choice per point instead of Vitality always winning.
       this.bonus_hp_from_attributes+=(this.attributes.vit||0);
       this.bonus_stamina_from_attributes+=(this.attributes.vit||0);
-      if(chain==="wizard"||chain==="windrider") this.bonus_hp_from_attributes+=(this.attributes.str||0);
       this.current_hp=this.getMaxHp(); leveled=true;
     }
     if(this.level>=Balance.LEVEL_CAP) this.xp=0;
     return leveled;
   },
-  canAttemptTrial(){return this.level>=Balance.MASTER_TRIAL_LEVEL_REQUIREMENT;},
+  canAttemptTrial(){return this.level>=Balance.trialLevelRequirement(this.getClassData().tier||1);},
   gamblingUnlocked(){return this.highest_tier_reached>=2 || this.season_won;},
   getEyesightRadius(){
     let r=1;
@@ -1077,9 +1128,10 @@ const GF = {
   overworld_snapshot:null,
   chatOpen:false, inventory_return_to:"town",
   brewing:null, brewInterval:null, crafting:null, craftInterval:null,
-  trialJustFailed:false, trialFailedSide:null, trialFailedStepIndex:-1,
+  trialJustFailed:false, trialFailedPlankIndex:null, trialFailedStepIndex:-1,
   ventureDepth:null, mazeOverlay:null, gambleReveal:null,
   admin_token:"", admin_leaderboard_cache:null, admin_leaderboard_error:"",
+  attributesCollapsed:false,
   goto(screen, extra={}){
     Object.assign(this, extra);
     if(PS.isRestingAtCampfire && !NO_REGEN_SCREENS_ON_LEAVE.includes(screen)) PS.isRestingAtCampfire=false;
@@ -1237,16 +1289,34 @@ function startCraftBag(itemId){
   },100);
 }
 
+// Aggregates every consumable into "N health potions"/"N stamina potions" (collapsing
+// the small/greater tiers together, since at a glance players care about the running
+// total more than the split) plus any other consumables (elixirs, scrolls) by name.
+// Used only in the compact character-detail preview -- the full Inventory screen still
+// lists each stack individually since its Use buttons need the specific item id.
+function aggregatedConsumableParts(){
+  let healthTotal=0, staminaTotal=0; const otherParts=[];
+  for(const itemId of Object.keys(PS.consumables)){
+    const qty=PS.consumables[itemId]; if(qty<=0) continue;
+    const item=DL.getItem(itemId);
+    if(item.heal_amount) healthTotal+=qty;
+    else if(item.stamina_amount) staminaTotal+=qty;
+    else otherParts.push(`${qty}x ${item.name}`);
+  }
+  const parts=[];
+  if(healthTotal>0) parts.push(`${healthTotal} health potion${healthTotal===1?"":"s"}`);
+  if(staminaTotal>0) parts.push(`${staminaTotal} stamina potion${staminaTotal===1?"":"s"}`);
+  parts.push(...otherParts);
+  return parts;
+}
+
 function inventoryPreview(){
   const equippedCount=IF.EQUIPPED_SLOT_KEYS.filter(s=>PS.equipped[s]).length;
-  const consumableParts=Object.keys(PS.consumables).filter(k=>PS.consumables[k]>0).map(k=>`${DL.getItem(k).name} x${PS.consumables[k]}`);
-  const herbParts=Object.keys(PS.herbs).filter(k=>PS.herbs[k]>0).map(k=>`${DL.getHerb(k).name} x${PS.herbs[k]}`);
+  const consumableParts=aggregatedConsumableParts();
+  const herbParts=Object.keys(PS.herbs).filter(k=>PS.herbs[k]>0).map(k=>`${PS.herbs[k]}x ${DL.getHerb(k).name}`);
   return h("div",{class:"col gap",style:{flex:"1",minWidth:"0"}},[
-    h("div",{class:"row",style:{justifyContent:"space-between"}},[
-      h("div",{style:{fontWeight:"bold"}},["Inventory"]),
-      GF.screen==="inventory"?h("span",{class:"muted"},["(open)"]):h("span",{class:"linklike",onClick:()=>GF.goto("inventory",{inventory_return_to:GF.screen})},["Open →"]),
-    ]),
-    h("div",{class:"muted"},[`Gear: ${PS.getInventoryUsed()}/${PS.getInventoryCapacity()} slots, Equipped: ${equippedCount}/${IF.EQUIPPED_SLOT_KEYS.length}`]),
+    h("div",{class:"muted"},[`Equipped: ${equippedCount}/${IF.EQUIPPED_SLOT_KEYS.length}`]),
+    h("div",{class:"muted"},[`Backpack: ${PS.getInventoryUsed()}/${PS.getInventoryCapacity()}`]),
     h("div",{class:"muted"},[`Bags: ${PS.equipped_bags.length}/${Balance.MAX_BAG_SLOTS}`]),
     h("div",{class:"muted",style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},[consumableParts.length?`Consumables: ${consumableParts.join(", ")}`:"Consumables: none"]),
     h("div",{class:"muted",style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},[herbParts.length?`Herbs: ${herbParts.join(", ")}`:"Herbs: none"]),
@@ -1257,10 +1327,16 @@ function statHeader(opts={}){
   const compact=!!opts.compact;
   const c=PS.getClassData();
   return h("div",{class:"panel",style:{marginBottom:compact?"0":"14px"}},[
-    h("div",{class:"row",style:{justifyContent:"space-between"}},[
+    h("div",{class:"row",style:{justifyContent:"space-between",alignItems:"flex-start"}},[
       h("div",{},[
-        h("div",{},[`${PS.character_name} `,h("span",{class:"muted"},[`-- Lv ${PS.level} ${c.display_name||""}`]), PS.hardcore?h("span",{style:{color:"#e07a7a"}},[" [Hardcore]"]):null]),
+        h("div",{style:{fontWeight:"bold"}},[PS.character_name, PS.hardcore?h("span",{style:{color:"#e07a7a"}},[" [Hardcore]"]):null]),
+        h("div",{class:"muted"},[`Lv ${PS.level} ${c.display_name||""}`]),
         PS.kill_streak>0?h("div",{class:"muted"},[`Kill streak: ${PS.kill_streak}`]):null,
+      ]),
+      h("div",{class:"row gap",style:{alignItems:"center"}},[
+        h("div",{style:{fontWeight:"bold"}},["Inventory"]),
+        GF.screen==="inventory"?h("span",{class:"muted"},["(open)"]):h("span",{class:"linklike",style:{marginLeft:"2px"},onClick:()=>GF.goto("inventory",{inventory_return_to:GF.screen})},["Open →"]),
+        PS.unspent_stat_points>0?h("span",{class:"stat-point-cta",title:`${PS.unspent_stat_points} unspent stat point${PS.unspent_stat_points===1?"":"s"} -- click to assign them`,onClick:()=>GF.goto("inventory",{inventory_return_to:GF.screen})},["+"]):null,
       ]),
       h("div",{class:"col",style:{alignItems:"flex-end"}},[
         h("div",{class:"gold-text"},[`${PS.gold} gold`]),
@@ -1461,7 +1537,7 @@ function screenClassPicker(){
   for(const classId of DL.starterClassIds()){
     const c=DL.getClass(classId);
     grid.appendChild(h("div",{class:"tile col gap"},[
-      h("div",{class:"row gap"},[iconBadge(PORTRAITS[classId],56), h("div",{},[h("div",{style:{fontWeight:"bold"}},[c.display_name]), h("div",{class:"muted"},[c.role])])]),
+      h("div",{class:"row",style:{alignItems:"center",gap:"10px"}},[iconBadge(PORTRAITS[classId],56), h("div",{style:{flex:"1",minWidth:"0"}},[h("div",{style:{fontWeight:"bold"}},[c.display_name]), h("div",{class:"muted"},[c.role])])]),
       h("div",{class:"muted"},[c.description]),
       h("button",{class:"wide",onClick:()=>{
         const name=nameInput.value.trim();
@@ -1513,20 +1589,28 @@ function classChainEntries(chainId){
   return Object.entries(CLASSES).filter(([id,c])=>c.chain===chainId).sort((a,b)=>a[1].tier-b[1].tier);
 }
 
+// A real CSS grid (not 3 independent flex columns) so every path's Nth row -- title,
+// attribute summary, each tier, each arrow -- lands in the same grid row as the other
+// two paths' Nth row. Grid rows auto-size to their tallest cell, so differing amounts
+// of description text can't push one path's Tier 4 higher or lower than the others'.
 function screenClassProgression(){
   const root=h("div",{});
   root.appendChild(h("h2",{},["Player Classes"]));
   root.appendChild(h("div",{class:"lore"},["Every hero begins along one of three paths below. Passing that class's Broken Bridge Challenge promotes you to the next tier down the same column. Whoever is first to pass the final trial of the final tier wins the season, at that moment, every player's level and class progress resets for a fresh season, but gear, gold, and other (future) skill progress carry over."]));
   const chainIds=["wizard","thornguard","windrider"];
-  const row=h("div",{class:"row gap",style:{alignItems:"flex-start",flexWrap:"wrap"}});
-  for(const chainId of chainIds){
+  const grid=h("div",{class:"class-grid"});
+  chainIds.forEach((chainId,i)=>{
+    grid.appendChild(h("div",{class:"class-path-bg",style:{gridColumn:String(i+1),gridRow:"1 / -1"}}));
+  });
+  chainIds.forEach((chainId,i)=>{
+    const col=String(i+1);
     const entries=classChainEntries(chainId);
-    const col=h("div",{class:"col gap",style:{flex:"1",minWidth:"220px"}});
-    col.appendChild(h("div",{style:{fontWeight:"bold",textAlign:"center",marginBottom:"2px"}},[DL.getClass(chainId).display_name+" Path"]));
-    col.appendChild(h("div",{class:"muted",style:{fontSize:".82em",lineHeight:"1.4em",marginBottom:"4px"}},attributeSummaryLines(chainId).map(l=>h("div",{},[l]))));
-    entries.forEach(([classId,c],i)=>{
+    let r=1;
+    grid.appendChild(h("div",{style:{gridColumn:col,gridRow:String(r++),zIndex:"1",fontWeight:"bold",textAlign:"center",fontSize:"1.35em",padding:"14px 10px 2px"}},[DL.getClass(chainId).display_name+" Path"]));
+    grid.appendChild(h("div",{class:"muted",style:{gridColumn:col,gridRow:String(r++),zIndex:"1",fontSize:".82em",lineHeight:"1.4em",padding:"0 12px 8px"}},attributeSummaryLines(chainId).map(l=>h("div",{},[l]))));
+    entries.forEach(([classId,c],idx)=>{
       const isFinal=!c.next_class;
-      col.appendChild(h("div",{class:"tile row gap",style:{alignItems:"center"}},[
+      grid.appendChild(h("div",{class:"tile row gap",style:{gridColumn:col,gridRow:String(r++),zIndex:"1",alignItems:"center",margin:"0 10px"+(isFinal?" 14px":"")}},[
         iconBadge(PORTRAITS[classId]||"",40),
         h("div",{style:{minWidth:"0"}},[
           h("div",{style:{fontWeight:"bold"}},[`Tier ${c.tier}: ${c.display_name}`]),
@@ -1535,11 +1619,10 @@ function screenClassProgression(){
           isFinal?h("div",{style:{color:"#e0b23d",fontWeight:"bold",marginTop:"2px"}},["★ Final tier, wins the season"]):null,
         ]),
       ]));
-      if(i<entries.length-1) col.appendChild(h("div",{class:"muted",style:{textAlign:"center"}},["↓"]));
+      if(idx<entries.length-1) grid.appendChild(h("div",{class:"muted",style:{gridColumn:col,gridRow:String(r++),zIndex:"1",textAlign:"center"}},["↓"]));
     });
-    row.appendChild(col);
-  }
-  root.appendChild(row);
+  });
+  root.appendChild(grid);
   root.appendChild(h("button",{style:{marginTop:"14px"},onClick:()=>GF.goto("mainMenuSlots")},["← Back"]));
   return root;
 }
@@ -1622,16 +1705,16 @@ function screenTown(){
   root.appendChild(h("div",{class:"town-quadrants",style:{marginBottom:"14px"}},[
     // top-left: venture (with depth stepper merged in) + rest
     h("div",{class:"col gap"},[
-      h("div",{class:"panel venture-card"},[
-        h("div",{class:"venture-action",onClick:()=>{ PS.resetKillStreak(); GF.overworld_snapshot=null; GF.goto("maze",{maze_depth: ventureDepth}); }},[
+      h("div",{class:"row venture-row"},[
+        h("div",{class:"panel venture-card venture-clickable",onClick:()=>{ PS.resetKillStreak(); GF.overworld_snapshot=null; GF.goto("maze",{maze_depth: ventureDepth}); }},[
           h("div",{class:"venture-title"},["🌳 Venture into the Woods"]),
           h("div",{class:"muted",style:{fontSize:".85em",marginTop:"2px"}},[`Area Level: ${ventureDepth}`]),
         ]),
-        h("div",{class:"depth-stepper",style:{justifyContent:"center"}},[
-          h("span",{class:"muted"},["Change depth level:"]),
-          h("button",{disabled:ventureDepth<=1,onClick:(e)=>{ e.stopPropagation(); GF.ventureDepth=Math.max(1,ventureDepth-1); render(); }},["-"]),
-          h("span",{},[String(ventureDepth)]),
-          h("button",{disabled:ventureDepth>=maxDepth,onClick:(e)=>{ e.stopPropagation(); GF.ventureDepth=Math.min(maxDepth,ventureDepth+1); render(); }},["+"]),
+        h("div",{class:"panel venture-chevrons"},[
+          h("div",{class:"muted",style:{fontSize:".72em"}},["Area Lv"]),
+          h("button",{disabled:ventureDepth>=maxDepth,onClick:(e)=>{ e.stopPropagation(); GF.ventureDepth=Math.min(maxDepth,ventureDepth+1); render(); }},["▲"]),
+          h("span",{style:{fontWeight:"bold"}},[String(ventureDepth)]),
+          h("button",{disabled:ventureDepth<=1,onClick:(e)=>{ e.stopPropagation(); GF.ventureDepth=Math.max(1,ventureDepth-1); render(); }},["▼"]),
         ]),
       ]),
       h("button",{class:"wide",disabled:PS.isRestingAtCampfire && PS.current_hp>=PS.getMaxHp() && PS.current_stamina>=PS.getMaxStamina(),onClick:()=>{
@@ -1646,6 +1729,7 @@ function screenTown(){
     h("div",{class:"col gap"},[
       serviceButton("Blacksmith","🔨",()=>GF.goto("blacksmith")),
       serviceButton("Alchemist","⚗",()=>GF.goto("alchemist")),
+      serviceButton("Storage Vault","🗝",()=>{ Net.vaultCache=null; GF.goto("vault"); }),
     ]),
     // bottom-right: merchant + auction house + master trial
     h("div",{class:"col gap"},[
@@ -1779,7 +1863,7 @@ function screenMaze(){
   const depth=GF.maze_depth||PS.level;
   const maze=ensureMaze(depth);
   const root=h("div",{});
-  root.appendChild(h("h2",{},[`The Woods, Depth ${depth}`]));
+  root.appendChild(h("h2",{},[`The Woods, Area Level ${depth}`]));
   root.appendChild(h("div",{class:"lore"},["Overgrown paths wind between the trees. Move with the arrow keys or by clicking an adjacent tile."]));
   const t=toastBox(); if(t) root.appendChild(t);
   root.appendChild(statHeader());
@@ -1824,11 +1908,7 @@ function screenMaze(){
   root.appendChild(h("div",{class:"maze-wrap"},[gridArea,
     h("div",{class:"side-panel"},[
       h("div",{class:"col",style:{gap:"2px"}},[
-        h("div",{class:"muted"},["🏕 start   ⬇ exit   🎁 chest"]),
-        h("div",{class:"muted"},["✨ shrine   🌿 herb"]),
-        h("div",{class:"muted"},["🪨 boulder, impassable"]),
-        h("div",{class:"muted"},["Green tile = grass, brown tile = dirt (both walkable)"]),
-        h("div",{class:"muted"},["Faded icon = already used"]),
+        h("div",{class:"muted",style:{lineHeight:"1.5em"}},["Use the arrow keys to explore the wilderness. Wild creatures lure at you from the tall grass, reach the exit (⬇) before your stamina runs out."]),
       ]),
       h("div",{class:"row gap"},[
         h("button",{disabled:!PS.canUseConsumable(PS.bestAvailableConsumable("health")),onClick:()=>{ PS.useConsumable(PS.bestAvailableConsumable("health")); autosave(); render(); }},["Use Health Potion"]),
@@ -2164,26 +2244,26 @@ function gearRow(inst, actions){
 function attributeSummaryLines(chain){
   if(chain==="thornguard"){
     return [
-      "Strength: +1 damage per point (this path's damage stat).",
-      "Dexterity: raises Block Chance, a chance to take 0 damage from a hit.",
+      "Strength: +1 damage per point.",
+      "Dexterity: +1% Block Chance per point, a chance to take 0 damage from a hit.",
       "Vitality: on every level-up, permanently adds that much HP and Stamina.",
       "Intelligence: no effect for this path.",
     ];
   }
   if(chain==="windrider"){
     return [
-      "Strength: on every level-up, permanently adds that much HP.",
-      "Dexterity: +1 damage per point (this path's damage stat).",
+      "Strength: no effect for this path.",
+      "Dexterity: +1 damage per point.",
       "Vitality: on every level-up, permanently adds that much HP and Stamina.",
       "Intelligence: no effect for this path.",
     ];
   }
   if(chain==="wizard"){
     return [
-      "Strength: on every level-up, permanently adds that much HP.",
-      "Dexterity: raises Block Chance, a chance to take 0 damage from a hit.",
+      "Strength: no effect for this path.",
+      "Dexterity: +1% Block Chance per point, a chance to take 0 damage from a hit.",
       "Vitality: on every level-up, permanently adds that much HP and Stamina.",
-      "Intelligence: +1 damage per point (this path's damage stat, gear included).",
+      "Intelligence: +1 damage per point.",
     ];
   }
   return [];
@@ -2193,19 +2273,49 @@ function attributesPanel(){
   const c=PS.getClassData();
   const rows=[{key:"str",label:"Strength",gearStat:"strength"},{key:"dex",label:"Dexterity",gearStat:"dexterity"},{key:"vit",label:"Vitality",gearStat:"vitality"},{key:"int",label:"Intelligence",gearStat:"intelligence"}];
   const summaryLines=attributeSummaryLines(c.chain);
-  return h("div",{class:"panel",style:{marginTop:"12px",marginBottom:"12px"}},[
-    h("div",{class:"row",style:{justifyContent:"space-between",marginBottom:"8px"}},[
-      h("div",{style:{fontWeight:"bold"}},["Attributes"]),
-      h("div",{class:PS.unspent_stat_points>0?"gold-text":"muted"},[PS.unspent_stat_points>0?`${PS.unspent_stat_points} point${PS.unspent_stat_points===1?"":"s"} to spend`:"No unspent points"]),
-    ]),
-    ...rows.map((r,i)=>{
+  const collapsed=!!GF.attributesCollapsed;
+  const body=[];
+  if(!collapsed){
+    body.push(...rows.map((r,i)=>{
       const gearAmt=PS.gearBonus(r.gearStat);
       return h("div",{class:"row",style:{justifyContent:"space-between",marginBottom:"4px",alignItems:"center"}},[
         h("div",{},[`${r.label}: ${PS.attributes[r.key]}`, gearAmt?h("span",{class:"muted"},[` (+${Math.round(gearAmt)} from gear)`]):null]),
         h("button",{disabled:PS.unspent_stat_points<=0,onClick:()=>{ PS.spendStatPoint(r.key); autosave(); render(); }},["+"]),
       ]);
-    }),
-    h("div",{class:"muted",style:{marginTop:"6px",lineHeight:"1.4em"}},summaryLines.map(l=>h("div",{},[l]))),
+    }));
+    body.push(h("div",{class:"muted",style:{marginTop:"6px",lineHeight:"1.4em"}},summaryLines.map(l=>h("div",{},[l]))));
+  }
+  return h("div",{class:"panel",style:{marginTop:"12px",marginBottom:"12px",height:"100%"}},[
+    h("div",{class:"row",style:{justifyContent:"space-between",marginBottom:collapsed?"0":"8px"}},[
+      h("div",{style:{fontWeight:"bold"}},["Attributes"]),
+      h("div",{class:"row gap",style:{alignItems:"center"}},[
+        h("div",{class:PS.unspent_stat_points>0?"gold-text":"muted"},[PS.unspent_stat_points>0?`${PS.unspent_stat_points} point${PS.unspent_stat_points===1?"":"s"} to spend`:"No unspent points"]),
+        h("button",{class:"attr-collapse-btn",title:collapsed?"Expand Attributes":"Collapse Attributes",onClick:()=>{ GF.attributesCollapsed=!GF.attributesCollapsed; render(); }},[collapsed?"▸":"▾"]),
+      ]),
+    ]),
+    ...body,
+  ]);
+}
+
+function gearBonusPanel(){
+  const lines=PS.getGearBonusLines();
+  return h("div",{class:"panel",style:{marginTop:"12px",marginBottom:"12px",height:"100%"}},[
+    h("div",{style:{fontWeight:"bold",marginBottom:"8px"}},["Gear Bonuses"]),
+    lines.length===0?h("div",{class:"muted"},["No gear bonuses yet."]):
+      h("div",{},lines.map(l=>h("div",{class:"muted",style:{marginBottom:"4px"}},[l]))),
+  ]);
+}
+
+// Equipped slots arranged like a Diablo-style paper doll: head+amulet up top, weapon
+// and shoulders flanking the chest armor, then gloves/rings/belt, pants, boots.
+const EQUIP_DOLL_ROWS=[["head","amulet"],["weapon","shoulders","armor"],["gloves","ring1","belt","ring2"],["pants"],["boots"]];
+
+function equipSlotTile(slot){
+  const inst=PS.equipped[slot];
+  return h("div",{class:"tile"},[
+    h("div",{class:"muted"},[IF.slotLabel(slot)]),
+    inst?h("div",{class:"row gap",style:{alignItems:"center"}},[gearIcon(inst,26), h("div",{class:"tooltip rarity-"+inst.rarity,"data-tip":IF.tooltipText(inst)},[IF.displayName(inst)+` (T${inst.tier})`])]):h("div",{class:"muted"},["(empty)"]),
+    inst?h("button",{style:{marginTop:"6px"},onClick:()=>{PS.unequipSlot(slot);autosave();render();}},["Unequip"]):null,
   ]);
 }
 
@@ -2214,28 +2324,24 @@ function screenInventory(){
   root.appendChild(h("h2",{},["Inventory"]));
   const t=toastBox(); if(t) root.appendChild(t);
   root.appendChild(statHeader());
-  root.appendChild(h("div",{class:"muted"},[PS.getGearBonusSummary()]));
-  root.appendChild(attributesPanel());
+  root.appendChild(h("div",{class:"row",style:{alignItems:"stretch",gap:"14px"}},[
+    h("div",{style:{flex:"0 0 50%",maxWidth:"50%",minWidth:"0"}},[attributesPanel()]),
+    h("div",{style:{flex:"1",minWidth:"0"}},[gearBonusPanel()]),
+  ]));
 
   root.appendChild(h("h3",{style:{marginTop:"12px"}},["Equipped"]));
-  const eqGrid=h("div",{class:"grid3"});
-  for(const slot of IF.EQUIPPED_SLOT_KEYS){
-    const inst=PS.equipped[slot];
-    eqGrid.appendChild(h("div",{class:"tile"},[
-      h("div",{class:"muted"},[IF.slotLabel(slot)]),
-      inst?h("div",{class:"row gap",style:{alignItems:"center"}},[gearIcon(inst,26), h("div",{class:"tooltip rarity-"+inst.rarity,"data-tip":IF.tooltipText(inst)},[IF.displayName(inst)+` (T${inst.tier})`])]):h("div",{class:"muted"},["(empty)"]),
-      inst?h("button",{style:{marginTop:"6px"},onClick:()=>{PS.unequipSlot(slot);autosave();render();}},["Unequip"]):null,
-    ]));
+  const eqDoll=h("div",{class:"equip-doll"});
+  for(const rowSlots of EQUIP_DOLL_ROWS){
+    eqDoll.appendChild(h("div",{class:"equip-doll-row"},rowSlots.map(slot=>equipSlotTile(slot))));
   }
-  root.appendChild(eqGrid);
+  root.appendChild(eqDoll);
 
   root.appendChild(h("h3",{},[`Backpack (${PS.getInventoryUsed()}/${PS.getInventoryCapacity()})`]));
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"6px"}},["Visit the Blacksmith to salvage gear, or the Merchant to sell it."]));
   if(PS.gear_instances.length===0) root.appendChild(h("div",{class:"muted"},["Empty. Go find some loot in the woods."]));
   for(const inst of [...PS.gear_instances]){
     root.appendChild(gearRow(inst,[
       h("button",{onClick:()=>{PS.equipGear(inst.instance_id);autosave();render();}},[PS.wouldSwap(inst)?"Swap":"Equip"]),
-      h("button",{onClick:()=>{PS.salvageGear(inst.instance_id);autosave();render();}},[`Salvage (+${Balance.salvageValue(inst.tier,IF.slotCount(inst))} mat)`]),
-      h("button",{onClick:()=>{PS.sellGear(inst.instance_id);autosave();render();}},[`Sell (+${Balance.sellValue(inst.tier,IF.slotCount(inst))}g)`]),
     ]));
   }
 
@@ -2260,7 +2366,9 @@ function screenInventory(){
   root.appendChild(h("h3",{},["Herbs"]));
   const herbEntries=Object.keys(PS.herbs).filter(k=>PS.herbs[k]>0);
   if(herbEntries.length===0) root.appendChild(h("div",{class:"muted"},["None."]));
-  for(const herbId of herbEntries) root.appendChild(h("div",{},[`${DL.getHerb(herbId).name} x${PS.herbs[herbId]}`]));
+  for(const herbId of herbEntries){
+    root.appendChild(h("div",{class:"row gap",style:{marginBottom:"4px",alignItems:"center"}},[herbIcon(herbId,22), `${DL.getHerb(herbId).name} x${PS.herbs[herbId]}`]));
+  }
 
   root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto(GF.inventory_return_to||"town")},["← Back"]));
   return root;
@@ -2339,6 +2447,135 @@ function screenAlchemist(){
     grid.appendChild(h("div",{class:"tile"},tileKids));
   }
   root.appendChild(grid);
+  root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
+  return root;
+}
+
+/* ================= STORAGE VAULT ================= */
+// A 20x10 (200-slot) chest shared across every character on the account, not just the
+// one currently loaded -- backed by the server's /api/vault endpoints (see server.js),
+// scoped to the logged-in account so nobody else's stash is ever reachable. Each slot
+// holds either one gear instance, or one stack of a single consumable/herb type.
+
+function vaultFindEmptySlot(){
+  const items=Net.vaultCache||[];
+  const capacity=Net.vaultCapacity||200;
+  const used=new Set(items.map(i=>i.slot));
+  for(let i=0;i<capacity;i++) if(!used.has(i)) return i;
+  return -1;
+}
+function vaultSync(){
+  Net.saveVault(Net.vaultCache||[]).catch(e=>setToast("Could not sync the vault with the server: "+e.message));
+}
+function vaultDepositGear(instanceId){
+  const slot=vaultFindEmptySlot();
+  if(slot===-1){ setToast("The vault is full."); return; }
+  const idx=PS.findGearIndex(instanceId);
+  if(idx===-1) return;
+  const inst=PS.gear_instances[idx];
+  PS.gear_instances.splice(idx,1);
+  Net.vaultCache.push({slot,kind:"gear",inst});
+  PS.saveGame(); vaultSync(); render();
+}
+function vaultDepositConsumable(itemId){
+  const qty=PS.consumables[itemId]||0; if(qty<=0) return;
+  const existing=(Net.vaultCache||[]).find(e=>e.kind==="consumable"&&e.item_id===itemId);
+  if(existing){ existing.qty+=qty; }
+  else {
+    const slot=vaultFindEmptySlot();
+    if(slot===-1){ setToast("The vault is full."); return; }
+    Net.vaultCache.push({slot,kind:"consumable",item_id:itemId,qty});
+  }
+  delete PS.consumables[itemId];
+  PS.saveGame(); vaultSync(); render();
+}
+function vaultDepositHerb(herbId){
+  const qty=PS.herbs[herbId]||0; if(qty<=0) return;
+  const existing=(Net.vaultCache||[]).find(e=>e.kind==="herb"&&e.herb_id===herbId);
+  if(existing){ existing.qty+=qty; }
+  else {
+    const slot=vaultFindEmptySlot();
+    if(slot===-1){ setToast("The vault is full."); return; }
+    Net.vaultCache.push({slot,kind:"herb",herb_id:herbId,qty});
+  }
+  delete PS.herbs[herbId];
+  PS.saveGame(); vaultSync(); render();
+}
+function vaultWithdraw(slotIndex){
+  const idx=(Net.vaultCache||[]).findIndex(e=>e.slot===slotIndex);
+  if(idx===-1) return;
+  const entry=Net.vaultCache[idx];
+  if(entry.kind==="gear"){
+    if(!PS.addGear(entry.inst)){ setToast("Your backpack is full."); return; }
+  } else if(entry.kind==="consumable"){
+    PS.addConsumable(entry.item_id,entry.qty);
+  } else if(entry.kind==="herb"){
+    PS.addHerb(entry.herb_id,entry.qty);
+  }
+  Net.vaultCache.splice(idx,1);
+  PS.saveGame(); vaultSync(); render();
+}
+
+function screenVault(){
+  const root=h("div",{});
+  root.appendChild(h("div",{class:"row gap"},[iconBadge(`<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><rect x="6" y="14" width="28" height="20" rx="3" fill="#5a4028" stroke="#2a2a2a" stroke-width="1.5"/><rect x="6" y="14" width="28" height="6" fill="#7a5a38"/><circle cx="20" cy="26" r="4" fill="#2a2a2a"/><rect x="18.5" y="26" width="3" height="6" fill="#2a2a2a"/></svg>`,52),h("div",{},[h("h2",{},["Storage Vault"]),h("div",{class:"flavor"},["\"Whatever you leave here waits for any hero of yours who comes looking, it's shared across every character on your account.\""])])]));
+  const t=toastBox(); if(t) root.appendChild(t);
+  root.appendChild(statHeader());
+
+  if(Net.vaultCache===null||Net.vaultCache===undefined){
+    root.appendChild(h("div",{class:"muted"},["Loading..."]));
+    Net.fetchVault().then(render).catch(()=>{ setToast("Could not load the vault."); render(); });
+    root.appendChild(h("button",{onClick:()=>GF.goto("town")},["← Back to Town"]));
+    return root;
+  }
+
+  const capacity=Net.vaultCapacity||200;
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},[`${Net.vaultCache.length}/${capacity} slots used, 20x10, shared across every character on this account.`]));
+
+  const grid=h("div",{style:{display:"grid",gridTemplateColumns:"repeat(20,1fr)",gap:"3px",marginBottom:"14px",maxWidth:"760px"}});
+  for(let i=0;i<capacity;i++){
+    const entry=Net.vaultCache.find(e=>e.slot===i);
+    let label=null, icon=null;
+    if(entry){
+      if(entry.kind==="gear"){ label=IF.displayName(entry.inst)+` (T${entry.inst.tier})`; icon=gearIcon(entry.inst,24); }
+      else if(entry.kind==="consumable"){ label=`${DL.getItem(entry.item_id).name} x${entry.qty}`; icon=itemIcon(entry.item_id,24); }
+      else if(entry.kind==="herb"){ label=`${DL.getHerb(entry.herb_id).name} x${entry.qty}`; icon=herbIcon(entry.herb_id,24); }
+    }
+    grid.appendChild(h("div",{
+      class:"tile"+(entry?" tooltip":""),
+      style:{width:"32px",height:"32px",padding:"0",display:"flex",alignItems:"center",justifyContent:"center",cursor:entry?"pointer":"default"},
+      "data-tip":label||undefined,
+      onClick:entry?()=>{ if(confirm(`Withdraw ${label} back to your backpack?`)) vaultWithdraw(i); }:null,
+    },[icon]));
+  }
+  root.appendChild(grid);
+
+  root.appendChild(h("h3",{},["Deposit from Backpack"]));
+  if(PS.gear_instances.length===0) root.appendChild(h("div",{class:"muted"},["Nothing in your backpack to store."]));
+  for(const inst of [...PS.gear_instances]){
+    root.appendChild(gearRow(inst,[h("button",{onClick:()=>vaultDepositGear(inst.instance_id)},["Store"])]));
+  }
+
+  root.appendChild(h("h3",{},["Deposit Consumables"]));
+  const consEntries=Object.keys(PS.consumables).filter(k=>PS.consumables[k]>0);
+  if(consEntries.length===0) root.appendChild(h("div",{class:"muted"},["None."]));
+  for(const itemId of consEntries){
+    root.appendChild(h("div",{class:"row gap",style:{marginBottom:"4px",alignItems:"center",justifyContent:"space-between"}},[
+      h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId,22), `${DL.getItem(itemId).name} x${PS.consumables[itemId]}`]),
+      h("button",{onClick:()=>vaultDepositConsumable(itemId)},["Store"]),
+    ]));
+  }
+
+  root.appendChild(h("h3",{},["Deposit Herbs"]));
+  const herbEntries=Object.keys(PS.herbs).filter(k=>PS.herbs[k]>0);
+  if(herbEntries.length===0) root.appendChild(h("div",{class:"muted"},["None."]));
+  for(const herbId of herbEntries){
+    root.appendChild(h("div",{class:"row gap",style:{marginBottom:"4px",alignItems:"center",justifyContent:"space-between"}},[
+      h("div",{class:"row gap",style:{alignItems:"center"}},[herbIcon(herbId,22), `${DL.getHerb(herbId).name} x${PS.herbs[herbId]}`]),
+      h("button",{onClick:()=>vaultDepositHerb(herbId)},["Store"]),
+    ]));
+  }
+
   root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
   return root;
 }
@@ -2586,56 +2823,53 @@ function screenMasterTrial(){
   const root=h("div",{});
   const c=PS.getClassData();
   const nextId=DL.getNextClassId(PS.class_id);
+  const currentTier=c.tier||1;
   root.appendChild(h("h2",{},["Broken Bridge Challenge"]));
+  if(!nextId){
+    root.appendChild(h("div",{class:"lore"},[`${c.display_name} is the final form of your path. The elders have no further plank bridge to offer, whatever comes next for a champion of the season is still being prepared. Not yet implemented, check back in a future update.`]));
+    root.appendChild(h("button",{onClick:()=>GF.goto("town")},["← Back to Town"]));
+    return root;
+  }
+  const levelReq=Balance.trialLevelRequirement(currentTier);
   // A failed attempt resets the player to level 1, which would normally fall back below
   // the level gate below, but the failed board must stay visible until the player
   // acknowledges it and leaves, so the gate is skipped for that one render.
   if(!PS.canAttemptTrial() && !GF.trialJustFailed){
-    root.appendChild(h("div",{class:"lore"},[`You must reach Level ${Balance.MASTER_TRIAL_LEVEL_REQUIREMENT} as a ${c.display_name} before the elders will test you.`]));
-    root.appendChild(h("button",{onClick:()=>GF.goto("town")},["← Back to Town"]));
-    return root;
-  }
-  if(!nextId){
-    root.appendChild(h("div",{class:"lore"},[`${c.display_name} is the final form of your path. There is nothing left to prove, you have mastered the woods.`]));
+    root.appendChild(h("div",{class:"lore"},[`You must reach Level ${levelReq} as a ${c.display_name} before the elders will test you.`]));
     root.appendChild(h("button",{onClick:()=>GF.goto("town")},["← Back to Town"]));
     return root;
   }
   const t=toastBox(); if(t) root.appendChild(t);
-  root.appendChild(h("div",{class:"lore"},[`Cross the ancient plank bridge to prove yourself worthy of becoming a ${DL.getClass(nextId).display_name}. Each step has a safe plank and a false one, choose top or bottom. Fall, and the attempt ends there, but the bridge remembers every safe step you've already found.`]));
+  const plankCount=Balance.bridgePlankCount(currentTier);
+  root.appendChild(h("div",{class:"lore"},[`Cross the ancient plank bridge to prove yourself worthy of becoming a ${DL.getClass(nextId).display_name}. Each step hides ${plankCount} planks, only one holds. Fall, and the attempt ends there, but the bridge remembers every safe step you've already found.`]));
 
-  const trialIndex=c.tier||1;
-  const stagesRequired=Balance.trialStagesRequired(trialIndex);
-  const rows=Balance.BRIDGE_ROWS_PER_STAGE;
-  const rowChance=Balance.bridgeRowSurvivalChance(Balance.TRIAL_STAGE_PASS_CHANCE, rows);
+  const rows=Balance.BRIDGE_ROWS;
+  const stepChance=Balance.bridgeStepPassChance(currentTier);
   const progress=getTrialProgress();
   const failed=!!GF.trialJustFailed;
 
-  root.appendChild(h("div",{class:"panel"},[
-    h("div",{},[`Stage ${progress.stage+1} of ${stagesRequired}`]),
-    h("div",{class:"muted"},[`Odds per unknown plank: ${Math.round(rowChance*100)}%`]),
+  root.appendChild(h("div",{class:"panel",style:{marginBottom:"10px"}},[
+    h("div",{class:"flavor",style:{margin:"0"}},["Tread carefully, a wrong step is a costly investment."]),
   ]));
 
-  function attemptStep(side){
+  function attemptStep(plankIndex){
     if(failed) return;
-    const passed=Math.random()<rowChance;
+    const passed=Math.random()<stepChance;
     if(passed){
-      progress.discoveredSides.push(side);
+      progress.discoveredSides.push(plankIndex);
       autosave();
       if(progress.discoveredSides.length>=rows){
-        progress.stage++; progress.discoveredSides=[];
-        if(progress.stage>=stagesRequired){
-          const nameBefore=c.display_name, levelBefore=PS.level;
-          const result=PS.resolveMasterTrial(true);
-          PS.trial_progress[PS.class_id]={stage:0,discoveredSides:[]};
-          autosave();
-          Net.announceTrialResult({character_name:PS.character_name, level:levelBefore, class_name:nameBefore, result:"passed", new_class_name:DL.getClass(PS.class_id).display_name});
-          setToast(result.final_tier?`You have mastered the ${c.chain} path completely!`:`You are promoted to ${DL.getClass(PS.class_id).display_name}!`);
-          GF.goto("town"); return;
-        } else setToast(`Stage ${progress.stage} cleared! Onward.`);
+        const nameBefore=c.display_name, levelBefore=PS.level;
+        const result=PS.resolveMasterTrial(true);
+        PS.trial_progress[PS.class_id]={stage:0,discoveredSides:[]};
+        autosave();
+        Net.announceTrialResult({character_name:PS.character_name, level:levelBefore, class_name:nameBefore, result:"passed", new_class_name:DL.getClass(PS.class_id).display_name});
+        setToast(result.final_tier?`You have mastered the ${c.chain} path completely!`:`You are promoted to ${DL.getClass(PS.class_id).display_name}!`);
+        GF.goto("town"); return;
       }
       render();
     } else {
-      GF.trialJustFailed=true; GF.trialFailedSide=side; GF.trialFailedStepIndex=progress.discoveredSides.length;
+      GF.trialJustFailed=true; GF.trialFailedPlankIndex=plankIndex; GF.trialFailedStepIndex=progress.discoveredSides.length;
       setToast("The plank gives way beneath you! The attempt ends here.");
       Net.announceTrialResult({character_name:PS.character_name, level:PS.level, class_name:c.display_name, result:"failed", failed_step:progress.discoveredSides.length+1});
       PS.resolveMasterTrial(false);
@@ -2645,26 +2879,26 @@ function screenMasterTrial(){
   }
 
   // Horizontal layout: the bridge crosses left-to-right, one column per step, each
-  // column stacking its Top/Bottom plank choice vertically.
+  // column stacking that step's planks vertically (2 to 5 of them depending on tier).
   const plankCols=h("div",{class:"row gap",style:{overflowX:"auto",paddingBottom:"6px"}});
   for(let i=0;i<rows;i++){
-    const discoveredSide=progress.discoveredSides[i];
+    const discoveredPlank=progress.discoveredSides[i];
     const isCurrent=i===progress.discoveredSides.length && !failed;
     const isFailedStep=failed && i===GF.trialFailedStepIndex;
-    const col=h("div",{class:"col gap",style:{alignItems:"center"}},[
-      h("button",{class:"plank-btn"+(discoveredSide==="top"?" safe":(isFailedStep&&GF.trialFailedSide==="top"?" unsafe":"")),
+    const col=h("div",{class:"col gap",style:{alignItems:"center"}});
+    for(let p=0;p<plankCount;p++){
+      const isSafe=discoveredPlank===p;
+      const isUnsafe=isFailedStep && GF.trialFailedPlankIndex===p;
+      col.appendChild(h("button",{class:"plank-btn"+(isSafe?" safe":(isUnsafe?" unsafe":"")),
         disabled:!isCurrent,
-        onClick:()=>attemptStep("top")},["Top"]),
-      h("button",{class:"plank-btn"+(discoveredSide==="bottom"?" safe":(isFailedStep&&GF.trialFailedSide==="bottom"?" unsafe":"")),
-        disabled:!isCurrent,
-        onClick:()=>attemptStep("bottom")},["Bottom"]),
-    ]);
+        onClick:()=>attemptStep(p)},[inlineIcon(FOOTSTEP_SVG,16)]));
+    }
     plankCols.appendChild(col);
   }
   root.appendChild(plankCols);
 
   root.appendChild(h("div",{class:"row",style:{marginTop:"10px"}},[
-    h("button",{onClick:()=>{ GF.trialJustFailed=false; GF.trialFailedSide=null; GF.goto("town"); }},[failed?"Return to Town":"← Retreat to Town"]),
+    h("button",{onClick:()=>{ GF.trialJustFailed=false; GF.trialFailedPlankIndex=null; GF.goto("town"); }},[failed?"Return to Town":"← Retreat to Town"]),
   ]));
   return root;
 }
@@ -2772,6 +3006,7 @@ const SCREENS={
   inventory: screenInventory,
   blacksmith: screenBlacksmith,
   alchemist: screenAlchemist,
+  vault: screenVault,
   merchant: screenMerchant,
   auctionHouse: screenAuctionHouse,
   gamblingGoblin: screenGamblingGoblin,

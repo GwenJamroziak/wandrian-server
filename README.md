@@ -15,6 +15,18 @@ the seller's gold directly server-side (since the seller isn't present for the b
 request), and both sides get a private mailbox notification, delivered live over the
 chat WebSocket if they're online, or queued and delivered next time they connect.
 
+As of v0.11, there's also a Storage Vault: a 200-slot (20x10) stash shared across every
+character on one account, so gear or consumables you stash on one character can be pulled
+out on another. It's account-scoped, not character-scoped, and stored server-side as one
+row per account (`GET`/`PUT /api/vault`), both behind `requireAuth` only (no admin needed).
+Same security model as everything else in this phase: the account is always taken from
+`req.account.id`, derived from the caller's Bearer token, never from anything the client
+sends in the request body or URL, so there is no way for one account to read or overwrite
+another account's vault. The one caveat that still applies here too: like character saves,
+the vault's contents are a client-trusted full-replace payload (see the section above), so
+a player editing their own vault client-side to fabricate items is the same pre-existing
+class of issue as editing their own character save, not a new cross-account hole.
+
 What this phase does **not** do yet: stop a player from opening devtools on their own
 browser and editing the character JSON before it's sent to `PUT /api/characters/:slot`
 (gold, level, items, all still client-computed and just handed to the server as-is).

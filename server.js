@@ -33,6 +33,9 @@ const CORS_ORIGIN = process.env.CORS_ORIGIN || "*"; // lock this down to your re
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const MAX_CHARACTER_SLOTS = 6;
 const CHAT_HISTORY_LIMIT = 50;
+// Storage Vault (v0.11): a 20x10 (200-slot) shared chest, one per ACCOUNT rather than
+// per character, so every character on the same account can pull from the same stash.
+const VAULT_CAPACITY = 200;
 
 // Leaderboard-moderation token (v0.10.1): deliberately NOT the client's Dev Tools
 // "atldp0" password -- that one ships inside index.html, so anyone who views page
@@ -115,6 +118,11 @@ db.exec(`
     message TEXT NOT NULL,
     created_at TEXT NOT NULL,
     delivered INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS vaults (
+    account_id INTEGER PRIMARY KEY,
+    data TEXT NOT NULL,
+    updated_at TEXT NOT NULL
   );
 `);
 
@@ -340,6 +348,40 @@ app.delete("/api/characters/:slot", requireAuth, (req, res) => {
     );
   }
   db.prepare("DELETE FROM characters WHERE account_id = ? AND slot = ?").run(req.account.id, slot);
+  res.json({ ok: true });
+});
+
+/* Storage Vault (v0.11): one shared 200-slot chest per ACCOUNT (not per character), so
+   every character slot on the same account can deposit into and withdraw from the same
+   stash. Scoped strictly by req.account.id (set by requireAuth from the caller's own
+   session token) -- there is no accountId taken from the request body or URL anywhere
+   here, so there is no way to address another account's vault, logged-in or not.
+   Like character saves, this is a client-trusted full-replace blob for now (same caveat
+   as the rest of the game: combat/loot/inventory aren't server-verified yet). */
+app.get("/api/vault", requireAuth, (req, res) => {
+  const row = db.prepare("SELECT data FROM vaults WHERE account_id = ?").get(req.account.id);
+  let items = [];
+  if (row) {
+    try {
+      items = JSON.parse(row.data);
+    } catch (e) {
+      items = [];
+    }
+  }
+  res.json({ items, capacity: VAULT_CAPACITY });
+});
+
+app.put("/api/vault", requireAuth, (req, res) => {
+  const items = req.body && req.body.items;
+  if (!Array.isArray(items)) return res.status(400).json({ error: "items must be an array." });
+  if (items.length > VAULT_CAPACITY) {
+    return res.status(400).json({ error: `The vault only holds ${VAULT_CAPACITY} items.` });
+  }
+  const json = JSON.stringify(items);
+  db.prepare(
+    `INSERT INTO vaults (account_id, data, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(account_id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at`
+  ).run(req.account.id, json, nowIso());
   res.json({ ok: true });
 });
 
