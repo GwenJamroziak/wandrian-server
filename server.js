@@ -109,6 +109,7 @@ db.exec(`
 for (const stmt of [
   "ALTER TABLE leaderboard_bests ADD COLUMN hardcore INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE leaderboard_bests ADD COLUMN lifetime_xp INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE leaderboard_bests ADD COLUMN is_dead INTEGER NOT NULL DEFAULT 0",
 ]) {
   try { db.exec(stmt); } catch (e) { /* column already exists -- fine */ }
 }
@@ -250,8 +251,8 @@ app.put("/api/characters/:slot", requireAuth, (req, res) => {
   // Track this character's personal best for the leaderboard, independent of live deletion.
   if (data.character_name && data.class_display_name) {
     db.prepare(
-      `INSERT INTO leaderboard_bests (account_id, character_name, class_name, level, highest_tier_reached, gold, updated_at, hardcore, lifetime_xp)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO leaderboard_bests (account_id, character_name, class_name, level, highest_tier_reached, gold, updated_at, hardcore, lifetime_xp, is_dead)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
        ON CONFLICT(account_id, character_name) DO UPDATE SET
          class_name=excluded.class_name,
          level=MAX(leaderboard_bests.level, excluded.level),
@@ -259,7 +260,8 @@ app.put("/api/characters/:slot", requireAuth, (req, res) => {
          gold=MAX(leaderboard_bests.gold, excluded.gold),
          updated_at=excluded.updated_at,
          hardcore=excluded.hardcore,
-         lifetime_xp=MAX(leaderboard_bests.lifetime_xp, excluded.lifetime_xp)`
+         lifetime_xp=MAX(leaderboard_bests.lifetime_xp, excluded.lifetime_xp),
+         is_dead=0`
     ).run(
       req.account.id,
       data.character_name,
@@ -290,6 +292,12 @@ app.delete("/api/characters/:slot", requireAuth, (req, res) => {
       hardcore_death.cause || "Died in the wilds",
       nowIso()
     );
+    // Keep the leaderboard entry (don't delete it) but mark it dead so the client can
+    // render a tombstone / strikethrough instead of pretending they're still active.
+    db.prepare("UPDATE leaderboard_bests SET is_dead = 1 WHERE account_id = ? AND character_name = ?").run(
+      req.account.id,
+      hardcore_death.name || "Hero"
+    );
   }
   db.prepare("DELETE FROM characters WHERE account_id = ? AND slot = ?").run(req.account.id, slot);
   res.json({ ok: true });
@@ -305,8 +313,8 @@ app.get("/api/graveyard", requireAuth, (req, res) => {
 app.get("/api/leaderboard", (req, res) => {
   const rows = db
     .prepare(
-      `SELECT account_id, character_name, class_name, level, highest_tier_reached, gold, lifetime_xp, hardcore
-       FROM leaderboard_bests ORDER BY lifetime_xp DESC, level DESC, highest_tier_reached DESC, gold DESC LIMIT 50`
+      `SELECT account_id, character_name, class_name, level, highest_tier_reached, gold, lifetime_xp, hardcore, is_dead
+       FROM leaderboard_bests ORDER BY highest_tier_reached DESC, level DESC, lifetime_xp DESC, gold DESC LIMIT 50`
     )
     .all();
   // join usernames without leaking passcode data
@@ -321,6 +329,7 @@ app.get("/api/leaderboard", (req, res) => {
       gold: r.gold,
       lifetime_xp: r.lifetime_xp || 0,
       hardcore: !!r.hardcore,
+      is_dead: !!r.is_dead,
     };
   });
   res.json({ entries: withNames });
@@ -342,11 +351,13 @@ function broadcastSystemMessage(message) {
 }
 
 app.post("/api/announce/trial", requireAuth, (req, res) => {
-  const { character_name, level, class_name, result, new_class_name } = req.body || {};
+  const { character_name, level, class_name, result, new_class_name, failed_step } = req.body || {};
   if (!character_name || !class_name || (result !== "passed" && result !== "failed")) {
     return res.status(400).json({ error: "Invalid announcement." });
   }
-  const suffix = result === "passed" && new_class_name ? ` and is now a ${new_class_name}` : "";
+  let suffix = "";
+  if (result === "passed" && new_class_name) suffix = ` and is now a ${new_class_name}`;
+  else if (result === "failed" && failed_step) suffix = ` at step ${failed_step}`;
   broadcastSystemMessage(`${character_name} (Lv ${level || 1} ${class_name}) has ${result} the broken bridge trial${suffix}.`);
   res.json({ ok: true });
 });
