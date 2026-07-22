@@ -328,7 +328,7 @@ const Balance = {
   SALVAGE_MATERIALS_PER_SLOT:3, REROLL_MATERIAL_COST_MULT:2, SELL_GOLD_PER_TIER:8, SELL_GOLD_PER_SLOT:4,
   TRIAL_STAGE_PASS_CHANCE:0.65, TRIAL_MAX_STAGES:3, BRIDGE_ROWS_PER_STAGE:10,
   KILL_STREAK_STAT_GROWTH_PER_KILL:0.015, KILL_STREAK_LOOT_GROWTH_PER_KILL:0.02, KILL_STREAK_CAP:40,
-  ADMIN_PASSWORD:"atldp0", MAX_CHARACTER_SLOTS:6,
+  MAX_CHARACTER_SLOTS:6,
   MASTER_TRIAL_LEVEL_REQUIREMENT:10, // temporarily lowered from LEVEL_CAP for early-access feedback; set back to LEVEL_CAP for the 1.0 launch
   EYESIGHT_AFFIX_CHANCE:0.03, ELIXIR_EYESIGHT_STEPS:500, RARE_HERB_CHANCE:0.06,
   BRIDGE_ROWS_PER_ATTEMPT:10,
@@ -606,9 +606,13 @@ const Net = {
     const json=await res.json().catch(()=>({entries:[]}));
     this.leaderboardCache=json.entries||[];
   },
-  // Leaderboard moderation (Dev Tools only): a separate, server-verified admin token,
-  // never the client's cosmetic Dev Tools password. Not persisted anywhere -- typed in
-  // fresh each session, sent only in the X-Admin-Token header of these two calls.
+  // Admin token (Dev Tools gate + leaderboard moderation): server-verified only, never
+  // embedded in the client. Not persisted anywhere -- typed in fresh each session, sent
+  // only in the X-Admin-Token header of these calls.
+  async verifyAdminToken(adminToken){
+    const res=await fetch(this.apiBase()+"/api/admin/verify",{headers:this.authHeaders({"X-Admin-Token":adminToken})});
+    return res.ok;
+  },
   async fetchAdminLeaderboard(adminToken){
     const res=await fetch(this.apiBase()+"/api/admin/leaderboard",{headers:this.authHeaders({"X-Admin-Token":adminToken})});
     const json=await res.json().catch(()=>({}));
@@ -2671,9 +2675,18 @@ function screenAdminPanel(){
   const root=h("div",{});
   root.appendChild(h("h2",{},["Dev Tools"]));
   if(!GF.admin_unlocked){
-    const pw=h("input",{type:"text",placeholder:"password"});
-    root.appendChild(h("div",{class:"row gap"},[pw,
-      h("button",{onClick:()=>{ if(pw.value===Balance.ADMIN_PASSWORD){GF.admin_unlocked=true;} else setToast("Incorrect password."); render(); }},["Unlock"]),
+    root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},[
+      "Dev Tools is gated by the server's real admin token (the ADMIN_TOKEN environment variable set on the server), there's no password stored in this page.",
+    ]));
+    const tokenInput=h("input",{type:"password",placeholder:"Admin token"});
+    root.appendChild(h("div",{class:"row gap"},[tokenInput,
+      h("button",{onClick:async ()=>{
+        const value=tokenInput.value||"";
+        let ok=false;
+        try{ ok=await Net.verifyAdminToken(value); }catch(e){ ok=false; }
+        if(ok){ GF.admin_unlocked=true; GF.admin_token=value; } else setToast("Invalid admin token.");
+        render();
+      }},["Unlock"]),
     ]));
     const t=toastBox(); if(t) root.appendChild(t);
     root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
@@ -2691,12 +2704,9 @@ function screenAdminPanel(){
 
   root.appendChild(h("h3",{style:{marginTop:"18px"}},["Leaderboard Moderation"]));
   root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},[
-    "Remove buggy or clearly-cheated entries from the shared leaderboard. Requires the server's real admin token (set via the ADMIN_TOKEN environment variable on the server), separate from the Dev Tools password above.",
+    "Remove buggy or clearly-cheated entries from the shared leaderboard, using the same admin token you unlocked Dev Tools with.",
   ]));
-  const tokenInput=h("input",{type:"password",placeholder:"Admin token",value:GF.admin_token||""});
-  tokenInput.addEventListener("input",()=>{ GF.admin_token=tokenInput.value; });
   root.appendChild(h("div",{class:"row gap",style:{marginBottom:"8px"}},[
-    tokenInput,
     h("button",{onClick:async ()=>{
       GF.admin_leaderboard_error="";
       try{

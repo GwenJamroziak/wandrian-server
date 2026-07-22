@@ -382,6 +382,12 @@ app.get("/api/leaderboard", (req, res) => {
    row (the ranking entry itself), not the underlying character save, graveyard
    history, or account -- it just takes the entry off the ladder. */
 
+// Lets the client confirm a typed-in token is the real ADMIN_TOKEN before unlocking
+// Dev Tools, without ever embedding the secret itself in the client code.
+app.get("/api/admin/verify", requireAuth, requireAdmin, (req, res) => {
+  res.json({ ok: true });
+});
+
 app.get("/api/admin/leaderboard", requireAuth, requireAdmin, (req, res) => {
   const rows = db
     .prepare(
