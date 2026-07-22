@@ -33,13 +33,14 @@ button{
 }
 button:hover:not(:disabled){background:#3a4a2a;border-color:#5a7a3a;}
 button:disabled{opacity:.45;cursor:not-allowed;}
-button.play:hover:not(:disabled){background:#2e4a78;border-color:#5a8ac9;font-weight:bold;}
+button.play:hover:not(:disabled){background:#3a4a2a;border-color:#5a7a3a;}
 button.danger:hover:not(:disabled){background:#5a2a24;border-color:#8a4a3a;}
 button.wide{width:100%;}
-input[type=text]{
+input[type=text],input[type=password],input[type=email]{
   font-family:inherit;background:#1a1c14;border:1px solid var(--border);color:var(--text);
   border-radius:5px;padding:8px 10px;font-size:.95em;
 }
+.social-login-btn{display:flex;align-items:center;justify-content:center;gap:8px;}
 .bar-bg{background:#000;border-radius:4px;overflow:hidden;height:16px;border:1px solid rgba(255,255,255,.08);}
 .bar-fill{height:100%;transition:width .25s;}
 .bar-hp{background:var(--hp);} .bar-stamina{background:var(--stamina);} .bar-xp{background:var(--xp);} .bar-gold{background:var(--gold);} .bar-brew{background:#c9a04a;}
@@ -83,11 +84,15 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 .plank-btn{min-width:52px;}
 .plank-btn.safe{background:#254a25;color:#9fe89f;border-color:#3a7a3a;}
 .plank-btn.unsafe{background:#4a2020;color:#e89f9f;border-color:#7a3a3a;}
-.maze-overlay-full{position:fixed;top:0;left:0;width:100vw;height:100vh;background:#000;display:flex;align-items:center;justify-content:center;z-index:200;opacity:1;transition:opacity 1.3s ease;}
-.maze-overlay-full.fade{opacity:0;}
-.maze-overlay-text{color:#e8d24a;font-size:3em;font-weight:bold;letter-spacing:2px;text-shadow:0 0 18px rgba(232,210,74,.6);}
+.maze-overlay-grid{position:absolute;top:0;left:0;width:100%;height:100%;background:#000;display:flex;align-items:center;justify-content:center;z-index:20;opacity:1;transition:opacity 1.3s ease;text-align:center;}
+.maze-overlay-grid.fade{opacity:0;}
+.maze-overlay-text{color:#e8d24a;font-size:1.8em;font-weight:bold;letter-spacing:1.5px;text-shadow:0 0 18px rgba(232,210,74,.6);padding:0 10px;}
 .depth-stepper{display:flex;align-items:center;gap:8px;}
 .depth-stepper button{padding:4px 12px;font-size:1.1em;}
+.venture-card{padding:18px;display:flex;flex-direction:column;gap:12px;}
+.venture-action{cursor:pointer;padding:2px;border-radius:5px;transition:.12s;}
+.venture-action:hover{background:#3a4a2a;}
+.venture-title{font-size:1.25em;font-weight:bold;}
 </style>
 </head>
 <body>
@@ -97,7 +102,7 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 "use strict";
 
 /* =========================================================================
-   EVERGRIND -- browser port
+   WANDRIAN, browser port
    Faithful re-implementation of the Godot/GDScript build's data + balance
    + core loop as a single self-contained HTML/JS file, so it can be hosted
    on literally any static host (no export templates, no COOP/COEP headers
@@ -107,20 +112,28 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 
 /* ---------- DATA ---------- */
 
+// base_str/base_dex/base_vit/base_int: level-1 attribute values for a fresh character
+// (or a character freshly promoted into this class, since a Broken Bridge Challenge
+// promotion resets level and attributes to the new class's own level-1 baseline). Each
+// chain has one specialization stat that's clearly highest for that chain: Thornguard
+// leans Strength+Vitality, Windrider leans Dexterity, Wizard leans Intelligence, see
+// PS.getTotalAttr()/getDamageRange()/getBlockChance() for what each attribute actually does.
 const CLASSES = {
-  wizard:{display_name:"Wizard",chain:"wizard",tier:1,next_class:"sorcerer",role:"damage",description:"Fragile but hits hard with raw magic.",base_hp:60,hp_per_level:8,base_damage_min:8,base_damage_max:14,damage_per_level:1.4,base_crit:0.05,armor:0.0,regen:0.0},
-  thornguard:{display_name:"Thornguard",chain:"thornguard",tier:1,next_class:"stonewarden",role:"tank",description:"Bark-skinned front-liner who shrugs off damage like rain off leaves.",base_hp:100,hp_per_level:14,base_damage_min:6,base_damage_max:10,damage_per_level:1.1,base_crit:0.05,armor:0.15,regen:0.0},
-  windrider:{display_name:"Windrider",chain:"windrider",tier:1,next_class:"galestrider",role:"damage",description:"Balanced fighter, quick as a gust through the canopy, high crit chance.",base_hp:75,hp_per_level:10,base_damage_min:7,base_damage_max:12,damage_per_level:1.2,base_crit:0.20,armor:0.0,regen:0.0},
-  sorcerer:{display_name:"Sorcerer",chain:"wizard",tier:2,next_class:"warlock",role:"damage",description:"Channels bigger, wilder spells than a Wizard ever could.",base_hp:80,hp_per_level:10,base_damage_min:12,base_damage_max:20,damage_per_level:1.9,base_crit:0.08,armor:0.0,regen:0.0},
-  stonewarden:{display_name:"Stonewarden",chain:"thornguard",tier:2,next_class:"treesinger",role:"tank",description:"Trades a little bark for a lot of stone -- heavier, harder to put down.",base_hp:140,hp_per_level:18,base_damage_min:10,base_damage_max:16,damage_per_level:1.6,base_crit:0.10,armor:0.12,regen:0.0},
-  galestrider:{display_name:"Galestrider",chain:"windrider",tier:2,next_class:"shadowbloom",role:"stealth",description:"Faster, sharper, deadlier with every shot on the wind.",base_hp:100,hp_per_level:13,base_damage_min:11,base_damage_max:18,damage_per_level:1.7,base_crit:0.25,armor:0.0,regen:0.0},
-  warlock:{display_name:"Warlock",chain:"wizard",tier:3,next_class:"necromancer",role:"summoner",description:"Dark pacts trade a little self-healing for serious power.",base_hp:105,hp_per_level:13,base_damage_min:16,base_damage_max:26,damage_per_level:2.4,base_crit:0.10,armor:0.0,regen:1.0},
-  treesinger:{display_name:"Treesinger",chain:"thornguard",tier:3,next_class:"rootbinder",role:"hybrid",description:"Calls the grove to its side -- disciplined, and mends wounds mid-fight.",base_hp:160,hp_per_level:20,base_damage_min:14,base_damage_max:22,damage_per_level:2.0,base_crit:0.15,armor:0.18,regen:2.5},
-  shadowbloom:{display_name:"Shadowbloom",chain:"windrider",tier:3,next_class:"druid",role:"stealth",description:"Blooms in the shadows between strikes -- pure burst damage built around crits.",base_hp:125,hp_per_level:16,base_damage_min:18,base_damage_max:28,damage_per_level:2.4,base_crit:0.35,armor:0.0,regen:0.0},
-  necromancer:{display_name:"Necromancer",chain:"wizard",tier:4,next_class:null,role:"summoner",description:"Wizard chain's endgame form -- commands dark power and a steady drain of life.",base_hp:135,hp_per_level:17,base_damage_min:22,base_damage_max:34,damage_per_level:3.0,base_crit:0.12,armor:0.0,regen:1.5},
-  rootbinder:{display_name:"Rootbinder",chain:"thornguard",tier:4,next_class:"emberpriest",role:"hybrid",description:"Binds foes in living roots to shield its allies -- heals as reliably as it blocks.",base_hp:210,hp_per_level:26,base_damage_min:18,base_damage_max:28,damage_per_level:2.6,base_crit:0.12,armor:0.25,regen:3.5},
-  druid:{display_name:"Druid",chain:"windrider",tier:4,next_class:null,role:"hybrid",description:"Windrider chain's endgame form -- nature's balance of bite and resilience.",base_hp:160,hp_per_level:20,base_damage_min:24,base_damage_max:36,damage_per_level:3.1,base_crit:0.20,armor:0.08,regen:2.0},
-  emberpriest:{display_name:"Emberpriest",chain:"thornguard",tier:5,next_class:null,role:"healer",description:"Thornguard chain's endgame form -- carries the last ember, trades raw damage for huge sustain.",base_hp:190,hp_per_level:24,base_damage_min:16,base_damage_max:24,damage_per_level:2.3,base_crit:0.10,armor:0.20,regen:6.0},
+  wizard:{display_name:"Wizard",chain:"wizard",tier:1,next_class:"sorcerer",role:"damage",description:"Fragile but hits hard with raw magic.",base_hp:60,hp_per_level:8,base_damage_min:8,base_damage_max:14,damage_per_level:1.4,base_crit:0.05,armor:0.0,regen:0.0,base_str:5,base_dex:5,base_vit:6,base_int:16},
+  thornguard:{display_name:"Thornguard",chain:"thornguard",tier:1,next_class:"stonewarden",role:"tank",description:"Bark-skinned front-liner who shrugs off damage like rain off leaves.",base_hp:100,hp_per_level:14,base_damage_min:6,base_damage_max:10,damage_per_level:1.1,base_crit:0.05,armor:0.15,regen:0.0,base_str:16,base_dex:5,base_vit:16,base_int:5},
+  windrider:{display_name:"Windrider",chain:"windrider",tier:1,next_class:"galestrider",role:"damage",description:"Balanced fighter, quick as a gust through the canopy, high crit chance.",base_hp:75,hp_per_level:10,base_damage_min:7,base_damage_max:12,damage_per_level:1.2,base_crit:0.20,armor:0.0,regen:0.0,base_str:6,base_dex:16,base_vit:9,base_int:5},
+  sorcerer:{display_name:"Sorcerer",chain:"wizard",tier:2,next_class:"warlock",role:"damage",description:"Channels bigger, wilder spells than a Wizard ever could.",base_hp:80,hp_per_level:10,base_damage_min:12,base_damage_max:20,damage_per_level:1.9,base_crit:0.08,armor:0.0,regen:0.0,base_str:5,base_dex:6,base_vit:8,base_int:21},
+  stonewarden:{display_name:"Stonewarden",chain:"thornguard",tier:2,next_class:"treesinger",role:"tank",description:"Trades a little bark for a lot of stone, heavier, harder to put down.",base_hp:140,hp_per_level:18,base_damage_min:10,base_damage_max:16,damage_per_level:1.6,base_crit:0.10,armor:0.12,regen:0.0,base_str:20,base_dex:6,base_vit:21,base_int:5},
+  galestrider:{display_name:"Galestrider",chain:"windrider",tier:2,next_class:"shadowbloom",role:"stealth",description:"Faster, sharper, deadlier with every shot on the wind.",base_hp:100,hp_per_level:13,base_damage_min:11,base_damage_max:18,damage_per_level:1.7,base_crit:0.25,armor:0.0,regen:0.0,base_str:7,base_dex:21,base_vit:11,base_int:5},
+  warlock:{display_name:"Warlock",chain:"wizard",tier:3,next_class:"necromancer",role:"summoner",description:"Dark pacts trade a little self-healing for serious power.",base_hp:105,hp_per_level:13,base_damage_min:16,base_damage_max:26,damage_per_level:2.4,base_crit:0.10,armor:0.0,regen:1.0,base_str:6,base_dex:7,base_vit:10,base_int:27},
+  treesinger:{display_name:"Treesinger",chain:"thornguard",tier:3,next_class:"rootbinder",role:"hybrid",description:"Calls the grove to its side, disciplined, and mends wounds mid-fight.",base_hp:160,hp_per_level:20,base_damage_min:14,base_damage_max:22,damage_per_level:2.0,base_crit:0.15,armor:0.18,regen:2.5,base_str:23,base_dex:8,base_vit:25,base_int:8},
+  shadowbloom:{display_name:"Shadowbloom",chain:"windrider",tier:3,next_class:"druid",role:"stealth",description:"Blooms in the shadows between strikes, pure burst damage built around crits.",base_hp:125,hp_per_level:16,base_damage_min:18,base_damage_max:28,damage_per_level:2.4,base_crit:0.35,armor:0.0,regen:0.0,base_str:8,base_dex:27,base_vit:13,base_int:6},
+  necromancer:{display_name:"Necromancer",chain:"wizard",tier:4,next_class:"archmage",role:"summoner",description:"Commands dark power and a steady drain of life.",base_hp:135,hp_per_level:17,base_damage_min:22,base_damage_max:34,damage_per_level:3.0,base_crit:0.12,armor:0.0,regen:1.5,base_str:7,base_dex:8,base_vit:12,base_int:33},
+  rootbinder:{display_name:"Rootbinder",chain:"thornguard",tier:4,next_class:"emberpriest",role:"hybrid",description:"Binds foes in living roots to shield its allies, heals as reliably as it blocks.",base_hp:210,hp_per_level:26,base_damage_min:18,base_damage_max:28,damage_per_level:2.6,base_crit:0.12,armor:0.25,regen:3.5,base_str:27,base_dex:9,base_vit:31,base_int:10},
+  druid:{display_name:"Druid",chain:"windrider",tier:4,next_class:"galeshaper",role:"hybrid",description:"Nature's balance of bite and resilience.",base_hp:160,hp_per_level:20,base_damage_min:24,base_damage_max:36,damage_per_level:3.1,base_crit:0.20,armor:0.08,regen:2.0,base_str:9,base_dex:31,base_vit:16,base_int:8},
+  emberpriest:{display_name:"Emberpriest",chain:"thornguard",tier:5,next_class:null,role:"healer",description:"Thornguard chain's endgame form, carries the last ember, trades raw damage for huge sustain.",base_hp:190,hp_per_level:24,base_damage_min:16,base_damage_max:24,damage_per_level:2.3,base_crit:0.10,armor:0.20,regen:6.0,base_str:29,base_dex:10,base_vit:37,base_int:14},
+  archmage:{display_name:"Archmage",chain:"wizard",tier:5,next_class:null,role:"damage",description:"Wizard chain's endgame form, raw magic mastered to its limit.",base_hp:165,hp_per_level:21,base_damage_min:28,base_damage_max:42,damage_per_level:3.6,base_crit:0.15,armor:0.0,regen:2.0,base_str:8,base_dex:9,base_vit:14,base_int:41},
+  galeshaper:{display_name:"Galeshaper",chain:"windrider",tier:5,next_class:null,role:"hybrid",description:"Windrider chain's endgame form, moves as one with the wind itself.",base_hp:195,hp_per_level:25,base_damage_min:30,base_damage_max:44,damage_per_level:3.8,base_crit:0.28,armor:0.10,regen:2.4,base_str:10,base_dex:37,base_vit:19,base_int:10},
 };
 
 const MONSTERS = [
@@ -165,7 +178,7 @@ const HERBS = {
   moonleaf:{name:"Moonleaf",found_in:"Herb nodes in any maze."},
   emberroot:{name:"Ember Root",found_in:"Herb nodes in any maze; also drops from uncommon-tier kills."},
   frostvine:{name:"Frostvine",found_in:"Herb nodes in any maze; also drops from rare/epic-tier kills."},
-  starveil:{name:"Starveil Petal",found_in:"A rare find in herb nodes -- most travelers never spot one.",rare:true},
+  starveil:{name:"Starveil Petal",found_in:"A rare find in herb nodes, most travelers never spot one.",rare:true},
 };
 
 const RECIPES = [
@@ -197,9 +210,11 @@ emberpriest:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circ
 galestrider:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#cfe4ea"/><ellipse cx="70" cy="88" rx="30" ry="35" fill="#2e5a68"/><circle cx="70" cy="50" r="19" fill="#e8c9a0"/><path d="M 54,46 Q 70,40 86,46 L 84,54 Q 70,50 56,54 Z" fill="#1c3a44"/><path d="M 40,92 Q 70,74 100,92 L 94,114 Q 70,124 46,114 Z" fill="#3f7a8a"/><path d="M 40,90 L 20,100 L 38,102 Z" fill="#8fd0dc"/><path d="M 100,90 L 120,100 L 102,102 Z" fill="#8fd0dc"/><path d="M 44,110 L 24,124 L 44,120 Z" fill="#6fb0c0"/><path d="M 96,110 L 116,124 L 96,120 Z" fill="#6fb0c0"/></svg>`,
 shadowbloom:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#c0b0c8"/><ellipse cx="70" cy="88" rx="30" ry="35" fill="#241830"/><circle cx="70" cy="50" r="19" fill="#d8b0a8"/><path d="M 54,46 Q 70,40 86,46 L 84,54 Q 70,50 56,54 Z" fill="#180f1e"/><path d="M 40,90 Q 70,72 100,90 L 94,112 Q 70,122 46,112 Z" fill="#3a2444"/><g fill="#e05fa0"><circle cx="40" cy="94" r="5"/><circle cx="34" cy="90" r="3.5"/><circle cx="46" cy="88" r="3.5"/><circle cx="100" cy="94" r="5"/><circle cx="106" cy="90" r="3.5"/><circle cx="94" cy="88" r="3.5"/></g><circle cx="40" cy="94" r="2" fill="#fff0a0"/><circle cx="100" cy="94" r="2" fill="#fff0a0"/></svg>`,
 druid:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#d8e0c4"/><ellipse cx="70" cy="88" rx="32" ry="36" fill="#5a4a2e"/><circle cx="70" cy="50" r="19" fill="#c99a70"/><circle cx="63" cy="49" r="2.4" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.4" fill="#2a2a2a"/><path d="M 40,92 Q 70,74 100,92 L 94,116 Q 70,126 46,116 Z" fill="#3f6b3f"/><path d="M 56,38 Q 48,26 38,24 Q 48,32 50,42 M 50,32 Q 42,28 36,30" stroke="#7a5a3a" stroke-width="2.2" fill="none"/><path d="M 84,38 Q 92,26 102,24 Q 92,32 90,42 M 90,32 Q 98,28 104,30" stroke="#7a5a3a" stroke-width="2.2" fill="none"/><polygon points="62,40 70,22 78,40" fill="#4fae4f"/></svg>`,
+archmage:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#8a7ab8"/><ellipse cx="70" cy="88" rx="33" ry="37" fill="#241a4a"/><circle cx="70" cy="50" r="19" fill="#e0c9a8"/><circle cx="63" cy="49" r="2.6" fill="#ffe98a"/><circle cx="77" cy="49" r="2.6" fill="#ffe98a"/><path d="M 38,92 Q 70,72 102,92 L 96,120 Q 70,132 44,120 Z" fill="#332470"/><path d="M 70,8 L 96,50 Q 70,40 44,50 Z" fill="#7a5fce"/><circle cx="70" cy="16" r="5" fill="#ffe98a"/><circle cx="100" cy="86" r="12" fill="#c9b3ff" opacity="0.85"/><circle cx="100" cy="86" r="18" fill="#c9b3ff" opacity="0.3"/><circle cx="40" cy="86" r="8" fill="#c9b3ff" opacity="0.5"/></svg>`,
+galeshaper:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#c8ecec"/><ellipse cx="70" cy="88" rx="31" ry="36" fill="#1f6a6a"/><circle cx="70" cy="50" r="19" fill="#e8c9a0"/><path d="M 54,46 Q 70,40 86,46 L 84,54 Q 70,50 56,54 Z" fill="#134646"/><path d="M 40,92 Q 70,72 100,92 L 94,118 Q 70,128 46,118 Z" fill="#2a8a8a"/><path d="M 26,66 Q 70,46 114,66" stroke="#bdf2f2" stroke-width="5" fill="none" opacity="0.9"/><path d="M 30,80 Q 70,62 110,80" stroke="#8fe0e0" stroke-width="4" fill="none" opacity="0.7"/><path d="M 40,114 L 16,132 L 40,122 Z" fill="#7fd4d4"/><path d="M 100,114 L 124,132 L 100,122 Z" fill="#7fd4d4"/></svg>`,
 };
 
-/* Procedurally-generated monster portraits (placeholder art -- swap in bespoke assets any time
+/* Procedurally-generated monster portraits (placeholder art, swap in bespoke assets any time
    by replacing monsterPortrait() with a lookup into a real MONSTER_PORTRAITS map). Deterministic
    per monster id so the same monster always looks the same; a "slain" variant is derived from
    the same shape with X eyes, a lolling tongue, and a dizzy swirl for the post-combat view. */
@@ -232,7 +247,7 @@ const CHARSELECT_BG_SVG = `<svg width="100%" height="100%" viewBox="0 0 900 200"
 
 function inlineIcon(svg,size=18){ const d=h("span",{style:{display:"inline-flex",alignItems:"center",justifyContent:"center",width:size+"px",height:size+"px",verticalAlign:"middle"}}); d.innerHTML=svg; return d; }
 
-/* Procedural placeholder art for potions/scrolls/bags -- each item id gets its own hue so
+/* Procedural placeholder art for potions/scrolls/bags, each item id gets its own hue so
    different items (and different tiers of the same base type) read as visually distinct.
    Swap these for real art any time; nothing else needs to change. */
 function itemIconSvg(itemId){
@@ -254,7 +269,7 @@ function itemIconSvg(itemId){
 }
 function itemIcon(itemId,size=26){ return iconBadge(itemIconSvg(itemId),size); }
 
-/* Procedural placeholder art for equippable gear -- shape varies by slot type, color
+/* Procedural placeholder art for equippable gear, shape varies by slot type, color
    follows the Diablo-style rarity palette (grey/white/blue/yellow/gold) so different
    tiers and rarities of the same base item read as visually distinct at a glance. */
 const RARITY_ICON_COLORS={Common:"#9a9686",Uncommon:"#e8e4d8",Rare:"#5a9ae0",Epic:"#e0c94a",Legendary:"#d9902f"};
@@ -283,9 +298,13 @@ const Balance = {
   LEVEL_CAP:60, KILLS_PER_LEVEL_TARGET:20, MONSTER_BASE_XP:8.0, AREA_XP_GROWTH:0.062,
   AREA_LEVEL_MIN:1, AREA_LEVEL_MAX:100, AREA_HP_GROWTH:0.07, AREA_DAMAGE_GROWTH:0.05, AREA_LOOT_GROWTH:0.05,
   CRIT_MULTIPLIER:1.75, DEATH_GOLD_LOSS_PCT:0.10,
-  ENCOUNTER_CHANCE_PER_STEP:0.12, TRAP_CHANCE_PER_TILE:0.04,
+  ENCOUNTER_CHANCE_PER_STEP:0.12, TRAP_CHANCE_PER_TILE:0.05,
   OBSTACLE_DENSITY:0.25, GRASS_PATCH_COUNT:18,
-  MAZE_CHEST_COUNT:2, MAZE_SHRINE_COUNT:2, MAZE_HERB_COUNT:3, MAZE_TRAPDOOR_COUNT:2,
+  // Independent per-tile roll chances (a 20x10 maze = 200 tiles), replacing the old
+  // fixed-count-per-maze model: chest 0.05% (~1 chest per 10 mazes), herb 0.20%
+  // (~1 per 2.5 mazes), shrine 0.10% (~1 per 5 mazes), trapdoor 0.5% (~1 per maze).
+  MAZE_CHEST_CHANCE_PER_TILE:0.0005, MAZE_SHRINE_CHANCE_PER_TILE:0.001,
+  MAZE_HERB_CHANCE_PER_TILE:0.002, MAZE_TRAPDOOR_CHANCE_PER_TILE:0.005,
   STAMINA_MAX_BASE:100.0, STAMINA_COST_PER_STEP:1.0,
   SHRINE_STAMINA_BUFF_PCT:1.0, SHRINE_XP_BUFF_MULT:1.5, SHRINE_XP_BUFF_ENCOUNTERS:20,
   TRAP_DAMAGE_MIN:4.0, TRAP_DAMAGE_MAX:12.0, TRAP_STAMINA_LOSS:20.0,
@@ -296,14 +315,14 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.9-web",
+  GAME_VERSION:"v0.10-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   NPC_BLACKSMITH_NAME:"Grondar Emberhand", NPC_ALCHEMIST_NAME:"Maren Thistlebrew", NPC_MERCHANT_NAME:"Cassius Wraithcoin",
   NPC_GOBLIN_NAME:"Grimsnick the Sackrattler",
   ITEM_TIER_MAX:5, ITEM_STAT_PER_TIER:5, ITEM_TIER_ADJECTIVES:["Withered","Budding","Blooming","Ancient","Eternal"],
   RARITY_TABLE:[{name:"Common",slots:1,weight:60},{name:"Uncommon",slots:2,weight:25},{name:"Rare",slots:3,weight:10},{name:"Epic",slots:5,weight:4},{name:"Legendary",slots:8,weight:1}],
-  AFFIX_POOL:["damage","hp","crit","armor","regen","gold_find","xp_find","stamina_max"],
+  AFFIX_POOL:["damage","hp","crit","armor","regen","gold_find","xp_find","stamina_max","strength","dexterity","vitality","intelligence"],
   BASE_INVENTORY_SLOTS:16, MAX_BAG_SLOTS:3, BAG_BUY_GOLD_PER_CAPACITY:4, BAG_CRAFT_MATERIALS_PER_CAPACITY:3,
   VENDOR_MARKUP:3,
   SALVAGE_MATERIALS_PER_SLOT:3, REROLL_MATERIAL_COST_MULT:2, SELL_GOLD_PER_TIER:8, SELL_GOLD_PER_SLOT:4,
@@ -314,6 +333,13 @@ const Balance = {
   EYESIGHT_AFFIX_CHANCE:0.03, ELIXIR_EYESIGHT_STEPS:500, RARE_HERB_CHANCE:0.06,
   BRIDGE_ROWS_PER_ATTEMPT:10,
   GAMBLE_ITEM_COST:800, GAMBLE_REVEAL_MS:2000,
+
+  // Stat Points / Attributes (v0.10): +3 points per level-up, spent on Strength/Dexterity/
+  // Vitality/Intelligence. See PS.getTotalAttr()/getDamageRange()/getBlockChance()/addXp()
+  // for exactly how each attribute is used per class chain, summarized on the Player
+  // Classes screen too.
+  STAT_POINTS_PER_LEVEL:3,
+  BLOCK_CHANCE_PER_DEX:0.005, BLOCK_CHANCE_MAX:0.60,
 
   killStreakStatMult(s){return 1.0+this.KILL_STREAK_STAT_GROWTH_PER_KILL*Math.min(s,this.KILL_STREAK_CAP);},
   killStreakLootMult(s){return 1.0+this.KILL_STREAK_LOOT_GROWTH_PER_KILL*Math.min(s,this.KILL_STREAK_CAP);},
@@ -452,6 +478,7 @@ const IF = {
       case "damage": return "Damage"; case "hp": return "Hit Points"; case "crit": return "Critical Strike";
       case "armor": return "Armor"; case "regen": return "Regeneration"; case "gold_find": return "Gold Found";
       case "xp_find": return "Experience Gained"; case "stamina_max": return "Stamina"; case "eyesight": return "Eyesight";
+      case "strength": return "Strength"; case "dexterity": return "Dexterity"; case "vitality": return "Vitality"; case "intelligence": return "Intelligence";
       default: return stat;
     }
   },
@@ -483,21 +510,20 @@ function shuffle(arr){for(let i=arr.length-1;i>0;i--){const j=randi(i+1);[arr[i]
    e.g. when a file is opened directly via file:// in some browsers) ---------- */
 const Storage_ = {
   available:true, _mem:{},
-  init(){ try{ window.localStorage.setItem("__evergrind_test__","1"); window.localStorage.removeItem("__evergrind_test__"); this.available=true; }catch(e){ this.available=false; } },
+  init(){ try{ window.localStorage.setItem("__wandrian_test__","1"); window.localStorage.removeItem("__wandrian_test__"); this.available=true; }catch(e){ this.available=false; } },
   getItem(k){ return this.available ? window.localStorage.getItem(k) : (Object.prototype.hasOwnProperty.call(this._mem,k)?this._mem[k]:null); },
   setItem(k,v){ if(this.available) window.localStorage.setItem(k,v); else this._mem[k]=v; },
   removeItem(k){ if(this.available) window.localStorage.removeItem(k); else delete this._mem[k]; },
 };
 Storage_.init();
 
-/* ---------- Networking: optional online mode against evergrind-server ----------
-   The game works two ways:
-   - Play Offline: everything below falls back to Storage_ (this browser only), exactly
-     like the original single-file build. No accounts, no chat, no leaderboard.
-   - Log In / Register: saves, the graveyard and the leaderboard live on a real server
-     (see evergrind-server/), so friends can share a hosted link and see each other in
-     chat and on the leaderboard. A `?api=https://example.com` query param can point the
-     client at a server hosted on a different origin than the page itself. ---------- */
+/* ---------- Networking: Wandrian is online-only (v0.10) ----------
+   Log In / Register puts saves, the graveyard and the leaderboard on a real server
+   (see the server folder), so friends can share a hosted link and see each other in
+   chat and on the leaderboard. A `?api=https://example.com` query param can point the
+   client at a server hosted on a different origin than the page itself. The old
+   Play Offline / Storage_-only mode has been removed from the UI; Storage_ itself is
+   kept only as the localStorage wrapper for session-token persistence. ---------- */
 
 const NET_TOKEN_KEY="wandrian_web_token";
 const NET_USERNAME_KEY="wandrian_web_username";
@@ -529,8 +555,8 @@ const Net = {
     }
   },
   authHeaders(extra={}){ return Object.assign({"Authorization":"Bearer "+this.token}, extra); },
-  async register(username,passcode){
-    const res=await fetch(this.apiBase()+"/api/register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username,passcode})});
+  async register(username,passcode,email){
+    const res=await fetch(this.apiBase()+"/api/register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username,passcode,email:email||undefined})});
     const json=await res.json().catch(()=>({}));
     if(!res.ok) throw new Error(json.error||"Registration failed.");
     return json;
@@ -639,8 +665,8 @@ const Net = {
 
 /* ---------- Save slots / Graveyard ---------- */
 
-const SAVE_KEY=(slot)=>`evergrind_web_slot_${slot}`;
-const GRAVEYARD_KEY="evergrind_web_graveyard";
+const SAVE_KEY=(slot)=>`wandrian_web_slot_${slot}`;
+const GRAVEYARD_KEY="wandrian_web_graveyard";
 
 function hasSave(slot){return Storage_.getItem(SAVE_KEY(slot))!==null;}
 function loadSaveRaw(slot){
@@ -690,7 +716,37 @@ const PS = {
   highest_tier_reached:1, season_won:false, kill_streak:0, hardcore:false, current_slot:-1,
   lifetime_xp:0, isRestingAtCampfire:false, eyesight_potion_steps_left:0, max_maze_depth_reached:1,
 
+  // Stat Points / Attributes (v0.10). `attributes` is base class value + spent points
+  // only, it deliberately excludes gear, see getTotalAttr(). `bonus_hp_from_attributes`/
+  // `bonus_stamina_from_attributes` are cumulative totals built up one level-up at a time
+  // (see addXp()): each level-up adds that moment's Vitality (and, for the paths where
+  // Strength grants HP instead of damage, that moment's Strength too) to these pools, and
+  // the pools only ever grow, previously granted HP/Stamina isn't lost by reallocating
+  // points later, matching a real Diablo-style build where early investment compounds.
+  attributes:{str:0,dex:0,vit:0,int:0}, unspent_stat_points:0,
+  bonus_hp_from_attributes:0, bonus_stamina_from_attributes:0,
+
   getClassData(){return DL.getClass(this.class_id);},
+  getTotalAttr(key){
+    const gearStat={str:"strength",dex:"dexterity",vit:"vitality",int:"intelligence"}[key];
+    return (this.attributes[key]||0)+this.gearBonus(gearStat);
+  },
+  spendStatPoint(key){
+    if(this.unspent_stat_points<=0 || !this.attributes.hasOwnProperty(key)) return false;
+    this.attributes[key]++; this.unspent_stat_points--; return true;
+  },
+  getBlockChance(){
+    const c=this.getClassData();
+    if(c.chain==="wizard"||c.chain==="thornguard"){
+      return clampf(this.getTotalAttr("dex")*Balance.BLOCK_CHANCE_PER_DEX,0,Balance.BLOCK_CHANCE_MAX);
+    }
+    return 0;
+  },
+  _resetAttributesToClassBase(){
+    const c=this.getClassData();
+    this.attributes={str:c.base_str||5, dex:c.base_dex||5, vit:c.base_vit||5, int:c.base_int||5};
+    this.unspent_stat_points=0; this.bonus_hp_from_attributes=0; this.bonus_stamina_from_attributes=0;
+  },
   gearBonus(stat){
     let total=0;
     for(const slot of IF.EQUIPPED_SLOT_KEYS){
@@ -699,16 +755,22 @@ const PS = {
     }
     return total;
   },
-  getMaxHp(){const c=this.getClassData(); return (c.base_hp||50)+(c.hp_per_level||5)*(this.level-1)+this.gearBonus("hp");},
+  getMaxHp(){const c=this.getClassData(); return (c.base_hp||50)+(c.hp_per_level||5)*(this.level-1)+this.gearBonus("hp")+this.bonus_hp_from_attributes;},
   getDamageRange(){
     const c=this.getClassData(); const perLevel=(c.damage_per_level||1.0)*(this.level-1);
-    const bonus=this.gearBonus("damage");
+    let bonus=this.gearBonus("damage");
+    // Each chain has one attribute that scales its damage directly (base+points+gear,
+    // recalculated live, unlike the HP/Stamina attribute bonuses below, this is not a
+    // cumulative per-level-up pool, just "however much of that stat you currently have").
+    if(c.chain==="thornguard") bonus+=this.getTotalAttr("str");
+    else if(c.chain==="windrider") bonus+=this.getTotalAttr("dex");
+    else if(c.chain==="wizard") bonus+=this.getTotalAttr("int");
     return [(c.base_damage_min||1)+perLevel+bonus, (c.base_damage_max||2)+perLevel+bonus];
   },
   getCritChance(){const c=this.getClassData(); return clampf((c.base_crit||0.05)+this.gearBonus("crit")/100.0,0,0.95);},
   getArmor(){const c=this.getClassData(); return clampf((c.armor||0.0)+this.gearBonus("armor")/100.0,0,0.75);},
   getRegen(){const c=this.getClassData(); return (c.regen||0.0)+this.gearBonus("regen");},
-  getMaxStamina(){return Balance.STAMINA_MAX_BASE+this.gearBonus("stamina_max");},
+  getMaxStamina(){return Balance.STAMINA_MAX_BASE+this.gearBonus("stamina_max")+this.bonus_stamina_from_attributes;},
   getGoldFindMult(){return 1.0+this.gearBonus("gold_find")/100.0;},
   getXpFindMult(){return 1.0+this.gearBonus("xp_find")/100.0;},
 
@@ -722,6 +784,10 @@ const PS = {
     const gf=this.gearBonus("gold_find"); if(gf) parts.push(`+${Math.round(gf)}% Gold Found`);
     const xf=this.gearBonus("xp_find"); if(xf) parts.push(`+${Math.round(xf)}% Experience Gained`);
     const sm=this.gearBonus("stamina_max"); if(sm) parts.push(`+${Math.round(sm)} Stamina`);
+    const str=this.gearBonus("strength"); if(str) parts.push(`+${Math.round(str)} Strength`);
+    const dex=this.gearBonus("dexterity"); if(dex) parts.push(`+${Math.round(dex)} Dexterity`);
+    const vit=this.gearBonus("vitality"); if(vit) parts.push(`+${Math.round(vit)} Vitality`);
+    const intl=this.gearBonus("intelligence"); if(intl) parts.push(`+${Math.round(intl)} Intelligence`);
     if(parts.length===0) return "No gear bonuses yet.";
     return "Gear bonuses: "+parts.join(", ");
   },
@@ -734,6 +800,15 @@ const PS = {
     let leveled=false;
     while(this.xp>=this.xp_to_next && this.level<Balance.LEVEL_CAP){
       this.xp-=this.xp_to_next; this.level++; this.xp_to_next=Balance.xpRequiredForLevel(this.level);
+      this.unspent_stat_points+=Balance.STAT_POINTS_PER_LEVEL;
+      // Vitality always adds to both pools; Strength only adds to the HP pool for the
+      // two chains whose Strength doesn't already scale their damage (Thornguard gets
+      // damage from Strength instead, see getDamageRange()). Both use base+points only,
+      // never gear, see the attributes/bonus_* fields' comment for why.
+      const chain=this.getClassData().chain;
+      this.bonus_hp_from_attributes+=(this.attributes.vit||0);
+      this.bonus_stamina_from_attributes+=(this.attributes.vit||0);
+      if(chain==="wizard"||chain==="windrider") this.bonus_hp_from_attributes+=(this.attributes.str||0);
       this.current_hp=this.getMaxHp(); leveled=true;
     }
     if(this.level>=Balance.LEVEL_CAP) this.xp=0;
@@ -756,8 +831,12 @@ const PS = {
       this.highest_tier_reached=Math.max(this.highest_tier_reached,currentTier+1);
       if(nextId!=="") this.class_id=nextId; else this.season_won=true;
     }
-    // failure: class_id unchanged -- no demotion, per v0.7 fix
+    // failure: class_id unchanged, no demotion, per v0.7 fix
     this.level=1; this.xp=0; this.xp_to_next=Balance.xpRequiredForLevel(this.level);
+    // A promotion (or even a failed attempt, since level always resets to 1 here) is a
+    // fresh character sheet for whatever class_id ends up active: attributes reset to
+    // that class's own level-1 base values, and the level-up HP/Stamina pools start over.
+    this._resetAttributesToClassBase();
     this.current_hp=this.getMaxHp(); this.current_stamina=this.getMaxStamina();
     return result;
   },
@@ -841,7 +920,7 @@ const PS = {
   getInventoryUsed(){return this.gear_instances.length;},
   hasInventorySpace(){return this.getInventoryUsed()<this.getInventoryCapacity();},
   equipBag(itemId){
-    if(this.equipped_bags.length>=Balance.MAX_BAG_SLOTS) return {success:false,reason:`Your bag rack is full (${this.equipped_bags.length}/${Balance.MAX_BAG_SLOTS}) -- unequip a bag first.`};
+    if(this.equipped_bags.length>=Balance.MAX_BAG_SLOTS) return {success:false,reason:`Your bag rack is full (${this.equipped_bags.length}/${Balance.MAX_BAG_SLOTS}), unequip a bag first.`};
     this.equipped_bags.push(itemId); return {success:true};
   },
   unequipBag(itemId){ const idx=this.equipped_bags.indexOf(itemId); if(idx!==-1) this.equipped_bags.splice(idx,1); },
@@ -916,6 +995,7 @@ const PS = {
     this.current_hp=this.getMaxHp(); this.current_stamina=this.getMaxStamina();
     this.lifetime_xp=0; this.isRestingAtCampfire=false; this.eyesight_potion_steps_left=0;
     this.max_maze_depth_reached=1;
+    this._resetAttributesToClassBase();
   },
   saveGame(){
     if(this.current_slot<0) return;
@@ -926,7 +1006,9 @@ const PS = {
       gear_instances:this.gear_instances,equipped:this.equipped,equipped_bags:this.equipped_bags,
       highest_tier_reached:this.highest_tier_reached,season_won:this.season_won,lifetime_xp:this.lifetime_xp,
       eyesight_potion_steps_left:this.eyesight_potion_steps_left,
-      max_maze_depth_reached:this.max_maze_depth_reached};
+      max_maze_depth_reached:this.max_maze_depth_reached,
+      attributes:this.attributes,unspent_stat_points:this.unspent_stat_points,
+      bonus_hp_from_attributes:this.bonus_hp_from_attributes,bonus_stamina_from_attributes:this.bonus_stamina_from_attributes};
     if(Net.online) Net.saveCharacter(this.current_slot, data);
     else Storage_.setItem(SAVE_KEY(this.current_slot), JSON.stringify(data));
   },
@@ -940,12 +1022,17 @@ const PS = {
     for(const s of IF.EQUIPPED_SLOT_KEYS) this.equipped[s]=loadedEquipped[s]||null;
     this.equipped_bags=(parsed.equipped_bags||[]).slice(0,Balance.MAX_BAG_SLOTS);
     this.highest_tier_reached=parsed.highest_tier_reached||1; this.season_won=!!parsed.season_won;
-    this.current_hp=parsed.current_hp!=null?parsed.current_hp:this.getMaxHp();
-    this.current_stamina=parsed.current_stamina!=null?parsed.current_stamina:this.getMaxStamina();
     this.pending_scroll_bonus=0; this.xp_buff_multiplier=1.0; this.xp_buff_encounters_left=0; this.stamina_shrine_buff=0.0;
     this.lifetime_xp=parsed.lifetime_xp||0; this.isRestingAtCampfire=false;
     this.eyesight_potion_steps_left=parsed.eyesight_potion_steps_left||0;
     this.max_maze_depth_reached=parsed.max_maze_depth_reached||1;
+    if(parsed.attributes){ this.attributes={str:parsed.attributes.str||0,dex:parsed.attributes.dex||0,vit:parsed.attributes.vit||0,int:parsed.attributes.int||0}; }
+    else this._resetAttributesToClassBase(); // pre-v0.10 save with no attributes recorded yet
+    this.unspent_stat_points=parsed.unspent_stat_points||0;
+    this.bonus_hp_from_attributes=parsed.bonus_hp_from_attributes||0;
+    this.bonus_stamina_from_attributes=parsed.bonus_stamina_from_attributes||0;
+    this.current_hp=parsed.current_hp!=null?parsed.current_hp:this.getMaxHp();
+    this.current_stamina=parsed.current_stamina!=null?parsed.current_stamina:this.getMaxStamina();
     return true;
   },
   loadGame(slot){
@@ -1011,15 +1098,13 @@ const NO_TOPBAR_SCREENS=["authGate","login","register"];
 function toggleChat(){ GF.chatOpen=!GF.chatOpen; if(GF.chatOpen) Net.ensureChat(); render(); }
 
 function topBar(){
-  const right=[];
-  if(Net.online){
-    right.push(h("span",{class:"muted"},[`Playing online as ${Net.username}`]));
-    right.push(h("span",{class:"linklike",onClick:()=>{ Net.logout(); GF.goto("authGate"); }},["Log out"]));
-    right.push(h("span",{class:"chat-toggle",onClick:toggleChat},[inlineIcon(CHAT_BUBBLE_SVG,18),"Global Chat"]));
-  } else {
-    right.push(h("span",{class:"muted"},["Playing offline (this browser only)"]));
-    right.push(h("span",{class:"linklike",onClick:()=>{ Net.logout(); GF.goto("authGate"); }},["Switch to online"]));
-  }
+  // Wandrian is online-only now (see screenAuthGate), every screen that shows this
+  // bar is reached only after a successful login, so Net.online is always true here.
+  const right=[
+    h("span",{class:"muted"},[`Playing as ${Net.username}`]),
+    h("span",{class:"linklike",onClick:()=>{ Net.logout(); GF.goto("authGate"); }},["Log out"]),
+    h("span",{class:"chat-toggle",onClick:toggleChat},[inlineIcon(CHAT_BUBBLE_SVG,18),"Global Chat"]),
+  ];
   return h("div",{class:"top-bar"},right);
 }
 
@@ -1045,7 +1130,7 @@ function chatBody(closeBtn){
   // Using requestAnimationFrame (not setTimeout) here matters: rAF runs before the
   // browser's next paint, so the scroll position is corrected before anything is drawn.
   // A setTimeout(fn,0) instead lets one frame paint at scrollTop=0 first (top of the
-  // log) and then jump to the bottom on the next tick -- that's the flicker players
+  // log) and then jump to the bottom on the next tick, that's the flicker players
   // saw on every maze step while chat was open (any full re-render rebuilds this div).
   requestAnimationFrame(()=>{ log.scrollTop=log.scrollHeight; });
   return root;
@@ -1077,6 +1162,19 @@ function toastBox(){
   return h("div",{class:"panel",style:{background:"#2a3a20",borderColor:"#5a7a3a",marginBottom:"12px"}},[msg]);
 }
 function setToast(msg){ GF.toast=msg; }
+
+/* Some feedback (like settling in at the bonfire) doesn't deserve a toast: a toast panel
+   pushes the whole Town layout down for a second and back up once it's cleared, which
+   reads as a flicker/bug on a screen that otherwise never changes size. Routing it into
+   the chat log (as a local "System:" line, the same private-message style already used
+   for server notifications) gives the same feedback without touching page layout at all. */
+function pushSystemChatMessage(message){
+  if(Net.online){
+    Net.privateMessages.push({created_at:new Date().toISOString(), message});
+  } else {
+    setToast(message); // no chat log to write into offline; fall back to the toast
+  }
+}
 
 /* ---------- Autosave: there is no manual save button. Progress is persisted after every
    meaningful action (combat rounds, maze steps/events, vendor transactions, campfire regen
@@ -1127,7 +1225,7 @@ function inventoryPreview(){
       h("div",{style:{fontWeight:"bold"}},["Inventory"]),
       GF.screen==="inventory"?h("span",{class:"muted"},["(open)"]):h("span",{class:"linklike",onClick:()=>GF.goto("inventory",{inventory_return_to:GF.screen})},["Open →"]),
     ]),
-    h("div",{class:"muted"},[`Gear: ${PS.getInventoryUsed()}/${PS.getInventoryCapacity()} slots -- Equipped: ${equippedCount}/${IF.EQUIPPED_SLOT_KEYS.length}`]),
+    h("div",{class:"muted"},[`Gear: ${PS.getInventoryUsed()}/${PS.getInventoryCapacity()} slots, Equipped: ${equippedCount}/${IF.EQUIPPED_SLOT_KEYS.length}`]),
     h("div",{class:"muted"},[`Bags: ${PS.equipped_bags.length}/${Balance.MAX_BAG_SLOTS}`]),
     h("div",{class:"muted",style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},[consumableParts.length?`Consumables: ${consumableParts.join(", ")}`:"Consumables: none"]),
     h("div",{class:"muted",style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},[herbParts.length?`Herbs: ${herbParts.join(", ")}`:"Herbs: none"]),
@@ -1150,11 +1248,11 @@ function statHeader(opts={}){
     ]),
     h("div",{class:"row",style:{marginTop:"8px",alignItems:"flex-start",gap:"14px"}},[
       h("div",{class:"col",style:{gap:compact?"3px":"8px",flex:"0 0 33%",maxWidth:"33%",minWidth:"0"}},[
-        h("div",{},[h("span",{class:"xp-text"},[`XP ${PS.xp}/${PS.xp_to_next}`])]),
+        h("div",{},[h("span",{class:"xp-text"},[`XP ${PS.xp}/${PS.xp_to_next}`]), PS.xp_buff_encounters_left>0?h("span",{title:`Experience shrine active: bonus XP for ${PS.xp_buff_encounters_left} more battle${PS.xp_buff_encounters_left===1?"":"s"}.`,style:{marginLeft:"4px"}},["✨"]):null]),
         bar(PS.xp/PS.xp_to_next*100,"bar-xp",compact),
         h("div",{},[h("span",{class:"hp-text"},[`HP ${Math.round(PS.current_hp)}/${Math.round(PS.getMaxHp())}`])]),
         bar(PS.current_hp/PS.getMaxHp()*100,"bar-hp",compact),
-        h("div",{},[h("span",{class:"stamina-text"},[`Stamina ${Math.round(PS.current_stamina)}/${Math.round(PS.getMaxStamina())}`])]),
+        h("div",{},[h("span",{class:"stamina-text"},[`Stamina ${Math.round(PS.current_stamina)}/${Math.round(PS.getMaxStamina())}`]), PS.stamina_shrine_buff>0?h("span",{title:`Stamina shrine active: ${Math.round(PS.stamina_shrine_buff)} bonus stamina in reserve.`,style:{marginLeft:"4px"}},["✨"]):null]),
         bar(PS.current_stamina/PS.getMaxStamina()*100,"bar-stamina",compact),
       ]),
       inventoryPreview(),
@@ -1164,21 +1262,29 @@ function statHeader(opts={}){
 
 /* ================= AUTH GATE / LOGIN / REGISTER ================= */
 
-function screenAuthGate(){
-  const root=h("div",{});
-  root.appendChild(h("div",{class:"row",style:{gap:"14px",marginBottom:"14px"}},[
+// Shared logo+title header used on the auth gate AND the login/register screens, so
+// logging in or creating an account reads as "the same app, one more step" instead of
+// dropping into a bare, unbranded form.
+function wandrianHeader(){
+  return h("div",{class:"row",style:{gap:"14px",marginBottom:"14px"}},[
     iconBadge(LOGO_SVG,72),
     h("div",{},[h("h1",{},["Wandrian"]), h("div",{class:"subtitle"},["A nature-fantasy dungeon crawl"])]),
-  ]));
+  ]);
+}
+
+// Wandrian is online-only: every character lives on the server, so friends can log in
+// from any device and see the same shared graveyard, leaderboard, chat and auction
+// house. There is no offline/local-only mode anymore, so this is a single centered
+// "Play Online" container rather than a choice between two paths.
+function screenAuthGate(){
+  const root=h("div",{});
+  root.appendChild(wandrianHeader());
   const t=toastBox(); if(t) root.appendChild(t);
-  root.appendChild(h("div",{class:"panel",style:{maxWidth:"440px"}},[
-    h("div",{style:{fontWeight:"bold",marginBottom:"6px"}},["Play Offline"]),
-    h("div",{class:"muted",style:{marginBottom:"8px"}},["Characters are saved only in this browser. No chat, leaderboard or auction house."]),
-    h("button",{class:"wide",onClick:()=>{ Net.logout(); GF.goto("mainMenuSlots"); }},["Play Offline"]),
-  ]));
-  root.appendChild(h("div",{class:"panel",style:{maxWidth:"440px",marginTop:"12px"}},[
-    h("div",{style:{fontWeight:"bold",marginBottom:"6px"}},["Play Online"]),
-    h("div",{class:"muted",style:{marginBottom:"8px"}},["Log in to a hosted Wandrian server to save your characters there, chat with other players, and appear on the leaderboard."]),
+  root.appendChild(h("div",{class:"panel",style:{maxWidth:"460px"}},[
+    h("div",{style:{fontWeight:"bold",marginBottom:"6px",fontSize:"1.1em"}},["Play Online"]),
+    h("div",{class:"muted",style:{marginBottom:"10px",lineHeight:"1.5em"}},[
+      "Wandrian requires an account so your progress lives on the server, not just in this browser. Log in (or create a free account in seconds) to: pick one of three class paths and climb through 5 tiers each via the Broken Bridge Challenge, explore a fresh maze every descent with boulders, hidden traps, chests, shrines and herb gathering, gear up through the Blacksmith, Alchemist, Merchant and Auction House, chat with everyone else online, and race for the top of the leaderboard, hardcore deaths and all.",
+    ]),
     h("div",{class:"row"},[
       h("button",{style:{flex:"1"},onClick:()=>GF.goto("login")},["Log In"]),
       h("button",{style:{flex:"1"},onClick:()=>GF.goto("register")},["Create Account"]),
@@ -1187,19 +1293,35 @@ function screenAuthGate(){
   return root;
 }
 
+function socialLoginRow(){
+  const comingSoon=()=>{ setToast("Social login is coming soon, use username and password for now."); render(); };
+  return h("div",{class:"col gap",style:{marginBottom:"10px"}},[
+    h("button",{class:"wide social-login-btn",onClick:comingSoon},["🔵 Continue with Google"]),
+    h("button",{class:"wide social-login-btn",onClick:comingSoon},["🔷 Continue with Facebook"]),
+    h("div",{class:"row",style:{alignItems:"center",gap:"8px",margin:"4px 0"}},[
+      h("div",{style:{flex:"1",height:"1px",background:"var(--border)"}}),
+      h("span",{class:"muted"},["or"]),
+      h("div",{style:{flex:"1",height:"1px",background:"var(--border)"}}),
+    ]),
+  ]);
+}
+
 function authForm(mode){
   const root=h("div",{});
   const isLogin=mode==="login";
+  root.appendChild(wandrianHeader());
   root.appendChild(h("h2",{},[isLogin?"Log In":"Create Account"]));
   const t=toastBox(); if(t) root.appendChild(t);
   const userInput=h("input",{type:"text",placeholder:"username"});
-  const passInput=h("input",{type:"password",placeholder:"passcode"});
+  const passInput=h("input",{type:"password",placeholder:"password"});
+  const emailInput=isLogin?null:h("input",{type:"email",placeholder:"email (optional)"});
   const statusDiv=h("div",{class:"muted"},[""]);
   const submit=async ()=>{
     const username=userInput.value.trim(), passcode=passInput.value;
+    const email=emailInput?emailInput.value.trim():"";
     statusDiv.textContent="Working...";
     try{
-      const json = isLogin ? await Net.login(username,passcode) : await Net.register(username,passcode);
+      const json = isLogin ? await Net.login(username,passcode) : await Net.register(username,passcode,email);
       await Net.afterAuth(json.username, json.token);
       setToast(`Welcome, ${json.username}!`);
       GF.goto("mainMenuSlots");
@@ -1208,7 +1330,9 @@ function authForm(mode){
     }
   };
   root.appendChild(h("div",{class:"panel col gap",style:{maxWidth:"360px"}},[
-    userInput, passInput,
+    socialLoginRow(),
+    userInput, passInput, emailInput,
+    isLogin?null:h("div",{class:"muted",style:{marginTop:"-4px"}},["Email is optional, just a nice-to-have. Jump in with only a username and password if you'd rather not share one yet."]),
     h("button",{class:"wide play",onClick:submit},[isLogin?"Log In":"Create Account"]),
     statusDiv,
   ]));
@@ -1310,7 +1434,7 @@ function screenClassPicker(){
   root.appendChild(h("div",{class:"panel",style:{marginBottom:"14px"}},[
     h("div",{class:"row gap"},[h("span",{},["Character name:"]), nameInput]),
     nameError,
-    h("div",{class:"row gap",style:{marginTop:"8px"}},[hardcoreBox, h("label",{for:"hcbox"},["Hardcore mode -- permadeath, sent to the Graveyard on death."])]),
+    h("div",{class:"row gap",style:{marginTop:"8px"}},[hardcoreBox, h("label",{for:"hcbox"},["Hardcore mode, permadeath, sent to the Graveyard on death."])]),
   ]));
   const grid=h("div",{class:"grid3"});
   for(const classId of DL.starterClassIds()){
@@ -1353,8 +1477,8 @@ function screenGraveyard(){
   } else {
     for(const e of entries){
       root.appendChild(h("div",{class:"tile",style:{marginBottom:"8px"}},[
-        h("div",{style:{fontWeight:"bold"}},[`${e.name} -- Lv ${e.level} ${e.class_name}`]),
-        h("div",{class:"muted"},[`${e.cause||"Died in the wilds"} -- ${new Date(e.date||e.died_at).toLocaleString()}`]),
+        h("div",{style:{fontWeight:"bold"}},[`${e.name}, Lv ${e.level} ${e.class_name}`]),
+        h("div",{class:"muted"},[`${e.cause||"Died in the wilds"}, ${new Date(e.date||e.died_at).toLocaleString()}`]),
       ]));
     }
   }
@@ -1371,13 +1495,14 @@ function classChainEntries(chainId){
 function screenClassProgression(){
   const root=h("div",{});
   root.appendChild(h("h2",{},["Player Classes"]));
-  root.appendChild(h("div",{class:"lore"},["Every hero begins along one of three paths below. Passing that class's Broken Bridge Challenge promotes you to the next tier down the same column. Whoever is first to pass the final trial of the final tier wins the season -- at that moment, every player's level and class progress resets for a fresh season, but gear, gold, and other (future) skill progress carry over."]));
+  root.appendChild(h("div",{class:"lore"},["Every hero begins along one of three paths below. Passing that class's Broken Bridge Challenge promotes you to the next tier down the same column. Whoever is first to pass the final trial of the final tier wins the season, at that moment, every player's level and class progress resets for a fresh season, but gear, gold, and other (future) skill progress carry over."]));
   const chainIds=["wizard","thornguard","windrider"];
   const row=h("div",{class:"row gap",style:{alignItems:"flex-start",flexWrap:"wrap"}});
   for(const chainId of chainIds){
     const entries=classChainEntries(chainId);
     const col=h("div",{class:"col gap",style:{flex:"1",minWidth:"220px"}});
     col.appendChild(h("div",{style:{fontWeight:"bold",textAlign:"center",marginBottom:"2px"}},[DL.getClass(chainId).display_name+" Path"]));
+    col.appendChild(h("div",{class:"muted",style:{fontSize:".82em",lineHeight:"1.4em",marginBottom:"4px"}},attributeSummaryLines(chainId).map(l=>h("div",{},[l]))));
     entries.forEach(([classId,c],i)=>{
       const isFinal=!c.next_class;
       col.appendChild(h("div",{class:"tile row gap",style:{alignItems:"center"}},[
@@ -1385,7 +1510,8 @@ function screenClassProgression(){
         h("div",{style:{minWidth:"0"}},[
           h("div",{style:{fontWeight:"bold"}},[`Tier ${c.tier}: ${c.display_name}`]),
           h("div",{class:"muted"},[c.description]),
-          isFinal?h("div",{style:{color:"#e0b23d",fontWeight:"bold",marginTop:"2px"}},["★ Final tier -- wins the season"]):null,
+          h("div",{class:"muted",style:{fontSize:".82em",marginTop:"2px"}},[`Starting attributes: STR ${c.base_str} · DEX ${c.base_dex} · VIT ${c.base_vit} · INT ${c.base_int}`]),
+          isFinal?h("div",{style:{color:"#e0b23d",fontWeight:"bold",marginTop:"2px"}},["★ Final tier, wins the season"]):null,
         ]),
       ]));
       if(i<entries.length-1) col.appendChild(h("div",{class:"muted",style:{textAlign:"center"}},["↓"]));
@@ -1410,7 +1536,7 @@ function screenLeaderboard(){
     return root;
   }
   const entries=Net.leaderboardCache;
-  if(entries.length===0) root.appendChild(h("div",{class:"muted"},["No one has made a mark yet -- be the first!"]));
+  if(entries.length===0) root.appendChild(h("div",{class:"muted"},["No one has made a mark yet, be the first!"]));
   entries.forEach((e,i)=>{
     const isMine=e.player===Net.username;
     const isDead=!!e.is_dead;
@@ -1428,7 +1554,7 @@ function screenLeaderboard(){
         h("span",{class:"muted"},[` (${e.player})`]),
         e.hardcore?h("span",{style:{color:"#e0b23d",fontWeight:"bold"}},[" [Hardcore]"]):null,
       ]),
-      h("div",{class:"muted"},[`Lv ${e.level} ${e.class_name} (Tier ${e.highest_tier_reached}) -- ${e.lifetime_xp||0} Experience -- ${e.gold} Gold`]),
+      h("div",{class:"muted"},[`Lv ${e.level} ${e.class_name} (Tier ${e.highest_tier_reached}), ${e.lifetime_xp||0} Experience, ${e.gold} Gold`]),
     ]));
   });
   root.appendChild(h("button",{style:{marginTop:"10px"},onClick:()=>GF.goto("mainMenuSlots")},["← Back"]));
@@ -1449,7 +1575,18 @@ function getTownName(){
 
 function getVentureDepth(){
   const max=PS.max_maze_depth_reached||1;
-  if(GF.ventureDepth==null || GF.ventureDepth>max || GF.ventureDepth<1) GF.ventureDepth=max;
+  if(GF.ventureDepth==null || GF.ventureDepth<1){
+    GF.ventureDepth=max;
+  } else if(max>(GF.lastKnownMaxDepth||1)){
+    // A new max depth was just unlocked (reached a fresh exit since we last checked) --
+    // default the venture depth up to it immediately, same as a brand new character
+    // would start at their max. Without this, the selector stayed frozen at whatever
+    // depth was picked before, even though + could still manually reach the new max.
+    GF.ventureDepth=max;
+  } else if(GF.ventureDepth>max){
+    GF.ventureDepth=max; // safety clamp, e.g. a stale/loaded value above the real max
+  }
+  GF.lastKnownMaxDepth=max;
   return GF.ventureDepth;
 }
 
@@ -1462,21 +1599,23 @@ function screenTown(){
   const ventureDepth=getVentureDepth();
   const maxDepth=PS.max_maze_depth_reached||1;
   root.appendChild(h("div",{class:"town-quadrants",style:{marginBottom:"14px"}},[
-    // top-left: venture + rest
+    // top-left: venture (with depth stepper merged in) + rest
     h("div",{class:"col gap"},[
-      h("button",{class:"wide",style:{padding:"16px"},onClick:()=>{ PS.resetKillStreak(); GF.overworld_snapshot=null; GF.goto("maze",{maze_depth: ventureDepth}); }},[
-        "🌳 Venture into the Woods",
-        h("div",{class:"muted",style:{fontWeight:"normal",fontSize:".8em",marginTop:"2px"}},[`Area Level: ${ventureDepth}`]),
-      ]),
-      h("div",{class:"depth-stepper",style:{justifyContent:"center"}},[
-        h("span",{class:"muted"},["Change depth level:"]),
-        h("button",{disabled:ventureDepth<=1,onClick:(e)=>{ e.stopPropagation(); GF.ventureDepth=Math.max(1,ventureDepth-1); render(); }},["-"]),
-        h("span",{},[String(ventureDepth)]),
-        h("button",{disabled:ventureDepth>=maxDepth,onClick:(e)=>{ e.stopPropagation(); GF.ventureDepth=Math.min(maxDepth,ventureDepth+1); render(); }},["+"]),
+      h("div",{class:"panel venture-card"},[
+        h("div",{class:"venture-action",onClick:()=>{ PS.resetKillStreak(); GF.overworld_snapshot=null; GF.goto("maze",{maze_depth: ventureDepth}); }},[
+          h("div",{class:"venture-title"},["🌳 Venture into the Woods"]),
+          h("div",{class:"muted",style:{fontSize:".85em",marginTop:"2px"}},[`Area Level: ${ventureDepth}`]),
+        ]),
+        h("div",{class:"depth-stepper",style:{justifyContent:"center"}},[
+          h("span",{class:"muted"},["Change depth level:"]),
+          h("button",{disabled:ventureDepth<=1,onClick:(e)=>{ e.stopPropagation(); GF.ventureDepth=Math.max(1,ventureDepth-1); render(); }},["-"]),
+          h("span",{},[String(ventureDepth)]),
+          h("button",{disabled:ventureDepth>=maxDepth,onClick:(e)=>{ e.stopPropagation(); GF.ventureDepth=Math.min(maxDepth,ventureDepth+1); render(); }},["+"]),
+        ]),
       ]),
       h("button",{class:"wide",disabled:PS.isRestingAtCampfire && PS.current_hp>=PS.getMaxHp() && PS.current_stamina>=PS.getMaxStamina(),onClick:()=>{
         PS.isRestingAtCampfire=true; autosave();
-        setToast("You settle in by the bonfire. HP and Stamina will recover gradually while you stay in camp.");
+        pushSystemChatMessage("You settle in by the bonfire. HP and Stamina will recover gradually while you stay in camp.");
         render();
       }},[inlineIcon(BONFIRE_SVG,18),PS.isRestingAtCampfire?" Resting by the Bonfire...":" Rest at the Bonfire"]),
     ]),
@@ -1515,7 +1654,7 @@ function generateMaze(depth){
   const dirs4=[[1,0],[-1,0],[0,1],[0,-1]];
 
   // Terrain, obstruction placement, and reachability are regenerated together and
-  // retried if the layout doesn't leave enough open ground -- boulders sit at up to
+  // retried if the layout doesn't leave enough open ground, boulders sit at up to
   // 25% density now, so this retry loop matters more than it used to.
   let cells, dist;
   for(let attempt=0;attempt<40;attempt++){
@@ -1523,7 +1662,7 @@ function generateMaze(depth){
     for(let y=0;y<sizeH;y++) for(let x=0;x<size;x++) cells.push({x,y,type:"dirt",baseTerrain:"dirt",discovered:false,cleared:false});
 
     // Cosmetic grass patches (tall grass = "hides mobs" flavor; dirt = plain path).
-    // Both are freely walkable -- monster encounters only trigger on grass tiles.
+    // Both are freely walkable, monster encounters only trigger on grass tiles.
     for(let p=0;p<Balance.GRASS_PATCH_COUNT;p++){
       let cx=randi(size), cy=randi(sizeH);
       const patchSize=3+randi(4);
@@ -1533,7 +1672,7 @@ function generateMaze(depth){
       }
     }
 
-    // Boulders: impassable whole tiles (not walls between tiles) -- any two
+    // Boulders: impassable whole tiles (not walls between tiles), any two
     // 4-directionally adjacent non-boulder cells are always mutually reachable.
     for(const c of cells){
       if(c.x===0&&c.y===0) continue; // never block the starting tile itself
@@ -1566,15 +1705,18 @@ function generateMaze(depth){
   // Content only ever lands on reachable, plain (grass/dirt) tiles. Trapdoors and traps
   // stay visually indistinguishable from ordinary terrain (see TILE_GLYPH/TILE_COLOR),
   // so their placement doesn't need to avoid "obvious" spots the way it once did.
+  // Each candidate tile gets one independent roll per content type, in order (a tile
+  // that hits an earlier roll is taken and skips the rest), this replaces the old
+  // fixed-count-per-maze model with true per-tile probabilities, so a big 25%-boulder
+  // maze with very few open tiles naturally spawns less content too.
   const candidates=cells.filter((c,i)=>dist[i]>0 && (c.type==="grass"||c.type==="dirt"));
-  shuffle(candidates);
-  let ci=0;
-  for(let i=0;i<Balance.MAZE_CHEST_COUNT && candidates[ci]; i++) candidates[ci++].type="chest";
-  for(let i=0;i<Balance.MAZE_SHRINE_COUNT && candidates[ci]; i++) candidates[ci++].type="shrine";
-  for(let i=0;i<Balance.MAZE_HERB_COUNT && candidates[ci]; i++) candidates[ci++].type="herb";
-  for(let i=0;i<Balance.MAZE_TRAPDOOR_COUNT && candidates[ci]; i++){ candidates[ci].type="trapdoor"; candidates[ci].wasHidden=true; ci++; }
-  for(let i=ci;i<candidates.length;i++){
-    if(Math.random()<Balance.TRAP_CHANCE_PER_TILE){ candidates[i].type="trap"; candidates[i].wasHidden=true; }
+  for(const c of candidates){
+    const roll=Math.random();
+    if(roll<Balance.MAZE_CHEST_CHANCE_PER_TILE){ c.type="chest"; continue; }
+    if(roll<Balance.MAZE_CHEST_CHANCE_PER_TILE+Balance.MAZE_SHRINE_CHANCE_PER_TILE){ c.type="shrine"; continue; }
+    if(roll<Balance.MAZE_CHEST_CHANCE_PER_TILE+Balance.MAZE_SHRINE_CHANCE_PER_TILE+Balance.MAZE_HERB_CHANCE_PER_TILE){ c.type="herb"; continue; }
+    if(roll<Balance.MAZE_CHEST_CHANCE_PER_TILE+Balance.MAZE_SHRINE_CHANCE_PER_TILE+Balance.MAZE_HERB_CHANCE_PER_TILE+Balance.MAZE_TRAPDOOR_CHANCE_PER_TILE){ c.type="trapdoor"; c.wasHidden=true; continue; }
+    if(roll<Balance.MAZE_CHEST_CHANCE_PER_TILE+Balance.MAZE_SHRINE_CHANCE_PER_TILE+Balance.MAZE_HERB_CHANCE_PER_TILE+Balance.MAZE_TRAPDOOR_CHANCE_PER_TILE+Balance.TRAP_CHANCE_PER_TILE){ c.type="trap"; c.wasHidden=true; }
   }
 
   const maze={size, sizeH, cells, depth, playerIdx:0};
@@ -1587,7 +1729,7 @@ function ensureMaze(depth){
   return GF.overworld_snapshot;
 }
 
-// Trap and trapdoor tiles are deliberately absent here -- they render using the cell's
+// Trap and trapdoor tiles are deliberately absent here, they render using the cell's
 // baseTerrain instead (see screenMaze), so they're indistinguishable from ordinary ground.
 const TILE_GLYPH={start:"🏕",exit:"⬇",chest:"🎁",shrine:"✨",herb:"🌿",boulder:"🪨",grass:"",dirt:""};
 const TILE_COLOR={start:"#2a4a2a",exit:"#3a3a6a",chest:"#5a4a1a",shrine:"#3a5a5a",herb:"#2a4a2a",boulder:"#3a3a34",grass:"#274a1e",dirt:"#4a3a26"};
@@ -1599,7 +1741,7 @@ function isAdjacent4(x1,y1,x2,y2){
 }
 
 function mazeOverlayScreen(overlay){
-  const div=h("div",{class:"maze-overlay-full"},[h("div",{class:"maze-overlay-text"},[overlay.text])]);
+  const div=h("div",{class:"maze-overlay-grid"},[h("div",{class:"maze-overlay-text"},[overlay.text])]);
   if(!overlay.timerStarted){
     overlay.timerStarted=true;
     setTimeout(()=>{ div.classList.add("fade"); },50);
@@ -1613,48 +1755,63 @@ function mazeOverlayScreen(overlay){
 }
 
 function screenMaze(){
-  if(GF.mazeOverlay) return mazeOverlayScreen(GF.mazeOverlay);
-
   const depth=GF.maze_depth||PS.level;
   const maze=ensureMaze(depth);
   const root=h("div",{});
-  root.appendChild(h("h2",{},[`The Woods -- Depth ${depth}`]));
+  root.appendChild(h("h2",{},[`The Woods, Depth ${depth}`]));
   root.appendChild(h("div",{class:"lore"},["Overgrown paths wind between the trees. Move with the arrow keys or by clicking an adjacent tile."]));
   const t=toastBox(); if(t) root.appendChild(t);
   root.appendChild(statHeader());
 
-  const px=maze.playerIdx%maze.size, py=Math.floor(maze.playerIdx/maze.size);
-  const grid=h("div",{class:"maze-grid",style:{gridTemplateColumns:`repeat(${maze.size},34px)`}});
-  for(let y=0;y<maze.sizeH;y++){
-    for(let x=0;x<maze.size;x++){
-      const i=y*maze.size+x; const cell=maze.cells[i];
-      const isPlayer=maze.playerIdx===i;
-      const isWalkable=!isPlayer && cell.type!=="boulder" && isAdjacent4(x,y,px,py);
-      const isKnown=cell.discovered || cell.type==="exit" || cell.type==="start";
-      const hidden=!!cell.wasHidden || HIDDEN_TILE_TYPES.includes(cell.type);
-      const displayType=HIDDEN_TILE_TYPES.includes(cell.type)?cell.baseTerrain:cell.type;
-      let bg="#050505", label="", border="1px solid #222", opacity="1";
-      if(isPlayer){ bg="#e0c96a"; }
-      else if(isKnown){
-        bg=TILE_COLOR[displayType]||TILE_COLOR.dirt;
-        label=TILE_GLYPH[displayType]||"";
-        if(cell.cleared && !hidden) opacity="0.4"; // hidden tiles never visually change, even once triggered
+  // Grid pixel size (tiles + 1px gaps + 2px border on each side), the dramatic
+  // Advanced!/Trapdoor! overlay is sized to exactly cover this box, not the full
+  // viewport, so it reads as "something happened on the grid" rather than a
+  // jarring full-screen takeover.
+  const gridWidthPx=maze.size*34+(maze.size-1)*1+4;
+  const gridHeightPx=maze.sizeH*34+(maze.sizeH-1)*1+4;
+
+  let gridArea;
+  if(GF.mazeOverlay){
+    gridArea=h("div",{style:{position:"relative",width:gridWidthPx+"px",height:gridHeightPx+"px",flex:"none"}},[mazeOverlayScreen(GF.mazeOverlay)]);
+  } else {
+    const px=maze.playerIdx%maze.size, py=Math.floor(maze.playerIdx/maze.size);
+    const grid=h("div",{class:"maze-grid",style:{gridTemplateColumns:`repeat(${maze.size},34px)`}});
+    for(let y=0;y<maze.sizeH;y++){
+      for(let x=0;x<maze.size;x++){
+        const i=y*maze.size+x; const cell=maze.cells[i];
+        const isPlayer=maze.playerIdx===i;
+        const isWalkable=!isPlayer && cell.type!=="boulder" && isAdjacent4(x,y,px,py);
+        const isKnown=cell.discovered || cell.type==="exit" || cell.type==="start";
+        const hidden=!!cell.wasHidden || HIDDEN_TILE_TYPES.includes(cell.type);
+        const displayType=HIDDEN_TILE_TYPES.includes(cell.type)?cell.baseTerrain:cell.type;
+        let bg="#050505", label="", border="1px solid #222", opacity="1";
+        if(isPlayer){ bg="#e0c96a"; }
+        else if(isKnown){
+          bg=TILE_COLOR[displayType]||TILE_COLOR.dirt;
+          label=TILE_GLYPH[displayType]||"";
+          if(cell.cleared && !hidden) opacity="0.4"; // hidden tiles never visually change, even once triggered
+        }
+        const inner=h("span",{style:{opacity}},[label]);
+        const tile=h("div",{class:"maze-tile",style:{background:bg,display:"flex",alignItems:"center",justifyContent:"center",cursor:isWalkable?"pointer":"default",fontSize:"16px",border}},[inner]);
+        if(isWalkable){ tile.addEventListener("click",()=>onStepMaze(maze,i)); }
+        grid.appendChild(tile);
       }
-      const inner=h("span",{style:{opacity}},[label]);
-      const tile=h("div",{class:"maze-tile",style:{background:bg,display:"flex",alignItems:"center",justifyContent:"center",cursor:isWalkable?"pointer":"default",fontSize:"16px",border}},[inner]);
-      if(isWalkable){ tile.addEventListener("click",()=>onStepMaze(maze,i)); }
-      grid.appendChild(tile);
     }
+    gridArea=grid;
   }
 
-  root.appendChild(h("div",{class:"maze-wrap"},[grid,
+  root.appendChild(h("div",{class:"maze-wrap"},[gridArea,
     h("div",{class:"side-panel"},[
       h("div",{class:"col",style:{gap:"2px"}},[
         h("div",{class:"muted"},["🏕 start   ⬇ exit   🎁 chest"]),
         h("div",{class:"muted"},["✨ shrine   🌿 herb"]),
-        h("div",{class:"muted"},["🪨 boulder -- impassable"]),
+        h("div",{class:"muted"},["🪨 boulder, impassable"]),
         h("div",{class:"muted"},["Green tile = grass, brown tile = dirt (both walkable)"]),
         h("div",{class:"muted"},["Faded icon = already used"]),
+      ]),
+      h("div",{class:"row gap"},[
+        h("button",{disabled:!PS.canUseConsumable(PS.bestAvailableConsumable("health")),onClick:()=>{ PS.useConsumable(PS.bestAvailableConsumable("health")); autosave(); render(); }},["Use Health Potion"]),
+        h("button",{disabled:!PS.canUseConsumable(PS.bestAvailableConsumable("stamina")),onClick:()=>{ PS.useConsumable(PS.bestAvailableConsumable("stamina")); autosave(); render(); }},["Use Stamina Potion"]),
       ]),
       h("button",{onClick:()=>GF.goto("town")},["← Retreat to Town"]),
     ]),
@@ -1680,6 +1837,17 @@ function tickEyesightPotion(){
 }
 
 function onStepMaze(maze,targetIdx){
+  // Exhaustion is checked BEFORE moving, and no longer force-teleports the player to
+  // town: that gave no chance to react (e.g. drink a Stamina Potion via the maze's
+  // quick-use buttons) and always left current_stamina at a suspicious flat 25 (a
+  // hardcoded 25% of the BASE stamina pool, ignoring any +stamina_max gear). Now the
+  // player simply can't take another step once truly out of stamina, and has to
+  // either use a potion or walk themselves back with "Retreat to Town".
+  if(PS.current_stamina<=0){
+    setToast("You're exhausted and can't go any further. Use a Stamina Potion, or retreat to town to rest.");
+    render();
+    return;
+  }
   const cell=maze.cells[targetIdx];
   maze.playerIdx=targetIdx; cell.discovered=true; cell.visited=true;
   PS.spendStamina(Balance.STAMINA_COST_PER_STEP);
@@ -1687,10 +1855,7 @@ function onStepMaze(maze,targetIdx){
   tickEyesightPotion();
   revealAround(maze,targetIdx,PS.getEyesightRadius());
   if(PS.current_stamina<=0){
-    setToast("You're exhausted and stumble back to camp.");
-    PS.restoreStamina(Balance.STAMINA_MAX_BASE*0.25);
-    autosave();
-    GF.goto("town"); return;
+    setToast("You're exhausted. Use a Stamina Potion, or retreat to town to rest, before you can move again.");
   }
 
   if(cell.type==="exit" && !cell.cleared){
@@ -1698,7 +1863,7 @@ function onStepMaze(maze,targetIdx){
     const nextDepth=maze.depth+Balance.EXIT_DEPTH_BONUS_PER_DESCENT;
     PS.max_maze_depth_reached=Math.max(PS.max_maze_depth_reached||1, nextDepth);
     autosave();
-    GF.mazeOverlay={text:"Advanced!", andThen:()=>{ GF.overworld_snapshot=null; GF.goto("maze",{maze_depth:nextDepth}); }};
+    GF.mazeOverlay={text:`Advanced to area level ${nextDepth}!`, andThen:()=>{ GF.overworld_snapshot=null; GF.goto("maze",{maze_depth:nextDepth}); }};
     render();
     return;
   }
@@ -1724,7 +1889,7 @@ function onStepMaze(maze,targetIdx){
   if(cell.type==="shrine" && !cell.cleared){
     cell.cleared=true;
     if(Math.random()<0.5){ PS.addStaminaShrineBuff(Balance.STAMINA_MAX_BASE*Balance.SHRINE_STAMINA_BUFF_PCT); setToast("A quiet shrine restores your stamina and grants a lasting reserve!"); }
-    else { PS.applyXpShrineBuff(); setToast("A quiet shrine blesses you -- bonus experience for a while!"); }
+    else { PS.applyXpShrineBuff(); setToast("A quiet shrine blesses you, bonus experience for a while!"); }
     autosave(); render(); return;
   }
   if(cell.type==="herb" && !cell.cleared){
@@ -1736,7 +1901,7 @@ function onStepMaze(maze,targetIdx){
     return;
   }
 
-  // Monsters only lurk in tall grass -- dirt paths and other special tiles are always safe.
+  // Monsters only lurk in tall grass, dirt paths and other special tiles are always safe.
   if(cell.type==="grass" && Math.random()<Balance.ENCOUNTER_CHANCE_PER_STEP){
     const monster=DL.pickRandomMonsterForArea(maze.depth);
     GF.goto("combat",{maze_depth:maze.depth, pending_monster_id:monster.id});
@@ -1781,7 +1946,7 @@ function grantLoot(lootTable, mult){
     const tier=Balance.itemTierForAreaLevel(GF.maze_depth);
     const inst=IF.generate(tier);
     if(PS.addGear(inst)) return `Found ${IF.displayName(inst)}!`;
-    return `Found gear but your bags are full -- it was left behind.`;
+    return `Found gear but your bags are full, it was left behind.`;
   }
   if(loot.type==="consumable"){ PS.addConsumable(loot.item_id,1); return `Found a ${DL.getItem(loot.item_id).name}.`; }
   if(loot.type==="herb"){ PS.addHerb(loot.herb_id,1); return `Found ${DL.getHerb(loot.herb_id).name}.`; }
@@ -1850,11 +2015,15 @@ function screenCombat(){
       return;
     }
     // monster turn
+    if(Math.random()<PS.getBlockChance()){
+      combatLog(cb,`You block the ${cb.name}'s attack entirely!`);
+      autosave(); render(); return;
+    }
     let mdmg=randRange(cb.dmgMin,cb.dmgMax);
     mdmg*=(1.0-PS.getArmor());
     PS.current_hp-=mdmg;
     combatLog(cb,`The ${cb.name} hits you for ${Math.round(mdmg)} damage.`);
-    // Anything below 1 HP is dead -- a fractional sliver (e.g. 0.4) used to display as
+    // Anything below 1 HP is dead, a fractional sliver (e.g. 0.4) used to display as
     // "0 HP" and read as alive, letting players survive a fight at what looked like 0 HP
     // only to be one-shot next encounter. Treat "rounds down to 0" as actually dead.
     if(PS.current_hp<1){ PS.current_hp=0; endCombatDeath(); return; }
@@ -1929,8 +2098,8 @@ function screenHerbEncounter(){
   const node=ensureHerbNode();
   const herb=DL.getHerb(node.herb_id);
   const root=h("div",{});
-  root.appendChild(h("h2",{},[herb.rare?`A rare bloom -- ${herb.name}`:`Gathering ${herb.name}`]));
-  root.appendChild(h("div",{class:"lore"},["Careful hands find more than hasty ones. No danger here -- just patience."]));
+  root.appendChild(h("h2",{},[herb.rare?`A rare bloom, ${herb.name}`:`Gathering ${herb.name}`]));
+  root.appendChild(h("div",{class:"lore"},["Careful hands find more than hasty ones. No danger here, just patience."]));
   root.appendChild(statHeader());
   root.appendChild(h("div",{class:"panel"},[
     h("div",{},[`Gathering: ${node.ticks_done}/${node.ticks_required}`]),
@@ -1968,12 +2137,64 @@ function gearRow(inst, actions){
   ]);
 }
 
+// Shared attribute-role copy: which stat drives damage for this class chain, and what
+// the other three do for it. Used both on the Inventory's Attributes panel (live values)
+// and the Player Classes screen (base values per class) so the wording always matches.
+function attributeSummaryLines(chain){
+  if(chain==="thornguard"){
+    return [
+      "Strength: +1 damage per point (this path's damage stat).",
+      "Dexterity: raises Block Chance, a chance to take 0 damage from a hit.",
+      "Vitality: on every level-up, permanently adds that much HP and Stamina.",
+      "Intelligence: no effect for this path.",
+    ];
+  }
+  if(chain==="windrider"){
+    return [
+      "Strength: on every level-up, permanently adds that much HP.",
+      "Dexterity: +1 damage per point (this path's damage stat).",
+      "Vitality: on every level-up, permanently adds that much HP and Stamina.",
+      "Intelligence: no effect for this path.",
+    ];
+  }
+  if(chain==="wizard"){
+    return [
+      "Strength: on every level-up, permanently adds that much HP.",
+      "Dexterity: raises Block Chance, a chance to take 0 damage from a hit.",
+      "Vitality: on every level-up, permanently adds that much HP and Stamina.",
+      "Intelligence: +1 damage per point (this path's damage stat, gear included).",
+    ];
+  }
+  return [];
+}
+
+function attributesPanel(){
+  const c=PS.getClassData();
+  const rows=[{key:"str",label:"Strength",gearStat:"strength"},{key:"dex",label:"Dexterity",gearStat:"dexterity"},{key:"vit",label:"Vitality",gearStat:"vitality"},{key:"int",label:"Intelligence",gearStat:"intelligence"}];
+  const summaryLines=attributeSummaryLines(c.chain);
+  return h("div",{class:"panel",style:{marginTop:"12px",marginBottom:"12px"}},[
+    h("div",{class:"row",style:{justifyContent:"space-between",marginBottom:"8px"}},[
+      h("div",{style:{fontWeight:"bold"}},["Attributes"]),
+      h("div",{class:PS.unspent_stat_points>0?"gold-text":"muted"},[PS.unspent_stat_points>0?`${PS.unspent_stat_points} point${PS.unspent_stat_points===1?"":"s"} to spend`:"No unspent points"]),
+    ]),
+    ...rows.map((r,i)=>{
+      const gearAmt=PS.gearBonus(r.gearStat);
+      return h("div",{class:"row",style:{justifyContent:"space-between",marginBottom:"4px",alignItems:"center"}},[
+        h("div",{},[`${r.label}: ${PS.attributes[r.key]}`, gearAmt?h("span",{class:"muted"},[` (+${Math.round(gearAmt)} from gear)`]):null]),
+        h("button",{disabled:PS.unspent_stat_points<=0,onClick:()=>{ PS.spendStatPoint(r.key); autosave(); render(); }},["+"]),
+      ]);
+    }),
+    h("div",{class:"muted",style:{marginTop:"6px",lineHeight:"1.4em"}},summaryLines.map(l=>h("div",{},[l]))),
+  ]);
+}
+
 function screenInventory(){
   const root=h("div",{});
   root.appendChild(h("h2",{},["Inventory"]));
   const t=toastBox(); if(t) root.appendChild(t);
   root.appendChild(statHeader());
   root.appendChild(h("div",{class:"muted"},[PS.getGearBonusSummary()]));
+  root.appendChild(attributesPanel());
 
   root.appendChild(h("h3",{style:{marginTop:"12px"}},["Equipped"]));
   const eqGrid=h("div",{class:"grid3"});
@@ -2076,7 +2297,7 @@ function screenAlchemist(){
 
   root.appendChild(h("h3",{},["Your Herbs"]));
   const herbEntries=Object.keys(PS.herbs).filter(k=>PS.herbs[k]>0);
-  root.appendChild(h("div",{class:"muted"},[herbEntries.length?herbEntries.map(id=>`${DL.getHerb(id).name} x${PS.herbs[id]}`).join(", "):"None yet -- gather herbs in the woods."]));
+  root.appendChild(h("div",{class:"muted"},[herbEntries.length?herbEntries.map(id=>`${DL.getHerb(id).name} x${PS.herbs[id]}`).join(", "):"None yet, gather herbs in the woods."]));
 
   root.appendChild(h("h3",{},["Recipes"]));
   const grid=h("div",{class:"grid3"});
@@ -2129,7 +2350,7 @@ function screenMerchant(){
     const price=Balance.bagBuyPrice(item.capacity);
     bagGrid.appendChild(h("div",{class:"tile"},[
       h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId), h("div",{style:{fontWeight:"bold"}},[item.name])]),
-      h("div",{class:"muted"},[`Capacity +${item.capacity} -- ${price} gold`]),
+      h("div",{class:"muted"},[`Capacity +${item.capacity}, ${price} gold`]),
       h("button",{style:{marginTop:"6px"},disabled:PS.gold<price||PS.equipped_bags.length>=Balance.MAX_BAG_SLOTS,onClick:()=>{
         const r=PS.buyBag(itemId); if(r.success){autosave(); setToast(`Bought ${item.name}!`);} else setToast(r.reason); render();
       }},["Buy"]),
@@ -2219,13 +2440,13 @@ function screenAuctionHouse(){
     root.appendChild(h("div",{class:"muted"},["Loading..."]));
     Net.fetchAuction().then(render).catch(()=>{ setToast("Could not load the auction house."); render(); });
   } else if(Net.auctionCache.length===0){
-    root.appendChild(h("div",{class:"muted"},["The block is empty right now -- be the first to list something."]));
+    root.appendChild(h("div",{class:"muted"},["The block is empty right now, be the first to list something."]));
   } else {
     for(const listing of Net.auctionCache){
       const isMine=listing.seller_username===Net.username;
       const label=listing.quantity>1?`${listing.display_name} x${listing.quantity}`:listing.display_name;
       root.appendChild(h("div",{class:"tile row",style:{marginBottom:"6px",justifyContent:"space-between"}},[
-        h("div",{},[h("span",{style:{fontWeight:"bold"}},[label]), h("span",{class:"muted"},[` -- listed by ${listing.seller_character_name} (${listing.seller_username})`])]),
+        h("div",{},[h("span",{style:{fontWeight:"bold"}},[label]), h("span",{class:"muted"},[`, listed by ${listing.seller_character_name} (${listing.seller_username})`])]),
         h("div",{class:"row gap"},[
           h("span",{class:"gold-text"},[`${listing.price}g`]),
           isMine?h("button",{class:"danger",onClick:async ()=>{
@@ -2237,7 +2458,7 @@ function screenAuctionHouse(){
                 else if(r.refund.type==="herb") PS.addHerb(r.refund.item_key,r.refund.quantity);
                 PS.saveGame();
               }
-              setToast("Listing cancelled -- item returned to your bags.");
+              setToast("Listing cancelled, item returned to your bags.");
             }
             catch(e){ setToast(e.message+" (refreshing listings...)"); }
             Net.auctionCache=null;
@@ -2280,7 +2501,7 @@ function screenGamblingGoblin(){
     return root;
   }
 
-  root.appendChild(h("div",{class:"lore"},[`Pay ${Balance.GAMBLE_ITEM_COST} gold and the goblin reaches into his sack -- any slot, any tier, any rarity, entirely up to chance.`]));
+  root.appendChild(h("div",{class:"lore"},[`Pay ${Balance.GAMBLE_ITEM_COST} gold and the goblin reaches into his sack, any slot, any tier, any rarity, entirely up to chance.`]));
 
   if(GF.gambleReveal){
     const elapsed=Date.now()-GF.gambleReveal.startedAt;
@@ -2296,7 +2517,7 @@ function screenGamblingGoblin(){
     } else {
       if(!GF.gambleReveal.granted){
         GF.gambleReveal.granted=true;
-        if(!PS.addGear(GF.gambleReveal.item)) setToast("Your backpack is full -- the item slips from your hands and is lost!");
+        if(!PS.addGear(GF.gambleReveal.item)) setToast("Your backpack is full, the item slips from your hands and is lost!");
         autosave();
       }
       const inst=GF.gambleReveal.item;
@@ -2346,7 +2567,7 @@ function screenMasterTrial(){
   const nextId=DL.getNextClassId(PS.class_id);
   root.appendChild(h("h2",{},["Broken Bridge Challenge"]));
   // A failed attempt resets the player to level 1, which would normally fall back below
-  // the level gate below -- but the failed board must stay visible until the player
+  // the level gate below, but the failed board must stay visible until the player
   // acknowledges it and leaves, so the gate is skipped for that one render.
   if(!PS.canAttemptTrial() && !GF.trialJustFailed){
     root.appendChild(h("div",{class:"lore"},[`You must reach Level ${Balance.MASTER_TRIAL_LEVEL_REQUIREMENT} as a ${c.display_name} before the elders will test you.`]));
@@ -2354,12 +2575,12 @@ function screenMasterTrial(){
     return root;
   }
   if(!nextId){
-    root.appendChild(h("div",{class:"lore"},[`${c.display_name} is the final form of your path. There is nothing left to prove -- you have mastered the woods.`]));
+    root.appendChild(h("div",{class:"lore"},[`${c.display_name} is the final form of your path. There is nothing left to prove, you have mastered the woods.`]));
     root.appendChild(h("button",{onClick:()=>GF.goto("town")},["← Back to Town"]));
     return root;
   }
   const t=toastBox(); if(t) root.appendChild(t);
-  root.appendChild(h("div",{class:"lore"},[`Cross the ancient plank bridge to prove yourself worthy of becoming a ${DL.getClass(nextId).display_name}. Each step has a safe plank and a false one -- choose top or bottom. Fall, and the attempt ends there -- but the bridge remembers every safe step you've already found.`]));
+  root.appendChild(h("div",{class:"lore"},[`Cross the ancient plank bridge to prove yourself worthy of becoming a ${DL.getClass(nextId).display_name}. Each step has a safe plank and a false one, choose top or bottom. Fall, and the attempt ends there, but the bridge remembers every safe step you've already found.`]));
 
   const trialIndex=c.tier||1;
   const stagesRequired=Balance.trialStagesRequired(trialIndex);
@@ -2441,7 +2662,7 @@ function screenAdminPanel(){
     root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
     return root;
   }
-  root.appendChild(h("div",{class:"muted"},["For local testing only -- affects the currently loaded character."]));
+  root.appendChild(h("div",{class:"muted"},["For local testing only, affects the currently loaded character."]));
   root.appendChild(h("div",{class:"row",style:{marginTop:"10px",flexWrap:"wrap"}},[
     h("button",{onClick:()=>{PS.gold+=500;PS.saveGame();render();}},["+500 gold"]),
     h("button",{onClick:()=>{PS.materials+=200;PS.saveGame();render();}},["+200 materials"]),

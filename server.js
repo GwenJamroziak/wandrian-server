@@ -1,18 +1,18 @@
 "use strict";
 /**
- * Evergrind backend -- Phase 1 (accounts + persistent saves + graveyard + leaderboard + chat).
+ * Wandrian backend, Phase 1 (accounts + persistent saves + graveyard + leaderboard + chat).
  *
  * Deliberately minimal dependencies: Express for HTTP, ws for WebSocket chat, and Node's
  * built-in node:sqlite + node:crypto for storage/auth, so there is nothing here that needs
- * native compilation (no better-sqlite3/bcrypt) -- easier to deploy on any host.
+ * native compilation (no better-sqlite3/bcrypt), easier to deploy on any host.
  *
  * Requires Node.js 22.5+ (for node:sqlite). If your host is stuck on an older Node, swap the
- * DB layer for better-sqlite3 (same API shape) -- everything else is unaffected.
+ * DB layer for better-sqlite3 (same API shape), everything else is unaffected.
  *
  * IMPORTANT: this phase moves saves/accounts/chat/leaderboard server-side, which is what lets
  * friends log in from anywhere and keeps chat/leaderboard trustworthy. It does NOT yet stop a
  * player from editing their own client and calling PUT /api/characters/:slot with fabricated
- * numbers -- that requires moving combat/loot resolution server-side too (see combat.js / the
+ * numbers, that requires moving combat/loot resolution server-side too (see combat.js / the
  * next phase). Treat this phase as "shared state," not yet "cheat-proof."
  */
 
@@ -24,6 +24,10 @@ const { WebSocketServer } = require("ws");
 const { DatabaseSync } = require("node:sqlite");
 
 const PORT = process.env.PORT || 8787;
+// Filename kept as evergrind.db intentionally: your already-deployed server's real
+// database is at this path, and changing the default here would make a fresh restart
+// silently start a brand-new empty database instead of loading existing player data.
+// Rename the actual file (and set DB_PATH) yourself if you ever want it renamed.
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, "data", "evergrind.db");
 const CORS_ORIGIN = process.env.CORS_ORIGIN || "*"; // lock this down to your real domain in production
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -110,8 +114,9 @@ for (const stmt of [
   "ALTER TABLE leaderboard_bests ADD COLUMN hardcore INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE leaderboard_bests ADD COLUMN lifetime_xp INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE leaderboard_bests ADD COLUMN is_dead INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE accounts ADD COLUMN email TEXT",
 ]) {
-  try { db.exec(stmt); } catch (e) { /* column already exists -- fine */ }
+  try { db.exec(stmt); } catch (e) { /* column already exists, fine */ }
 }
 
 /* ---------------- auth helpers ---------------- */
@@ -126,13 +131,13 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function createAccount(username, passcode) {
+function createAccount(username, passcode, email) {
   const salt = crypto.randomBytes(16).toString("hex");
   const hash = hashPasscode(passcode, salt);
   const stmt = db.prepare(
-    "INSERT INTO accounts (username, passcode_hash, passcode_salt, created_at) VALUES (?, ?, ?, ?)"
+    "INSERT INTO accounts (username, passcode_hash, passcode_salt, email, created_at) VALUES (?, ?, ?, ?, ?)"
   );
-  const info = stmt.run(username, hash, salt, nowIso());
+  const info = stmt.run(username, hash, salt, email || null, nowIso());
   return Number(info.lastInsertRowid);
 }
 
@@ -193,25 +198,36 @@ app.use((req, res, next) => {
 });
 
 // Serve the game client itself, so the whole thing (client + API) is one deployable
-// unit on your domain -- put evergrind_web.html (renamed to index.html) in ./public.
+// unit on your domain, put index.html (the game client) in ./public.
 app.use(express.static(path.join(__dirname, "public")));
 
 function isValidUsername(u) {
   return typeof u === "string" && /^[A-Za-z0-9_\-]{3,20}$/.test(u);
 }
 
+// email is optional (v0.10): early testers can sign up with just a username and
+// password, no onboarding friction, if given, it must at least look like an email,
+// but a missing/blank email is never a reason to reject registration.
+function isValidOptionalEmail(e) {
+  if (e === undefined || e === null || e === "") return true;
+  return typeof e === "string" && e.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+}
+
 app.post("/api/register", (req, res) => {
-  const { username, passcode } = req.body || {};
+  const { username, passcode, email } = req.body || {};
   if (!isValidUsername(username)) {
     return res.status(400).json({ error: "Username must be 3-20 letters/numbers/_/- ." });
   }
   if (typeof passcode !== "string" || passcode.length < 4) {
-    return res.status(400).json({ error: "Passcode must be at least 4 characters." });
+    return res.status(400).json({ error: "Password must be at least 4 characters." });
+  }
+  if (!isValidOptionalEmail(email)) {
+    return res.status(400).json({ error: "That doesn't look like a valid email (or leave it blank)." });
   }
   if (findAccountByUsername(username)) {
     return res.status(409).json({ error: "That username is already taken." });
   }
-  const accountId = createAccount(username, passcode);
+  const accountId = createAccount(username, passcode, email);
   const token = createSession(accountId);
   res.json({ token, username });
 });
@@ -220,7 +236,7 @@ app.post("/api/login", (req, res) => {
   const { username, passcode } = req.body || {};
   const account = findAccountByUsername(username || "");
   if (!account || !verifyPasscode(account, passcode || "")) {
-    return res.status(401).json({ error: "Wrong username or passcode." });
+    return res.status(401).json({ error: "Wrong username or password." });
   }
   const token = createSession(account.id);
   res.json({ token, username: account.username });
@@ -339,7 +355,7 @@ app.get("/api/health", (req, res) => res.json({ ok: true, time: nowIso() }));
 
 /* ---------------- system chat announcements (trial results, hardcore deaths) ---------------- */
 // These are self-reported by the client (consistent with this phase's "not cheat-proof yet"
-// trust model -- see the top-of-file note) but are flavor-only chat text, no economy impact.
+// trust model, see the top-of-file note) but are flavor-only chat text, no economy impact.
 
 function broadcastSystemMessage(message) {
   const created_at = nowIso();
@@ -567,5 +583,5 @@ wss.on("connection", (ws, req) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Evergrind server listening on port ${PORT} (db: ${DB_PATH})`);
+  console.log(`Wandrian server listening on port ${PORT} (db: ${DB_PATH})`);
 });
