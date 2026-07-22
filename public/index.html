@@ -1,0 +1,1694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Evergrind</title>
+<style>
+:root{
+  --hp:#d94a4a; --stamina:#eae6d9; --xp:#9e59d9; --gold:#e0b23d;
+  --bg:#12140f; --panel:#1c2018; --panel2:#242a1e; --border:#3a4230;
+  --text:#e8e4d8; --muted:#9a9686; --accent:#4a7a3a;
+}
+*{box-sizing:border-box;}
+body{
+  margin:0; font-family:Georgia,'Times New Roman',serif; background:radial-gradient(ellipse at 50% 20%,#2a3322,#0c0e09 75%);
+  color:var(--text); min-height:100vh;
+}
+#app{max-width:1100px;margin:0 auto;padding:28px 24px 60px;}
+h1,h2,h3{margin:0 0 6px;}
+h1{font-size:2.4em;color:#fff;text-shadow:0 0 12px rgba(255,180,80,.35);}
+.subtitle{color:#f0d9a0;font-size:1.05em;margin-bottom:10px;}
+.lore{color:#d8d4c8;max-width:600px;line-height:1.5em;margin-bottom:14px;}
+.muted{color:var(--muted);font-size:.85em;}
+.flavor{color:#c0b8a0;font-style:italic;margin:6px 0 14px;}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+.col{display:flex;flex-direction:column;}
+.gap{gap:8px;}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:16px 0;}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:14px 16px;}
+.tile{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:10px 12px;}
+button{
+  font-family:inherit;background:#2a3020;color:var(--text);border:1px solid var(--border);
+  border-radius:6px;padding:10px 14px;cursor:pointer;font-size:.95em;transition:.12s;
+}
+button:hover:not(:disabled){background:#3a4a2a;border-color:#5a7a3a;}
+button:disabled{opacity:.45;cursor:not-allowed;}
+button.play:hover:not(:disabled){background:#2e4a78;border-color:#5a8ac9;font-weight:bold;}
+button.danger:hover:not(:disabled){background:#5a2a24;border-color:#8a4a3a;}
+button.wide{width:100%;}
+input[type=text]{
+  font-family:inherit;background:#1a1c14;border:1px solid var(--border);color:var(--text);
+  border-radius:5px;padding:8px 10px;font-size:.95em;
+}
+.bar-bg{background:#000;border-radius:4px;overflow:hidden;height:16px;border:1px solid rgba(255,255,255,.08);}
+.bar-fill{height:100%;transition:width .25s;}
+.bar-hp{background:var(--hp);} .bar-stamina{background:var(--stamina);} .bar-xp{background:var(--xp);} .bar-gold{background:var(--gold);}
+.hp-text{color:var(--hp);} .stamina-text{color:var(--stamina);} .xp-text{color:var(--xp);} .gold-text{color:var(--gold);}
+a.back-link,.linklike{color:#cbd9a0;cursor:pointer;text-decoration:underline;}
+.icon-badge{width:56px;height:56px;border-radius:50%;overflow:hidden;flex:none;background:#000;display:flex;align-items:center;justify-content:center;}
+.icon-badge svg{width:100%;height:100%;}
+.services{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:14px 0;}
+.maze-wrap{display:flex;gap:20px;align-items:flex-start;}
+.maze-grid{display:grid;gap:1px;background:#000;border:2px solid #333;}
+.maze-tile{width:34px;height:34px;}
+.side-panel{min-width:260px;display:flex;flex-direction:column;gap:8px;}
+hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
+.tooltip{position:relative;cursor:help;border-bottom:1px dotted var(--muted);}
+.tooltip:hover::after{
+  content:attr(data-tip);position:absolute;bottom:120%;left:0;background:#000;color:#fff;
+  padding:6px 8px;border-radius:4px;font-size:.8em;white-space:pre-line;width:220px;z-index:10;
+  box-shadow:0 2px 8px rgba(0,0,0,.6);
+}
+.plank-row{display:flex;gap:8px;margin:6px 0;}
+.plank-row button.locked-safe{background:#254a25;color:#9fe89f;border-color:#3a7a3a;}
+.plank-row button.locked-fail{background:#4a2020;color:#e89f9f;border-color:#7a3a3a;}
+.dim-note{color:#8a8676;font-size:.82em;}
+.version-tag{position:fixed;bottom:8px;right:12px;color:rgba(230,225,210,.6);font-size:.8em;}
+::-webkit-scrollbar{width:10px;} ::-webkit-scrollbar-thumb{background:#3a4230;border-radius:5px;}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="version-tag" id="versionTag"></div>
+<script>
+"use strict";
+
+/* =========================================================================
+   EVERGRIND -- browser port
+   Faithful re-implementation of the Godot/GDScript build's data + balance
+   + core loop as a single self-contained HTML/JS file, so it can be hosted
+   on literally any static host (no export templates, no COOP/COEP headers
+   needed) and friends can just open a link. See the in-game "About this
+   build" note in the admin panel for what's deferred vs. the native build
+   (Global Chat and the Gambling Goblin are stubs/omitted this round).
+   ========================================================================= */
+
+/* ---------- DATA ---------- */
+
+const CLASSES = {
+  wizard:{display_name:"Wizard",chain:"wizard",tier:1,next_class:"sorcerer",role:"damage",description:"Fragile but hits hard with raw magic.",base_hp:60,hp_per_level:8,base_damage_min:8,base_damage_max:14,damage_per_level:1.4,base_crit:0.05,armor:0.0,regen:0.0},
+  thornguard:{display_name:"Thornguard",chain:"thornguard",tier:1,next_class:"stonewarden",role:"tank",description:"Bark-skinned front-liner who shrugs off damage like rain off leaves.",base_hp:100,hp_per_level:14,base_damage_min:6,base_damage_max:10,damage_per_level:1.1,base_crit:0.05,armor:0.15,regen:0.0},
+  windrider:{display_name:"Windrider",chain:"windrider",tier:1,next_class:"galestrider",role:"damage",description:"Balanced fighter, quick as a gust through the canopy, high crit chance.",base_hp:75,hp_per_level:10,base_damage_min:7,base_damage_max:12,damage_per_level:1.2,base_crit:0.20,armor:0.0,regen:0.0},
+  sorcerer:{display_name:"Sorcerer",chain:"wizard",tier:2,next_class:"warlock",role:"damage",description:"Channels bigger, wilder spells than a Wizard ever could.",base_hp:80,hp_per_level:10,base_damage_min:12,base_damage_max:20,damage_per_level:1.9,base_crit:0.08,armor:0.0,regen:0.0},
+  stonewarden:{display_name:"Stonewarden",chain:"thornguard",tier:2,next_class:"treesinger",role:"tank",description:"Trades a little bark for a lot of stone -- heavier, harder to put down.",base_hp:140,hp_per_level:18,base_damage_min:10,base_damage_max:16,damage_per_level:1.6,base_crit:0.10,armor:0.12,regen:0.0},
+  galestrider:{display_name:"Galestrider",chain:"windrider",tier:2,next_class:"shadowbloom",role:"stealth",description:"Faster, sharper, deadlier with every shot on the wind.",base_hp:100,hp_per_level:13,base_damage_min:11,base_damage_max:18,damage_per_level:1.7,base_crit:0.25,armor:0.0,regen:0.0},
+  warlock:{display_name:"Warlock",chain:"wizard",tier:3,next_class:"necromancer",role:"summoner",description:"Dark pacts trade a little self-healing for serious power.",base_hp:105,hp_per_level:13,base_damage_min:16,base_damage_max:26,damage_per_level:2.4,base_crit:0.10,armor:0.0,regen:1.0},
+  treesinger:{display_name:"Treesinger",chain:"thornguard",tier:3,next_class:"rootbinder",role:"hybrid",description:"Calls the grove to its side -- disciplined, and mends wounds mid-fight.",base_hp:160,hp_per_level:20,base_damage_min:14,base_damage_max:22,damage_per_level:2.0,base_crit:0.15,armor:0.18,regen:2.5},
+  shadowbloom:{display_name:"Shadowbloom",chain:"windrider",tier:3,next_class:"druid",role:"stealth",description:"Blooms in the shadows between strikes -- pure burst damage built around crits.",base_hp:125,hp_per_level:16,base_damage_min:18,base_damage_max:28,damage_per_level:2.4,base_crit:0.35,armor:0.0,regen:0.0},
+  necromancer:{display_name:"Necromancer",chain:"wizard",tier:4,next_class:null,role:"summoner",description:"Wizard chain's endgame form -- commands dark power and a steady drain of life.",base_hp:135,hp_per_level:17,base_damage_min:22,base_damage_max:34,damage_per_level:3.0,base_crit:0.12,armor:0.0,regen:1.5},
+  rootbinder:{display_name:"Rootbinder",chain:"thornguard",tier:4,next_class:"emberpriest",role:"hybrid",description:"Binds foes in living roots to shield its allies -- heals as reliably as it blocks.",base_hp:210,hp_per_level:26,base_damage_min:18,base_damage_max:28,damage_per_level:2.6,base_crit:0.12,armor:0.25,regen:3.5},
+  druid:{display_name:"Druid",chain:"windrider",tier:4,next_class:null,role:"hybrid",description:"Windrider chain's endgame form -- nature's balance of bite and resilience.",base_hp:160,hp_per_level:20,base_damage_min:24,base_damage_max:36,damage_per_level:3.1,base_crit:0.20,armor:0.08,regen:2.0},
+  emberpriest:{display_name:"Emberpriest",chain:"thornguard",tier:5,next_class:null,role:"healer",description:"Thornguard chain's endgame form -- carries the last ember, trades raw damage for huge sustain.",base_hp:190,hp_per_level:24,base_damage_min:16,base_damage_max:24,damage_per_level:2.3,base_crit:0.10,armor:0.20,regen:6.0},
+};
+
+const MONSTERS = [
+  {id:"sprout",name:"Sprout",tier:"common",base_hp:20,base_damage_min:2,base_damage_max:4,base_xp:8,gold_min:1,gold_max:4,loot_table:"common"},
+  {id:"mosshide",name:"Mosshide",tier:"common",base_hp:22,base_damage_min:3,base_damage_max:6,base_xp:8,gold_min:2,gold_max:5,loot_table:"common"},
+  {id:"windwisp",name:"Windwisp",tier:"common",base_hp:16,base_damage_min:2,base_damage_max:5,base_xp:7,gold_min:1,gold_max:3,loot_table:"common"},
+  {id:"pebblekin",name:"Pebblekin",tier:"common",base_hp:26,base_damage_min:3,base_damage_max:6,base_xp:9,gold_min:2,gold_max:5,loot_table:"common"},
+  {id:"cinderling",name:"Cinderling",tier:"common",base_hp:24,base_damage_min:4,base_damage_max:7,base_xp:9,gold_min:2,gold_max:6,loot_table:"common"},
+  {id:"bramble_knight",name:"Bramble Knight",tier:"uncommon",base_hp:38,base_damage_min:6,base_damage_max:10,base_xp:12,gold_min:4,gold_max:10,loot_table:"uncommon"},
+  {id:"thornling",name:"Thornling",tier:"uncommon",base_hp:32,base_damage_min:6,base_damage_max:10,base_xp:12,gold_min:3,gold_max:9,loot_table:"uncommon"},
+  {id:"boglurker",name:"Boglurker",tier:"uncommon",base_hp:42,base_damage_min:5,base_damage_max:9,base_xp:12,gold_min:3,gold_max:8,loot_table:"uncommon"},
+  {id:"emberkin",name:"Emberkin",tier:"uncommon",base_hp:28,base_damage_min:7,base_damage_max:12,base_xp:13,gold_min:4,gold_max:9,loot_table:"uncommon"},
+  {id:"fernstalker",name:"Fernstalker",tier:"uncommon",base_hp:30,base_damage_min:8,base_damage_max:13,base_xp:13,gold_min:4,gold_max:10,loot_table:"uncommon"},
+  {id:"vinewraith",name:"Vinewraith",tier:"rare",base_hp:65,base_damage_min:10,base_damage_max:16,base_xp:18,gold_min:8,gold_max:16,loot_table:"rare"},
+  {id:"stumplurker",name:"Stumplurker",tier:"rare",base_hp:58,base_damage_min:9,base_damage_max:15,base_xp:17,gold_min:7,gold_max:15,loot_table:"rare"},
+  {id:"ashwalker",name:"Ashwalker",tier:"rare",base_hp:60,base_damage_min:8,base_damage_max:14,base_xp:18,gold_min:8,gold_max:18,loot_table:"rare"},
+  {id:"stormroot",name:"Stormroot",tier:"rare",base_hp:50,base_damage_min:11,base_damage_max:18,base_xp:19,gold_min:8,gold_max:17,loot_table:"rare"},
+  {id:"bark_golem",name:"Bark Golem",tier:"rare",base_hp:90,base_damage_min:9,base_damage_max:14,base_xp:20,gold_min:10,gold_max:20,loot_table:"rare"},
+  {id:"ancient_treant",name:"Ancient Treant",tier:"epic",base_hp:95,base_damage_min:16,base_damage_max:24,base_xp:30,gold_min:16,gold_max:28,loot_table:"epic"},
+  {id:"wildfire",name:"Wildfire",tier:"epic",base_hp:100,base_damage_min:18,base_damage_max:28,base_xp:34,gold_min:18,gold_max:32,loot_table:"epic"},
+  {id:"stonewaker",name:"Stonewaker",tier:"epic",base_hp:110,base_damage_min:17,base_damage_max:26,base_xp:32,gold_min:17,gold_max:30,loot_table:"epic"},
+  {id:"tempest_elm",name:"Tempest Elm",tier:"epic",base_hp:105,base_damage_min:19,base_damage_max:29,base_xp:36,gold_min:19,gold_max:34,loot_table:"epic"},
+];
+
+const ITEMS = {
+  health_potion:{name:"Health Potion",type:"consumable",heal_amount:30,sell_value:3},
+  greater_health_potion:{name:"Greater Health Potion",type:"consumable",heal_amount:60,sell_value:7},
+  stamina_potion:{name:"Stamina Potion",type:"consumable",stamina_amount:50,sell_value:4},
+  greater_stamina_potion:{name:"Greater Stamina Potion",type:"consumable",stamina_amount:100,sell_value:9},
+  scroll_of_challenge_1:{name:"Scroll of Challenge I",type:"scroll",level_bonus:1,sell_value:6},
+  scroll_of_challenge_2:{name:"Scroll of Challenge II",type:"scroll",level_bonus:2,sell_value:14},
+  scroll_of_challenge_3:{name:"Scroll of Challenge III",type:"scroll",level_bonus:3,sell_value:30},
+  traveler_pouch:{name:"Traveler's Pouch",type:"bag",capacity:8,sell_value:10},
+  woven_bag:{name:"Woven Bramble Bag",type:"bag",capacity:16,sell_value:20},
+  bramble_sack:{name:"Bramble Sack",type:"bag",capacity:24,sell_value:32},
+  rootpack_ancient:{name:"Ancient Rootpack",type:"bag",capacity:40,sell_value:60},
+};
+
+const HERBS = {
+  sunpetal:{name:"Sunpetal Bloom",found_in:"Herb nodes in any maze; also drops from common-tier kills."},
+  moonleaf:{name:"Moonleaf",found_in:"Herb nodes in any maze."},
+  emberroot:{name:"Ember Root",found_in:"Herb nodes in any maze; also drops from uncommon-tier kills."},
+  frostvine:{name:"Frostvine",found_in:"Herb nodes in any maze; also drops from rare/epic-tier kills."},
+};
+
+const RECIPES = [
+  {id:"brew_health_potion",result_item:"health_potion",herbs:{sunpetal:2,moonleaf:1}},
+  {id:"brew_greater_health_potion",result_item:"greater_health_potion",herbs:{sunpetal:2,emberroot:1}},
+  {id:"brew_stamina_potion",result_item:"stamina_potion",herbs:{moonleaf:2}},
+  {id:"brew_stamina_potion_deluxe",result_item:"greater_stamina_potion",herbs:{moonleaf:1,frostvine:1}},
+];
+
+const LOOT_TABLES = {
+  common:[{type:"nothing",weight:55},{type:"gear",weight:15},{type:"consumable",weight:20,item_id:"health_potion"},{type:"herb",weight:10,herb_id:"sunpetal"}],
+  uncommon:[{type:"nothing",weight:50},{type:"gear",weight:20},{type:"consumable",weight:15,item_id:"health_potion"},{type:"herb",weight:15,herb_id:"emberroot"}],
+  rare:[{type:"nothing",weight:40},{type:"gear",weight:30},{type:"consumable",weight:15,item_id:"greater_health_potion"},{type:"herb",weight:15,herb_id:"frostvine"}],
+  epic:[{type:"nothing",weight:30},{type:"gear",weight:45},{type:"consumable",weight:15,item_id:"greater_health_potion"},{type:"herb",weight:10,herb_id:"frostvine"}],
+};
+
+const PORTRAITS = {
+wizard:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><path d="M100,20 L150,90 L50,90 Z" fill="#4a6fd0" stroke="#2b2b2b" stroke-width="4"/><circle cx="135" cy="35" r="7" fill="#f4d94a"/><path d="M60,95 C60,150 60,175 100,180 C140,175 140,150 140,95 Z" fill="#5d7fe0" stroke="#2b2b2b" stroke-width="4"/><circle cx="84" cy="118" r="9" fill="#ffffff"/><circle cx="116" cy="118" r="9" fill="#ffffff"/><circle cx="86" cy="120" r="4" fill="#222"/><circle cx="118" cy="120" r="4" fill="#222"/><path d="M88,140 Q100,150 112,140" stroke="#2b2b2b" stroke-width="3" fill="none" stroke-linecap="round"/></svg>`,
+thornguard:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#e7dcc2"/><ellipse cx="70" cy="86.8" rx="30" ry="34" fill="#6b4a2f"/><circle cx="70" cy="50.4" r="20" fill="#e8c9a0"/><circle cx="63" cy="49" r="2.5" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.5" fill="#2a2a2a"/><path d="M 40,92 Q 70,72 100,92 L 96,110 Q 70,122 44,110 Z" fill="#4b3524"/><ellipse cx="70" cy="45" rx="22" ry="10" fill="#2e4526"/><polygon points="55,42 60,20 65,42" fill="#3f6b3f"/><polygon points="70,42 75,16 80,42" fill="#3f6b3f"/><polygon points="85,42 88,22 92,42" fill="#3f6b3f"/></svg>`,
+windrider:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#d7ede6"/><ellipse cx="70" cy="86.8" rx="30" ry="34" fill="#3f7d4e"/><circle cx="70" cy="50.4" r="20" fill="#e8c9a0"/><circle cx="63" cy="49" r="2.5" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.5" fill="#2a2a2a"/><path d="M 42,95 Q 70,80 98,95 L 92,112 Q 70,120 48,112 Z" fill="#255530"/><path d="M 30,70 Q 70,52 110,70" stroke="#8fd0c4" stroke-width="5" fill="none" opacity="0.8"/><ellipse cx="70" cy="40" rx="24" ry="11" fill="#3f7d4e"/><path d="M 100,70 Q 118,60 112,88" stroke="#5f9f68" stroke-width="4" fill="none"/></svg>`,
+sorcerer:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#dcd4ea"/><ellipse cx="70" cy="88" rx="32" ry="36" fill="#3a2c6b"/><circle cx="70" cy="50" r="19" fill="#e8c9a0"/><circle cx="63" cy="49" r="2.4" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.4" fill="#2a2a2a"/><path d="M 40,94 Q 70,76 100,94 L 94,116 Q 70,126 46,116 Z" fill="#4a3a8a"/><path d="M 70,10 L 92,48 Q 70,40 48,48 Z" fill="#5a3fa0"/><circle cx="70" cy="18" r="4" fill="#e8c96a"/><circle cx="100" cy="86" r="10" fill="#b39cff" opacity="0.85"/><circle cx="100" cy="86" r="15" fill="#b39cff" opacity="0.3"/></svg>`,
+warlock:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#c9b8c4"/><ellipse cx="70" cy="88" rx="32" ry="36" fill="#2a1830"/><circle cx="70" cy="50" r="19" fill="#d8b592"/><circle cx="63" cy="49" r="2.4" fill="#7a2a2a"/><circle cx="77" cy="49" r="2.4" fill="#7a2a2a"/><path d="M 40,94 Q 70,76 100,94 L 94,116 Q 70,126 46,116 Z" fill="#3a1e40"/><path d="M 54,36 Q 48,24 42,20 Q 50,28 52,38 Z" fill="#4a2a2a"/><path d="M 86,36 Q 92,24 98,20 Q 90,28 88,38 Z" fill="#4a2a2a"/><path d="M 96,90 Q 108,84 108,96 Q 100,94 96,90 Z" fill="#9a3fbf" opacity="0.7"/><path d="M 100,100 Q 112,98 110,110 Q 102,106 100,100 Z" fill="#9a3fbf" opacity="0.5"/></svg>`,
+necromancer:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#a8b8a8"/><ellipse cx="70" cy="88" rx="32" ry="36" fill="#1a1a1a"/><circle cx="70" cy="50" r="19" fill="#c9c9b8"/><circle cx="63" cy="49" r="2.6" fill="#4fff8a"/><circle cx="77" cy="49" r="2.6" fill="#4fff8a"/><path d="M 40,94 Q 70,76 100,94 L 94,116 Q 70,126 46,116 Z" fill="#242424"/><path d="M 46,42 Q 70,20 94,42 Q 88,30 70,28 Q 52,30 46,42 Z" fill="#141414"/><circle cx="70" cy="104" r="7" fill="#e8e4d0"/><circle cx="67" cy="103" r="1.6" fill="#141414"/><circle cx="73" cy="103" r="1.6" fill="#141414"/><circle cx="100" cy="88" r="6" fill="#4fff8a" opacity="0.6"/><circle cx="40" cy="88" r="5" fill="#4fff8a" opacity="0.5"/></svg>`,
+stonewarden:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#d8d4c8"/><ellipse cx="70" cy="88" rx="34" ry="36" fill="#5a5850"/><circle cx="70" cy="50" r="20" fill="#c99a70"/><circle cx="63" cy="49" r="2.5" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.5" fill="#2a2a2a"/><path d="M 38,92 Q 70,74 102,92 L 96,118 Q 70,130 44,118 Z" fill="#6e6a5e"/><ellipse cx="44" cy="82" rx="14" ry="12" fill="#8a8678"/><ellipse cx="96" cy="82" rx="14" ry="12" fill="#8a8678"/><polygon points="55,42 60,20 65,42" fill="#3f6b3f"/><polygon points="85,42 88,22 92,42" fill="#3f6b3f"/></svg>`,
+treesinger:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#e0e8d0"/><ellipse cx="70" cy="88" rx="32" ry="36" fill="#4a6a3a"/><circle cx="70" cy="50" r="19" fill="#e8c9a0"/><circle cx="63" cy="49" r="2.4" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.4" fill="#2a2a2a"/><path d="M 40,92 Q 70,74 100,92 L 94,116 Q 70,126 46,116 Z" fill="#5a8a48"/><polygon points="50,44 56,18 62,44" fill="#3f8a3f"/><polygon points="62,40 70,14 78,40" fill="#4fae4f"/><polygon points="78,44 84,18 90,44" fill="#3f8a3f"/><circle cx="42" cy="92" r="7" fill="#8fce6a" opacity="0.8"/><circle cx="98" cy="92" r="7" fill="#8fce6a" opacity="0.8"/></svg>`,
+rootbinder:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#c8d4c0"/><ellipse cx="70" cy="88" rx="34" ry="37" fill="#3a4a2a"/><circle cx="70" cy="50" r="19" fill="#c99a70"/><circle cx="63" cy="49" r="2.4" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.4" fill="#2a2a2a"/><path d="M 38,92 Q 70,74 102,92 L 96,120 Q 70,132 44,120 Z" fill="#4a5e34"/><path d="M 38,90 Q 30,100 40,112 Q 32,116 34,126" stroke="#5a4028" stroke-width="4" fill="none" stroke-linecap="round"/><path d="M 102,90 Q 110,100 100,112 Q 108,116 106,126" stroke="#5a4028" stroke-width="4" fill="none" stroke-linecap="round"/><polygon points="58,42 63,22 68,42" fill="#3f6b3f"/><polygon points="72,42 77,22 82,42" fill="#3f6b3f"/></svg>`,
+emberpriest:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#e8d4c0"/><circle cx="70" cy="42" r="26" fill="#ffcf7a" opacity="0.35"/><ellipse cx="70" cy="88" rx="32" ry="36" fill="#7a2a1e"/><circle cx="70" cy="50" r="19" fill="#dcae82"/><circle cx="63" cy="49" r="2.4" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.4" fill="#2a2a2a"/><path d="M 40,92 Q 70,74 100,92 L 94,118 Q 70,130 46,118 Z" fill="#9a3a28"/><path d="M 56,74 Q 70,86 84,74 L 84,84 Q 70,94 56,84 Z" fill="#e0c458"/><circle cx="70" cy="112" r="8" fill="#ffcf7a"/><circle cx="70" cy="112" r="13" fill="#ff9d3d" opacity="0.35"/></svg>`,
+galestrider:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#cfe4ea"/><ellipse cx="70" cy="88" rx="30" ry="35" fill="#2e5a68"/><circle cx="70" cy="50" r="19" fill="#e8c9a0"/><path d="M 54,46 Q 70,40 86,46 L 84,54 Q 70,50 56,54 Z" fill="#1c3a44"/><path d="M 40,92 Q 70,74 100,92 L 94,114 Q 70,124 46,114 Z" fill="#3f7a8a"/><path d="M 40,90 L 20,100 L 38,102 Z" fill="#8fd0dc"/><path d="M 100,90 L 120,100 L 102,102 Z" fill="#8fd0dc"/><path d="M 44,110 L 24,124 L 44,120 Z" fill="#6fb0c0"/><path d="M 96,110 L 116,124 L 96,120 Z" fill="#6fb0c0"/></svg>`,
+shadowbloom:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#c0b0c8"/><ellipse cx="70" cy="88" rx="30" ry="35" fill="#241830"/><circle cx="70" cy="50" r="19" fill="#d8b0a8"/><path d="M 54,46 Q 70,40 86,46 L 84,54 Q 70,50 56,54 Z" fill="#180f1e"/><path d="M 40,90 Q 70,72 100,90 L 94,112 Q 70,122 46,112 Z" fill="#3a2444"/><g fill="#e05fa0"><circle cx="40" cy="94" r="5"/><circle cx="34" cy="90" r="3.5"/><circle cx="46" cy="88" r="3.5"/><circle cx="100" cy="94" r="5"/><circle cx="106" cy="90" r="3.5"/><circle cx="94" cy="88" r="3.5"/></g><circle cx="40" cy="94" r="2" fill="#fff0a0"/><circle cx="100" cy="94" r="2" fill="#fff0a0"/></svg>`,
+druid:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#d8e0c4"/><ellipse cx="70" cy="88" rx="32" ry="36" fill="#5a4a2e"/><circle cx="70" cy="50" r="19" fill="#c99a70"/><circle cx="63" cy="49" r="2.4" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.4" fill="#2a2a2a"/><path d="M 40,92 Q 70,74 100,92 L 94,116 Q 70,126 46,116 Z" fill="#3f6b3f"/><path d="M 56,38 Q 48,26 38,24 Q 48,32 50,42 M 50,32 Q 42,28 36,30" stroke="#7a5a3a" stroke-width="2.2" fill="none"/><path d="M 84,38 Q 92,26 102,24 Q 92,32 90,42 M 90,32 Q 98,28 104,30" stroke="#7a5a3a" stroke-width="2.2" fill="none"/><polygon points="62,40 70,22 78,40" fill="#4fae4f"/></svg>`,
+};
+
+const LOGO_SVG = `<svg viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="badgeBg" cx="50%" cy="42%" r="65%"><stop offset="0%" stop-color="#2c4a2e"/><stop offset="70%" stop-color="#16281a"/><stop offset="100%" stop-color="#0d1a10"/></radialGradient><linearGradient id="ring" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#f0c96a"/><stop offset="50%" stop-color="#b8862f"/><stop offset="100%" stop-color="#f0c96a"/></linearGradient><linearGradient id="bladeLight" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#3f7a3a"/><stop offset="100%" stop-color="#8fce6a"/></linearGradient><linearGradient id="bladeDark" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#2c5c2a"/><stop offset="100%" stop-color="#5e9b4c"/></linearGradient></defs><circle cx="80" cy="80" r="76" fill="url(#ring)"/><circle cx="80" cy="80" r="70" fill="url(#badgeBg)"/><path d="M 80,118 C 68,100 52,86 40,54 C 58,66 72,82 78,104 Z" fill="url(#bladeDark)"/><path d="M 80,118 C 92,100 108,86 120,54 C 102,66 88,82 82,104 Z" fill="url(#bladeDark)"/><path d="M 80,120 C 72,96 66,74 62,42 C 76,58 82,82 82,110 Z" fill="url(#bladeLight)"/><path d="M 80,120 C 88,96 94,74 98,42 C 84,58 78,82 78,110 Z" fill="url(#bladeLight)"/><circle cx="80" cy="122" r="16" fill="#ff9d3d" opacity="0.5"/><circle cx="80" cy="124" r="5" fill="#ffdd9a"/></svg>`;
+
+/* ---------- BALANCE ---------- */
+
+const Balance = {
+  LEVEL_CAP:60, KILLS_PER_LEVEL_TARGET:20, MONSTER_BASE_XP:8.0, AREA_XP_GROWTH:0.062,
+  AREA_LEVEL_MIN:1, AREA_LEVEL_MAX:100, AREA_HP_GROWTH:0.07, AREA_DAMAGE_GROWTH:0.05, AREA_LOOT_GROWTH:0.05,
+  CRIT_MULTIPLIER:1.75, DEATH_GOLD_LOSS_PCT:0.10,
+  ENCOUNTER_CHANCE_PER_STEP:0.12, TRAP_CHANCE_PER_TILE:0.05, CHEST_CHANCE_PER_MAZE:0.35, SHRINE_CHANCE_PER_MAZE:0.45,
+  OBSTACLE_DENSITY:0.18, GRASS_PATCH_COUNT:18, HERB_NODE_COUNT:2,
+  STAMINA_MAX_BASE:100.0, STAMINA_COST_PER_STEP:1.0,
+  SHRINE_STAMINA_BUFF_PCT:1.0, SHRINE_XP_BUFF_MULT:1.5, SHRINE_XP_BUFF_ENCOUNTERS:20,
+  TRAP_DAMAGE_MIN:4.0, TRAP_DAMAGE_MAX:12.0, TRAP_STAMINA_LOSS:20.0, TRAP_REGENERATE_MAZE_CHANCE:0.5,
+  CHEST_LOOT_MULTIPLIER:2.5, CHEST_SCROLL_CHANCE:0.12, CHEST_HITS_MIN:3, CHEST_HITS_MAX:5,
+  CAMPFIRE_REGEN_PER_SECOND:1.0, CAMPFIRE_STAMINA_REGEN_PER_SECOND:5.0,
+  EXIT_DEPTH_BONUS_PER_DESCENT:1, TRAPDOOR_DEPTH_PENALTY:1,
+  CHARACTER_NAME_MAX_LEN:20, ELEMENT_ITEM_CHANCE:0.3,
+  ELEMENT_IDS:["fire","wind","earth","water"],
+  ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
+  ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
+  GAME_VERSION:"v0.7.3-web",
+  TOWN_1_NAME:"Emberroot Camp", NPC_BLACKSMITH_NAME:"Thane Ironvein", NPC_ALCHEMIST_NAME:"Ysolde Frostvine", NPC_MERCHANT_NAME:"Barnaby Fitch",
+  ITEM_TIER_MAX:5, ITEM_STAT_PER_TIER:5, ITEM_TIER_ADJECTIVES:["Withered","Budding","Blooming","Ancient","Eternal"],
+  RARITY_TABLE:[{name:"Common",slots:1,weight:60},{name:"Uncommon",slots:2,weight:25},{name:"Rare",slots:3,weight:10},{name:"Epic",slots:5,weight:4},{name:"Legendary",slots:8,weight:1}],
+  AFFIX_POOL:["damage","hp","crit","armor","regen","gold_find","xp_find","stamina_max"],
+  BASE_INVENTORY_SLOTS:16, MAX_BAG_SLOTS:3, BAG_BUY_GOLD_PER_CAPACITY:4, BAG_CRAFT_MATERIALS_PER_CAPACITY:3,
+  VENDOR_MARKUP:3,
+  SALVAGE_MATERIALS_PER_SLOT:3, REROLL_MATERIAL_COST_MULT:2, SELL_GOLD_PER_TIER:8, SELL_GOLD_PER_SLOT:4,
+  TRIAL_STAGE_PASS_CHANCE:0.65, TRIAL_MAX_STAGES:3, BRIDGE_ROWS_PER_STAGE:10,
+  KILL_STREAK_STAT_GROWTH_PER_KILL:0.015, KILL_STREAK_LOOT_GROWTH_PER_KILL:0.02, KILL_STREAK_CAP:40,
+  ADMIN_PASSWORD:"devmode", MAX_CHARACTER_SLOTS:6,
+
+  killStreakStatMult(s){return 1.0+this.KILL_STREAK_STAT_GROWTH_PER_KILL*Math.min(s,this.KILL_STREAK_CAP);},
+  killStreakLootMult(s){return 1.0+this.KILL_STREAK_LOOT_GROWTH_PER_KILL*Math.min(s,this.KILL_STREAK_CAP);},
+  xpRequiredForLevel(level){return Math.round(this.KILLS_PER_LEVEL_TARGET*this.monsterXpReward(this.MONSTER_BASE_XP,level));},
+  monsterXpReward(baseXp,areaLevel){return baseXp*Math.pow(1.0+this.AREA_XP_GROWTH,areaLevel);},
+  monsterHp(baseHp,areaLevel){return baseHp*Math.pow(1.0+this.AREA_HP_GROWTH,areaLevel);},
+  monsterDamage(baseDmg,areaLevel){return baseDmg*Math.pow(1.0+this.AREA_DAMAGE_GROWTH,areaLevel);},
+  lootMultiplier(areaLevel){return Math.pow(1.0+this.AREA_LOOT_GROWTH,areaLevel);},
+  itemTierForAreaLevel(areaLevel){return clampi(1+Math.floor(areaLevel/15.0),1,this.ITEM_TIER_MAX);},
+  itemTierStatRange(tier){const t=clampi(tier,1,this.ITEM_TIER_MAX);return [(t-1)*this.ITEM_STAT_PER_TIER+1,t*this.ITEM_STAT_PER_TIER];},
+  itemTierAdjective(tier){return this.ITEM_TIER_ADJECTIVES[clampi(tier-1,0,this.ITEM_TIER_ADJECTIVES.length-1)];},
+  rollRarity(){
+    let total=0; for(const r of this.RARITY_TABLE) total+=r.weight;
+    let roll=Math.floor(Math.random()*total), cum=0;
+    for(const r of this.RARITY_TABLE){cum+=r.weight; if(roll<cum) return r;}
+    return this.RARITY_TABLE[0];
+  },
+  trialStagesRequired(trialIndex){return clampi(1+Math.floor((trialIndex-1)/2.0),1,this.TRIAL_MAX_STAGES);},
+  trialOverallOdds(trialIndex){return Math.pow(this.TRIAL_STAGE_PASS_CHANCE,this.trialStagesRequired(trialIndex));},
+  bridgeRowSurvivalChance(stagePassChance,rows){return Math.pow(stagePassChance,1.0/rows);},
+  salvageValue(tier,slots){return tier*slots*this.SALVAGE_MATERIALS_PER_SLOT;},
+  rerollCost(tier,slots){return this.salvageValue(tier,slots)*this.REROLL_MATERIAL_COST_MULT;},
+  sellValue(tier,slots){return tier*this.SELL_GOLD_PER_TIER+slots*this.SELL_GOLD_PER_SLOT;},
+  bagBuyPrice(cap){return cap*this.BAG_BUY_GOLD_PER_CAPACITY;},
+  bagCraftCost(cap){return cap*this.BAG_CRAFT_MATERIALS_PER_CAPACITY;},
+};
+
+function clampi(v,lo,hi){return Math.max(lo,Math.min(hi,v));}
+function clampf(v,lo,hi){return Math.max(lo,Math.min(hi,v));}
+function randi(n){return Math.floor(Math.random()*n);}
+function randRange(a,b){return a+Math.random()*(b-a);}
+function randIntRange(a,b){return a+Math.floor(Math.random()*(b-a+1));}
+function pick(arr){return arr[randi(arr.length)];}
+
+/* ---------- DataLoader-equivalent lookups ---------- */
+
+const DL = {
+  getClass(id){return CLASSES[id]||{};},
+  starterClassIds(){return Object.keys(CLASSES).filter(id=>CLASSES[id].tier===1);},
+  getNextClassId(id){const c=this.getClass(id); return c.next_class||"";},
+  getItem(id){return ITEMS[id]||{};},
+  getMonster(id){return MONSTERS.find(m=>m.id===id)||{};},
+  getHerb(id){return HERBS[id]||{};},
+  allHerbIds(){return Object.keys(HERBS);},
+  allRecipes(){return RECIPES;},
+  pickRandomMonsterForArea(areaLevel){
+    let pool=MONSTERS.filter(m=>{
+      if(m.tier==="common") return true;
+      if(m.tier==="uncommon") return areaLevel>=8;
+      if(m.tier==="rare") return areaLevel>=20;
+      if(m.tier==="epic") return areaLevel>=35;
+      return false;
+    });
+    if(pool.length===0) pool=MONSTERS;
+    return pick(pool);
+  },
+  rollLoot(tableId){
+    const table=LOOT_TABLES[tableId]||[];
+    if(table.length===0) return {type:"nothing"};
+    let total=0; for(const e of table) total+=e.weight;
+    if(total<=0) return {type:"nothing"};
+    let roll=randi(total), cum=0;
+    for(const e of table){cum+=e.weight; if(roll<cum) return e;}
+    return {type:"nothing"};
+  },
+};
+
+/* ---------- ItemFactory-equivalent ---------- */
+
+const IF = {
+  BASE_NAMES:{
+    weapon:["Twig Wand","Bramblestaff","Rootcarver","Thornbow","Charwood Axe","Emberbrand"],
+    head:["Bramble Circlet","Mosscap","Antlercrown","Leafwood Hood"],
+    shoulders:["Bark Mantle","Rootguard Pauldrons","Thistle Shoulderguard"],
+    armor:["Big Leaf Wrap","Bark Plate","Mosscloak","Reedmail","Ashen Hide"],
+    pants:["Root-woven Leggings","Bark Greaves","Vine Trousers"],
+    gloves:["Thornweave Gloves","Barkgrip Gauntlets","Mossback Handwraps"],
+    boots:["Rootstep Boots","Mossy Treads","Bramblehide Boots"],
+    ring:["Acorn Ring","Petal Ring","Vinewrought Ring"],
+    amulet:["Emberstone Pendant","Driftwood Amulet","Heartwood Talisman"],
+    belt:["Vine Cinch","Barkweave Belt","Root Sash"],
+  },
+  GENERATION_SLOTS:["weapon","head","shoulders","armor","pants","gloves","boots","ring","amulet","belt"],
+  EQUIPPED_SLOT_KEYS:["weapon","head","shoulders","armor","pants","gloves","boots","ring1","ring2","amulet","belt"],
+  SLOT_LABELS:{weapon:"Weapon",head:"Head",shoulders:"Shoulders",armor:"Armor",pants:"Pants",gloves:"Gloves",boots:"Boots",ring1:"Ring 1",ring2:"Ring 2",amulet:"Amulet",belt:"Belt"},
+
+  slotLabel(slot){return this.SLOT_LABELS[slot]||slot;},
+
+  generate(tier, slot=""){
+    let chosenSlot=slot;
+    if(!chosenSlot||!this.BASE_NAMES[chosenSlot]) chosenSlot=pick(this.GENERATION_SLOTS);
+    const baseName=pick(this.BASE_NAMES[chosenSlot]||["Item"]);
+    const rarity=Balance.rollRarity();
+    const slotCount=rarity.slots;
+    const [lo,hi]=Balance.itemTierStatRange(tier);
+    let pool=[...Balance.AFFIX_POOL];
+    shuffle(pool);
+    let element="";
+    if(Math.random()<Balance.ELEMENT_ITEM_CHANCE){
+      element=pick(Balance.ELEMENT_IDS);
+      const biasStat=Balance.ELEMENT_AFFIX_BIAS[element]||"";
+      if(biasStat && pool.includes(biasStat)){
+        pool=pool.filter(s=>s!==biasStat);
+        pool.unshift(biasStat);
+      }
+    }
+    const affixCount=Math.min(slotCount,pool.length);
+    const affixes=[];
+    for(let i=0;i<affixCount;i++){
+      affixes.push({stat:pool[i], value:randIntRange(lo,hi)});
+    }
+    return {instance_id:`${Date.now()}_${randi(999999)}`, slot:chosenSlot, base_name:baseName, tier, rarity:rarity.name, affixes, element};
+  },
+  displayName(inst){
+    let name=`${inst.rarity} ${Balance.itemTierAdjective(inst.tier)} ${inst.base_name}`;
+    if(inst.element) name+=` of ${Balance.ELEMENT_DISPLAY_NAMES[inst.element]||inst.element}`;
+    return name;
+  },
+  affixTotal(inst,stat){
+    if(!inst||!inst.affixes) return 0;
+    let total=0; for(const a of inst.affixes) if(a.stat===stat) total+=a.value;
+    return total;
+  },
+  slotCount(inst){return (inst.affixes||[]).length;},
+  affixIsPercent(stat){return ["crit","armor","gold_find","xp_find"].includes(stat);},
+  affixLabel(stat){
+    switch(stat){
+      case "damage": return "Damage"; case "hp": return "Hit Points"; case "crit": return "Critical Strike";
+      case "armor": return "Armor"; case "regen": return "Regeneration"; case "gold_find": return "Gold Found";
+      case "xp_find": return "Experience Gained"; case "stamina_max": return "Stamina";
+      default: return stat;
+    }
+  },
+  formatAffix(a){
+    const label=this.affixLabel(a.stat);
+    if(this.affixIsPercent(a.stat)) return `+${Math.round(a.value)}% ${label}`;
+    if(a.stat==="regen") return `+${a.value.toFixed(1)} ${label}`;
+    return `+${Math.round(a.value)} ${label}`;
+  },
+  tooltipText(inst){
+    const lines=[`${this.displayName(inst)} (Tier ${inst.tier})`];
+    for(const a of inst.affixes) lines.push(this.formatAffix(a));
+    return lines.join("\n");
+  },
+  affixSummary(inst){
+    if(!inst.affixes||inst.affixes.length===0) return "(no bonuses)";
+    return inst.affixes.map(a=>this.formatAffix(a)).join(", ");
+  },
+  reroll(inst){
+    const [lo,hi]=Balance.itemTierStatRange(inst.tier);
+    const newAffixes=inst.affixes.map(a=>({stat:a.stat,value:randIntRange(lo,hi)}));
+    return {...inst, affixes:newAffixes};
+  },
+};
+
+function shuffle(arr){for(let i=arr.length-1;i>0;i--){const j=randi(i+1);[arr[i],arr[j]]=[arr[j],arr[i]];}}
+
+/* ---------- Safe storage wrapper (falls back to in-memory if localStorage is blocked,
+   e.g. when a file is opened directly via file:// in some browsers) ---------- */
+const Storage_ = {
+  available:true, _mem:{},
+  init(){ try{ window.localStorage.setItem("__evergrind_test__","1"); window.localStorage.removeItem("__evergrind_test__"); this.available=true; }catch(e){ this.available=false; } },
+  getItem(k){ return this.available ? window.localStorage.getItem(k) : (Object.prototype.hasOwnProperty.call(this._mem,k)?this._mem[k]:null); },
+  setItem(k,v){ if(this.available) window.localStorage.setItem(k,v); else this._mem[k]=v; },
+  removeItem(k){ if(this.available) window.localStorage.removeItem(k); else delete this._mem[k]; },
+};
+Storage_.init();
+
+/* ---------- Networking: optional online mode against evergrind-server ----------
+   The game works two ways:
+   - Play Offline: everything below falls back to Storage_ (this browser only), exactly
+     like the original single-file build. No accounts, no chat, no leaderboard.
+   - Log In / Register: saves, the graveyard and the leaderboard live on a real server
+     (see evergrind-server/), so friends can share a hosted link and see each other in
+     chat and on the leaderboard. A `?api=https://example.com` query param can point the
+     client at a server hosted on a different origin than the page itself. ---------- */
+
+const Net = {
+  online:false, token:null, username:null,
+  cache:null,            // array of 6 slot entries from GET /api/characters
+  graveyardCache:null,
+  leaderboardCache:null,
+  chatMessages:[], chatSocket:null,
+  apiBase(){
+    const params=new URLSearchParams(location.search);
+    return params.get("api") || "";
+  },
+  authHeaders(extra={}){ return Object.assign({"Authorization":"Bearer "+this.token}, extra); },
+  async register(username,passcode){
+    const res=await fetch(this.apiBase()+"/api/register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username,passcode})});
+    const json=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(json.error||"Registration failed.");
+    return json;
+  },
+  async login(username,passcode){
+    const res=await fetch(this.apiBase()+"/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username,passcode})});
+    const json=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(json.error||"Login failed.");
+    return json;
+  },
+  async afterAuth(username,token){
+    this.username=username; this.token=token; this.online=true;
+    await this.refreshCharacters();
+  },
+  async refreshCharacters(){
+    const res=await fetch(this.apiBase()+"/api/characters",{headers:this.authHeaders()});
+    if(!res.ok) throw new Error("Could not load your characters from the server.");
+    const json=await res.json();
+    this.cache=json.slots;
+  },
+  logout(){
+    this.online=false; this.token=null; this.username=null; this.cache=null;
+    this.graveyardCache=null; this.leaderboardCache=null; this.chatMessages=[];
+    if(this.chatSocket){ try{this.chatSocket.close();}catch(e){} this.chatSocket=null; }
+  },
+  saveCharacter(slot,data){
+    if(this.cache) this.cache[slot]={slot,data,updated_at:new Date().toISOString(),empty:false};
+    fetch(this.apiBase()+"/api/characters/"+slot,{method:"PUT",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify(data)})
+      .catch(e=>console.warn("save to server failed",e));
+  },
+  deleteCharacter(slot,hardcoreDeath){
+    if(this.cache) this.cache[slot]={slot,empty:true};
+    if(this.graveyardCache && hardcoreDeath) this.graveyardCache.unshift({name:hardcoreDeath.name,class_name:hardcoreDeath.class_name,level:hardcoreDeath.level,cause:hardcoreDeath.cause,died_at:new Date().toISOString()});
+    fetch(this.apiBase()+"/api/characters/"+slot,{method:"DELETE",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({hardcore_death:hardcoreDeath||null})})
+      .catch(e=>console.warn("delete on server failed",e));
+  },
+  async fetchGraveyard(){
+    const res=await fetch(this.apiBase()+"/api/graveyard",{headers:this.authHeaders()});
+    const json=await res.json().catch(()=>({entries:[]}));
+    this.graveyardCache=json.entries||[];
+  },
+  async fetchLeaderboard(){
+    const res=await fetch(this.apiBase()+"/api/leaderboard");
+    const json=await res.json().catch(()=>({entries:[]}));
+    this.leaderboardCache=json.entries||[];
+  },
+  ensureChat(){
+    if(this.chatSocket || !this.online) return;
+    const wsProto = location.protocol==="https:" ? "wss://" : "ws://";
+    const base = this.apiBase();
+    const wsUrl = base ? base.replace(/^http/,"ws")+"/ws/chat?token="+this.token : wsProto+location.host+"/ws/chat?token="+this.token;
+    try{
+      const ws=new WebSocket(wsUrl);
+      ws.onmessage=(ev)=>{
+        try{
+          const msg=JSON.parse(ev.data);
+          if(msg.type==="history") this.chatMessages=msg.messages||[];
+          else if(msg.type==="chat"){ this.chatMessages.push(msg); if(this.chatMessages.length>200) this.chatMessages.shift(); }
+          if(GF.screen==="chat") render();
+        }catch(e){}
+      };
+      ws.onclose=()=>{ if(this.chatSocket===ws) this.chatSocket=null; };
+      this.chatSocket=ws;
+    }catch(e){ console.warn("chat connect failed",e); }
+  },
+  sendChat(message){
+    if(this.chatSocket && this.chatSocket.readyState===WebSocket.OPEN) this.chatSocket.send(JSON.stringify({type:"chat",message}));
+  },
+};
+
+/* ---------- Save slots / Graveyard ---------- */
+
+const SAVE_KEY=(slot)=>`evergrind_web_slot_${slot}`;
+const GRAVEYARD_KEY="evergrind_web_graveyard";
+
+function hasSave(slot){return Storage_.getItem(SAVE_KEY(slot))!==null;}
+function loadSaveRaw(slot){
+  try{ return JSON.parse(Storage_.getItem(SAVE_KEY(slot))); }catch(e){ return null; }
+}
+function deleteSave(slot,hardcoreDeath){
+  if(Net.online){ Net.deleteCharacter(slot,hardcoreDeath); return; }
+  Storage_.removeItem(SAVE_KEY(slot));
+}
+function listCharacterSummaries(){
+  if(Net.online){
+    const out=[];
+    for(const entry of (Net.cache||[])){
+      if(entry.empty){ out.push({slot:entry.slot, empty:true}); continue; }
+      const raw=entry.data; const c=DL.getClass(raw.class_id);
+      out.push({slot:entry.slot, empty:false, class_id:raw.class_id, display_name:c.display_name||raw.class_id, character_name:raw.character_name||"Hero", level:raw.level||1, tier:c.tier||1, hardcore:!!raw.hardcore});
+    }
+    return out;
+  }
+  const out=[];
+  for(let slot=0; slot<Balance.MAX_CHARACTER_SLOTS; slot++){
+    const raw=loadSaveRaw(slot);
+    if(raw){
+      const c=DL.getClass(raw.class_id);
+      out.push({slot, empty:false, class_id:raw.class_id, display_name:c.display_name||raw.class_id, character_name:raw.character_name||"Hero", level:raw.level||1, tier:c.tier||1, hardcore:!!raw.hardcore});
+    } else out.push({slot, empty:true});
+  }
+  return out;
+}
+function readGraveyard(){
+  if(Net.online) return Net.graveyardCache||[];
+  try{return JSON.parse(Storage_.getItem(GRAVEYARD_KEY))||[];}catch(e){return [];}
+}
+function appendGraveyard(entry){
+  if(Net.online) return; // server records this when deleteSave() sends hardcore_death
+  const g=readGraveyard(); g.unshift(entry);
+  Storage_.setItem(GRAVEYARD_KEY, JSON.stringify(g.slice(0,100)));
+}
+
+/* ---------- PlayerState-equivalent ---------- */
+
+const PS = {
+  class_id:"", character_name:"Hero", level:1, xp:0, xp_to_next:0, gold:0,
+  current_hp:0, current_stamina:0, gear_instances:[], equipped:{}, equipped_bags:[],
+  consumables:{}, materials:0, herbs:{}, pending_scroll_bonus:0,
+  xp_buff_multiplier:1.0, xp_buff_encounters_left:0, stamina_shrine_buff:0.0,
+  highest_tier_reached:1, season_won:false, kill_streak:0, hardcore:false, current_slot:-1,
+
+  getClassData(){return DL.getClass(this.class_id);},
+  gearBonus(stat){
+    let total=0;
+    for(const slot of IF.EQUIPPED_SLOT_KEYS){
+      const inst=this.equipped[slot];
+      if(inst) total+=IF.affixTotal(inst,stat);
+    }
+    return total;
+  },
+  getMaxHp(){const c=this.getClassData(); return (c.base_hp||50)+(c.hp_per_level||5)*(this.level-1)+this.gearBonus("hp");},
+  getDamageRange(){
+    const c=this.getClassData(); const perLevel=(c.damage_per_level||1.0)*(this.level-1);
+    const bonus=this.gearBonus("damage");
+    return [(c.base_damage_min||1)+perLevel+bonus, (c.base_damage_max||2)+perLevel+bonus];
+  },
+  getCritChance(){const c=this.getClassData(); return clampf((c.base_crit||0.05)+this.gearBonus("crit")/100.0,0,0.95);},
+  getArmor(){const c=this.getClassData(); return clampf((c.armor||0.0)+this.gearBonus("armor")/100.0,0,0.75);},
+  getRegen(){const c=this.getClassData(); return (c.regen||0.0)+this.gearBonus("regen");},
+  getMaxStamina(){return Balance.STAMINA_MAX_BASE+this.gearBonus("stamina_max");},
+  getGoldFindMult(){return 1.0+this.gearBonus("gold_find")/100.0;},
+  getXpFindMult(){return 1.0+this.gearBonus("xp_find")/100.0;},
+
+  getGearBonusSummary(){
+    const parts=[];
+    const dmg=this.gearBonus("damage"); if(dmg) parts.push(`+${Math.round(dmg)} Damage`);
+    const hp=this.gearBonus("hp"); if(hp) parts.push(`+${Math.round(hp)} Hit Points`);
+    const crit=this.gearBonus("crit"); if(crit) parts.push(`+${Math.round(crit)}% Critical Strike`);
+    const armor=this.gearBonus("armor"); if(armor) parts.push(`+${Math.round(armor)}% Armor`);
+    const regen=this.gearBonus("regen"); if(regen) parts.push(`+${regen.toFixed(1)} Regeneration`);
+    const gf=this.gearBonus("gold_find"); if(gf) parts.push(`+${Math.round(gf)}% Gold Found`);
+    const xf=this.gearBonus("xp_find"); if(xf) parts.push(`+${Math.round(xf)}% Experience Gained`);
+    const sm=this.gearBonus("stamina_max"); if(sm) parts.push(`+${Math.round(sm)} Stamina`);
+    if(parts.length===0) return "No gear bonuses yet.";
+    return "Gear bonuses: "+parts.join(", ");
+  },
+
+  addXp(amount){
+    let buffed=amount*this.getXpFindMult();
+    if(this.xp_buff_encounters_left>0) buffed*=this.xp_buff_multiplier;
+    this.xp+=Math.round(buffed);
+    let leveled=false;
+    while(this.xp>=this.xp_to_next && this.level<Balance.LEVEL_CAP){
+      this.xp-=this.xp_to_next; this.level++; this.xp_to_next=Balance.xpRequiredForLevel(this.level);
+      this.current_hp=this.getMaxHp(); leveled=true;
+    }
+    if(this.level>=Balance.LEVEL_CAP) this.xp=0;
+    return leveled;
+  },
+  canAttemptTrial(){return this.level>=Balance.LEVEL_CAP;},
+  resolveMasterTrial(success){
+    const currentTier=this.getClassData().tier||1;
+    const nextId=DL.getNextClassId(this.class_id);
+    const result={success, final_tier:nextId===""};
+    if(success){
+      this.highest_tier_reached=Math.max(this.highest_tier_reached,currentTier+1);
+      if(nextId!=="") this.class_id=nextId; else this.season_won=true;
+    }
+    // failure: class_id unchanged -- no demotion, per v0.7 fix
+    this.level=1; this.xp=0; this.xp_to_next=Balance.xpRequiredForLevel(this.level);
+    this.current_hp=this.getMaxHp(); this.current_stamina=this.getMaxStamina();
+    return result;
+  },
+  getEffectiveAreaLevel(bonus=0){return clampi(this.level+bonus, Balance.AREA_LEVEL_MIN, Balance.AREA_LEVEL_MAX);},
+  consumePendingScrollBonus(){const b=this.pending_scroll_bonus; this.pending_scroll_bonus=0; return b;},
+  useScroll(itemId){
+    const item=DL.getItem(itemId);
+    if(item.type!=="scroll") return false;
+    if((this.consumables[itemId]||0)<=0) return false;
+    this._removeConsumableOne(itemId);
+    this.pending_scroll_bonus=item.level_bonus||0;
+    return true;
+  },
+  applyXpShrineBuff(){ this.xp_buff_multiplier=Balance.SHRINE_XP_BUFF_MULT; this.xp_buff_encounters_left+=Balance.SHRINE_XP_BUFF_ENCOUNTERS; },
+  tickXpBuff(){ if(this.xp_buff_encounters_left>0){ this.xp_buff_encounters_left--; if(this.xp_buff_encounters_left===0) this.xp_buff_multiplier=1.0; } },
+  spendStamina(amount){
+    if(this.stamina_shrine_buff>0){ const fromBuff=Math.min(this.stamina_shrine_buff,amount); this.stamina_shrine_buff-=fromBuff; amount-=fromBuff; }
+    this.current_stamina=Math.max(0,this.current_stamina-amount);
+  },
+  restoreStamina(amount){ this.current_stamina=Math.min(this.getMaxStamina(),this.current_stamina+amount); },
+  addStaminaShrineBuff(bonus){ this.current_stamina=this.getMaxStamina(); this.stamina_shrine_buff+=bonus; },
+  addGold(amount){ this.gold=Math.max(0,Math.round(this.gold+amount*this.getGoldFindMult())); },
+  applyDeathPenalty(){ const loss=Math.round(this.gold*Balance.DEATH_GOLD_LOSS_PCT); this.gold=Math.max(0,this.gold-loss); this.current_hp=this.getMaxHp(); this.resetKillStreak(); },
+  incrementKillStreak(){ this.kill_streak++; },
+  resetKillStreak(){ this.kill_streak=0; },
+  handleDeath(cause){
+    if(this.hardcore){
+      const cd=this.getClassData();
+      const entry={name:this.character_name, class_name:cd.display_name||this.class_id, level:this.level, cause, date:new Date().toISOString()};
+      appendGraveyard(entry);
+      if(this.current_slot>=0) deleteSave(this.current_slot, entry);
+      this.current_slot=-1;
+      return true;
+    }
+    this.applyDeathPenalty();
+    return false;
+  },
+  addConsumable(itemId,count=1){ this.consumables[itemId]=(this.consumables[itemId]||0)+count; },
+  _removeConsumableOne(itemId){ const rem=(this.consumables[itemId]||0)-1; if(rem>0) this.consumables[itemId]=rem; else delete this.consumables[itemId]; },
+  useConsumable(itemId){
+    if(!this.canUseConsumable(itemId)) return false;
+    const item=DL.getItem(itemId); let used=false;
+    if((item.heal_amount||0)>0 && this.current_hp<this.getMaxHp()){ this.current_hp=Math.min(this.getMaxHp(),this.current_hp+item.heal_amount); used=true; }
+    if((item.stamina_amount||0)>0 && this.current_stamina<this.getMaxStamina()){ this.current_stamina=Math.min(this.getMaxStamina(),this.current_stamina+item.stamina_amount); used=true; }
+    if(used) this._removeConsumableOne(itemId);
+    return used;
+  },
+  canUseConsumable(itemId){
+    if((this.consumables[itemId]||0)<=0) return false;
+    const item=DL.getItem(itemId);
+    if((item.heal_amount||0)>0 && this.current_hp<this.getMaxHp()) return true;
+    if((item.stamina_amount||0)>0 && this.current_stamina<this.getMaxStamina()) return true;
+    return false;
+  },
+  bestAvailableConsumable(kind){
+    const field=kind==="health"?"heal_amount":"stamina_amount";
+    let bestId="", bestAmt=-1;
+    for(const itemId in this.consumables){
+      if((this.consumables[itemId]||0)<=0) continue;
+      const item=DL.getItem(itemId);
+      if(item.type!=="consumable") continue;
+      const amt=item[field]||0;
+      if(amt<=0) continue;
+      if(amt>bestAmt){ bestAmt=amt; bestId=itemId; }
+    }
+    return bestId;
+  },
+  buyConsumable(itemId){
+    const item=DL.getItem(itemId); if(!item.name) return false;
+    const price=(item.sell_value||1)*Balance.VENDOR_MARKUP;
+    if(this.gold<price) return false;
+    this.gold-=price; this.addConsumable(itemId); return true;
+  },
+  getInventoryCapacity(){
+    let cap=Balance.BASE_INVENTORY_SLOTS;
+    for(const bagId of this.equipped_bags) cap+=DL.getItem(bagId).capacity||0;
+    return cap;
+  },
+  getInventoryUsed(){return this.gear_instances.length;},
+  hasInventorySpace(){return this.getInventoryUsed()<this.getInventoryCapacity();},
+  equipBag(itemId){
+    if(this.equipped_bags.length>=Balance.MAX_BAG_SLOTS) return {success:false,reason:`Your bag rack is full (${this.equipped_bags.length}/${Balance.MAX_BAG_SLOTS}) -- unequip a bag first.`};
+    this.equipped_bags.push(itemId); return {success:true};
+  },
+  unequipBag(itemId){ const idx=this.equipped_bags.indexOf(itemId); if(idx!==-1) this.equipped_bags.splice(idx,1); },
+  buyBag(itemId){
+    const item=DL.getItem(itemId); if(!item.name||item.type!=="bag") return {success:false,reason:"Unknown bag."};
+    const price=Balance.bagBuyPrice(item.capacity||0);
+    if(this.gold<price) return {success:false,reason:"Not enough gold."};
+    const result=this.equipBag(itemId); if(!result.success) return result;
+    this.gold-=price; return {success:true};
+  },
+  craftBag(itemId){
+    const item=DL.getItem(itemId); if(!item.name||item.type!=="bag") return {success:false,reason:"Unknown bag."};
+    const cost=Balance.bagCraftCost(item.capacity||0);
+    if(this.materials<cost) return {success:false,reason:"Not enough materials."};
+    const result=this.equipBag(itemId); if(!result.success) return result;
+    this.materials-=cost; return {success:true};
+  },
+  addGear(inst){ if(!this.hasInventorySpace()) return false; this.gear_instances.push(inst); return true; },
+  findGearIndex(instanceId){ return this.gear_instances.findIndex(g=>g.instance_id===instanceId); },
+  equipGear(instanceId){
+    const idx=this.findGearIndex(instanceId); if(idx===-1) return;
+    const inst=this.gear_instances[idx]; const genSlot=inst.slot; let target=genSlot;
+    if(genSlot==="ring"){
+      if(!this.equipped["ring1"]) target="ring1"; else if(!this.equipped["ring2"]) target="ring2"; else target="ring1";
+    } else if(!IF.EQUIPPED_SLOT_KEYS.includes(genSlot)) return;
+    this.gear_instances.splice(idx,1);
+    if(this.equipped[target]) this.gear_instances.push(this.equipped[target]);
+    this.equipped[target]=inst;
+    this.current_hp=Math.min(this.current_hp,this.getMaxHp());
+  },
+  unequipSlot(slot){ if(!this.equipped[slot]) return; this.gear_instances.push(this.equipped[slot]); this.equipped[slot]=null; },
+  salvageGear(instanceId){
+    const idx=this.findGearIndex(instanceId); if(idx===-1) return;
+    const inst=this.gear_instances[idx];
+    this.materials+=Balance.salvageValue(inst.tier, IF.slotCount(inst));
+    this.gear_instances.splice(idx,1);
+  },
+  sellGear(instanceId){
+    const idx=this.findGearIndex(instanceId); if(idx===-1) return;
+    const inst=this.gear_instances[idx];
+    this.addGold(Balance.sellValue(inst.tier, IF.slotCount(inst)));
+    this.gear_instances.splice(idx,1);
+  },
+  rerollGear(instanceId){
+    const idx=this.findGearIndex(instanceId); if(idx===-1) return false;
+    const inst=this.gear_instances[idx];
+    const cost=Balance.rerollCost(inst.tier, IF.slotCount(inst));
+    if(this.materials<cost) return false;
+    this.materials-=cost; this.gear_instances[idx]=IF.reroll(inst); return true;
+  },
+  addHerb(herbId,count=1){ this.herbs[herbId]=(this.herbs[herbId]||0)+count; },
+  canAffordRecipe(recipe){ for(const h in recipe.herbs) if((this.herbs[h]||0)<recipe.herbs[h]) return false; return true; },
+  brewRecipe(recipe){
+    if(!this.canAffordRecipe(recipe)) return false;
+    for(const h in recipe.herbs) this.herbs[h]-=recipe.herbs[h];
+    this.addConsumable(recipe.result_item); return true;
+  },
+
+  startNewCharacter(classId,name,slot,isHardcore){
+    this.current_slot=slot; this.class_id=classId;
+    this.character_name=(name||"Hero").slice(0,Balance.CHARACTER_NAME_MAX_LEN);
+    this.hardcore=isHardcore; this.level=1; this.xp=0; this.gold=20; this.materials=0;
+    this.herbs={}; this.consumables={}; this.gear_instances=[]; this.equipped={};
+    for(const s of IF.EQUIPPED_SLOT_KEYS) this.equipped[s]=null;
+    this.equipped_bags=[]; this.pending_scroll_bonus=0; this.xp_buff_multiplier=1.0;
+    this.xp_buff_encounters_left=0; this.stamina_shrine_buff=0.0; this.highest_tier_reached=1;
+    this.season_won=false; this.kill_streak=0; this.xp_to_next=Balance.xpRequiredForLevel(this.level);
+    this.current_hp=this.getMaxHp(); this.current_stamina=this.getMaxStamina();
+  },
+  saveGame(){
+    if(this.current_slot<0) return;
+    const data={class_id:this.class_id,class_display_name:this.getClassData().display_name||this.class_id,
+      character_name:this.character_name,hardcore:this.hardcore,level:this.level,
+      xp:this.xp,xp_to_next:this.xp_to_next,gold:this.gold,materials:this.materials,herbs:this.herbs,
+      current_hp:this.current_hp,current_stamina:this.current_stamina,consumables:this.consumables,
+      gear_instances:this.gear_instances,equipped:this.equipped,equipped_bags:this.equipped_bags,
+      highest_tier_reached:this.highest_tier_reached,season_won:this.season_won};
+    if(Net.online) Net.saveCharacter(this.current_slot, data);
+    else Storage_.setItem(SAVE_KEY(this.current_slot), JSON.stringify(data));
+  },
+  _applyLoadedData(slot,parsed){
+    this.current_slot=slot; this.class_id=parsed.class_id||""; this.character_name=parsed.character_name||"Hero";
+    this.hardcore=!!parsed.hardcore; this.kill_streak=0; this.level=parsed.level||1; this.xp=parsed.xp||0;
+    this.xp_to_next=parsed.xp_to_next||Balance.xpRequiredForLevel(this.level); this.gold=parsed.gold||0;
+    this.materials=parsed.materials||0; this.herbs=parsed.herbs||{}; this.consumables=parsed.consumables||{};
+    this.gear_instances=(parsed.gear_instances||[]).filter(g=>g&&g.instance_id);
+    const loadedEquipped=parsed.equipped||{}; this.equipped={};
+    for(const s of IF.EQUIPPED_SLOT_KEYS) this.equipped[s]=loadedEquipped[s]||null;
+    this.equipped_bags=(parsed.equipped_bags||[]).slice(0,Balance.MAX_BAG_SLOTS);
+    this.highest_tier_reached=parsed.highest_tier_reached||1; this.season_won=!!parsed.season_won;
+    this.current_hp=parsed.current_hp!=null?parsed.current_hp:this.getMaxHp();
+    this.current_stamina=parsed.current_stamina!=null?parsed.current_stamina:this.getMaxStamina();
+    this.pending_scroll_bonus=0; this.xp_buff_multiplier=1.0; this.xp_buff_encounters_left=0; this.stamina_shrine_buff=0.0;
+    return true;
+  },
+  loadGame(slot){
+    if(Net.online){
+      const entry=(Net.cache||[]).find(e=>e.slot===slot);
+      if(!entry || entry.empty) return false;
+      return this._applyLoadedData(slot, entry.data);
+    }
+    const parsed=loadSaveRaw(slot); if(!parsed) return false;
+    return this._applyLoadedData(slot, parsed);
+  },
+};
+
+/* ---------- GameFlow-equivalent (screen router) ---------- */
+
+const GF = {
+  screen:"authGate", selected_slot:-1, pending_delete_slot:-1,
+  pending_monster_id:"", pending_area_level:1,
+  pending_chest_hits_required:3, pending_chest_tier:1, pending_chest_area_level:1,
+  overworld_snapshot:null,
+  goto(screen, extra={}){ Object.assign(this, extra); this.screen=screen; render(); },
+};
+
+/* ---------- Tiny DOM helper ---------- */
+
+function h(tag, attrs={}, children=[]){
+  const e=document.createElement(tag);
+  for(const k in attrs){
+    const v=attrs[k];
+    if(k==="style") Object.assign(e.style, v);
+    else if(k==="html") e.innerHTML=v;
+    else if(k==="class") e.className=v;
+    else if(k.startsWith("on") && typeof v==="function") e.addEventListener(k.slice(2).toLowerCase(), v);
+    else if(v!==false && v!=null) e.setAttribute(k, v===true?"":v);
+  }
+  const kids=Array.isArray(children)?children:[children];
+  for(const c of kids){
+    if(c==null) continue;
+    e.appendChild((typeof c==="string"||typeof c==="number")?document.createTextNode(String(c)):c);
+  }
+  return e;
+}
+function bar(pct, cls){ return h("div",{class:"bar-bg"},[h("div",{class:"bar-fill "+cls, style:{width:clampf(pct,0,100)+"%"}})]); }
+function iconBadge(svg, size){ const d=h("div",{class:"icon-badge",style:size?{width:size+"px",height:size+"px"}:{}}); d.innerHTML=svg; return d; }
+
+/* ---------- App root + render ---------- */
+
+const app=document.getElementById("app");
+document.getElementById("versionTag").textContent=Balance.GAME_VERSION;
+
+function render(){
+  app.innerHTML="";
+  if(!Net.online && !Storage_.available){
+    app.appendChild(h("div",{class:"panel",style:{background:"#4a2a20",borderColor:"#8a4a3a",marginBottom:"14px"}},[
+      "Your browser is blocking local saves for this file (this can happen when opening the file directly instead of through a web server or a hosted link). Progress will work this session but won't be remembered after you close the tab. Host this file online (or open it via a local server) to get persistent saves."
+    ]));
+  }
+  const fn=SCREENS[GF.screen]||SCREENS.mainMenuSlots;
+  app.appendChild(fn());
+}
+
+
+/* ---------- shared toast ---------- */
+function toastBox(){
+  if(!GF.toast) return null;
+  const msg=GF.toast; GF.toast="";
+  return h("div",{class:"panel",style:{background:"#2a3a20",borderColor:"#5a7a3a",marginBottom:"12px"}},[msg]);
+}
+function setToast(msg){ GF.toast=msg; }
+
+function statHeader(){
+  const c=PS.getClassData();
+  return h("div",{class:"panel",style:{marginBottom:"14px"}},[
+    h("div",{class:"row",style:{justifyContent:"space-between"}},[
+      h("div",{},[
+        h("div",{},[`${PS.character_name} `,h("span",{class:"muted"},[`-- Lv ${PS.level} ${c.display_name||""}`]), PS.hardcore?h("span",{style:{color:"#e07a7a"}},[" [Hardcore]"]):null]),
+        PS.kill_streak>0?h("div",{class:"muted"},[`Kill streak: ${PS.kill_streak}`]):null,
+      ]),
+      h("div",{class:"col",style:{alignItems:"flex-end"}},[
+        h("div",{class:"gold-text"},[`${PS.gold} gold`]),
+        h("div",{class:"muted"},[`${PS.materials} materials`]),
+      ]),
+    ]),
+    h("div",{class:"col gap",style:{marginTop:"8px"}},[
+      h("div",{},[h("span",{class:"hp-text"},[`HP ${Math.round(PS.current_hp)}/${Math.round(PS.getMaxHp())}`])]),
+      bar(PS.current_hp/PS.getMaxHp()*100,"bar-hp"),
+      h("div",{},[h("span",{class:"stamina-text"},[`Stamina ${Math.round(PS.current_stamina)}/${Math.round(PS.getMaxStamina())}`])]),
+      bar(PS.current_stamina/PS.getMaxStamina()*100,"bar-stamina"),
+      h("div",{},[h("span",{class:"xp-text"},[`XP ${PS.xp}/${PS.xp_to_next}`])]),
+      bar(PS.xp/PS.xp_to_next*100,"bar-xp"),
+    ]),
+  ]);
+}
+
+/* ================= AUTH GATE / LOGIN / REGISTER ================= */
+
+function screenAuthGate(){
+  const root=h("div",{});
+  root.appendChild(h("div",{class:"row",style:{gap:"14px",marginBottom:"14px"}},[
+    iconBadge(LOGO_SVG,72),
+    h("div",{},[h("h1",{},["Evergrind"]), h("div",{class:"subtitle"},["A nature-fantasy dungeon crawl"])]),
+  ]));
+  const t=toastBox(); if(t) root.appendChild(t);
+  root.appendChild(h("div",{class:"panel",style:{maxWidth:"440px"}},[
+    h("div",{style:{fontWeight:"bold",marginBottom:"6px"}},["Play Offline"]),
+    h("div",{class:"muted",style:{marginBottom:"8px"}},["Characters are saved only in this browser. No chat, leaderboard or auction house."]),
+    h("button",{class:"wide",onClick:()=>{ Net.logout(); GF.goto("mainMenuSlots"); }},["Play Offline"]),
+  ]));
+  root.appendChild(h("div",{class:"panel",style:{maxWidth:"440px",marginTop:"12px"}},[
+    h("div",{style:{fontWeight:"bold",marginBottom:"6px"}},["Play Online"]),
+    h("div",{class:"muted",style:{marginBottom:"8px"}},["Log in to a hosted Evergrind server to save your characters there, chat with other players, and appear on the leaderboard."]),
+    h("div",{class:"row"},[
+      h("button",{style:{flex:"1"},onClick:()=>GF.goto("login")},["Log In"]),
+      h("button",{style:{flex:"1"},onClick:()=>GF.goto("register")},["Create Account"]),
+    ]),
+  ]));
+  return root;
+}
+
+function authForm(mode){
+  const root=h("div",{});
+  const isLogin=mode==="login";
+  root.appendChild(h("h2",{},[isLogin?"Log In":"Create Account"]));
+  const t=toastBox(); if(t) root.appendChild(t);
+  const userInput=h("input",{type:"text",placeholder:"username"});
+  const passInput=h("input",{type:"password",placeholder:"passcode"});
+  const statusDiv=h("div",{class:"muted"},[""]);
+  const submit=async ()=>{
+    const username=userInput.value.trim(), passcode=passInput.value;
+    statusDiv.textContent="Working...";
+    try{
+      const json = isLogin ? await Net.login(username,passcode) : await Net.register(username,passcode);
+      await Net.afterAuth(json.username, json.token);
+      setToast(`Welcome, ${json.username}!`);
+      GF.goto("mainMenuSlots");
+    }catch(e){
+      statusDiv.textContent = e.message || "Something went wrong. Is the game server reachable?";
+    }
+  };
+  root.appendChild(h("div",{class:"panel col gap",style:{maxWidth:"360px"}},[
+    userInput, passInput,
+    h("button",{class:"wide play",onClick:submit},[isLogin?"Log In":"Create Account"]),
+    statusDiv,
+  ]));
+  root.appendChild(h("div",{style:{marginTop:"10px"}},[h("span",{class:"linklike",onClick:()=>GF.goto("authGate")},["← Back"])]));
+  return root;
+}
+function screenLogin(){ return authForm("login"); }
+function screenRegister(){ return authForm("register"); }
+
+/* ================= MAIN MENU / SLOTS ================= */
+
+function screenMainMenuSlots(){
+  const root=h("div",{});
+  root.appendChild(h("div",{class:"row",style:{gap:"14px",marginBottom:"4px"}},[
+    iconBadge(LOGO_SVG,72),
+    h("div",{},[h("h1",{},["Evergrind"]), h("div",{class:"subtitle"},["A nature-fantasy dungeon crawl"])]),
+  ]));
+  root.appendChild(h("div",{class:"row",style:{marginBottom:"10px"}},[
+    h("span",{class:"muted"},[Net.online?`Playing online as ${Net.username}`:"Playing offline (this browser only)"]),
+    h("span",{class:"linklike",style:{marginLeft:"10px"},onClick:()=>{ Net.logout(); GF.goto("authGate"); }},[Net.online?"Log out":"Switch to online"]),
+    Net.online?h("span",{class:"linklike",style:{marginLeft:"10px"},onClick:()=>GF.goto("leaderboard")},["Leaderboard"]):null,
+  ]));
+  const t=toastBox(); if(t) root.appendChild(t);
+
+  const summaries=listCharacterSummaries();
+  const grid=h("div",{class:"grid3"});
+  let firstEmpty=-1;
+  let filled=0;
+  for(const s of summaries){
+    if(s.empty){ if(firstEmpty===-1) firstEmpty=s.slot; continue; }
+    filled++;
+    const portrait=PORTRAITS[s.class_id]||"";
+    grid.appendChild(h("div",{class:"tile"},[
+      h("div",{class:"row",style:{alignItems:"center"}},[
+        iconBadge(portrait,56),
+        h("div",{class:"col",style:{marginLeft:"10px",flex:"1",minWidth:"0"}},[
+          h("div",{style:{fontWeight:"bold",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},[s.character_name]),
+          h("div",{class:"muted"},[`Lv ${s.level} ${s.display_name}`]),
+        ]),
+      ]),
+      h("div",{class:"row",style:{marginTop:"10px"}},[
+        h("button",{class:"play",style:{flex:"1"},onClick:()=>{ PS.loadGame(s.slot); PS.resetKillStreak(); GF.goto("town"); }},["Play"]),
+        h("button",{class:"danger",style:{flex:"1"},onClick:()=>{
+          if(confirm(`Delete ${s.character_name} (Lv ${s.level} ${s.display_name})? This cannot be undone.`)){
+            deleteSave(s.slot); render();
+          }
+        }},["Delete"]),
+      ]),
+    ]));
+  }
+  root.appendChild(grid);
+
+  const full=filled>=Balance.MAX_CHARACTER_SLOTS;
+  root.appendChild(h("div",{class:"row",style:{marginTop:"10px"}},[
+    h("div",{style:{width:"240px"}},[
+      h("button",{class:"wide",disabled:full,onClick:()=>{ if(firstEmpty!==-1) GF.goto("classPicker",{selected_slot:firstEmpty}); }},[
+        full?"Character limit reached.":"+ Create New Character"
+      ]),
+    ]),
+    h("div",{class:"col",style:{width:"240px"}},[
+      h("button",{class:"wide",onClick:()=>GF.goto("graveyard")},["† Graveyard"]),
+      h("div",{class:"dim-note"},["Final resting place for our fallen heroes"]),
+    ]),
+  ]));
+  return root;
+}
+
+function screenClassPicker(){
+  const root=h("div",{});
+  root.appendChild(h("h2",{},["Create Your Hero"]));
+  const nameInput=h("input",{type:"text",value:"Hero",maxlength:String(Balance.CHARACTER_NAME_MAX_LEN)});
+  const hardcoreBox=h("input",{type:"checkbox",id:"hcbox"});
+  root.appendChild(h("div",{class:"panel",style:{marginBottom:"14px"}},[
+    h("div",{class:"row gap"},[h("span",{},["Character name:"]), nameInput]),
+    h("div",{class:"row gap",style:{marginTop:"8px"}},[hardcoreBox, h("label",{for:"hcbox"},["Hardcore mode -- permadeath, sent to the Graveyard on death."])]),
+  ]));
+  const grid=h("div",{class:"grid3"});
+  for(const classId of DL.starterClassIds()){
+    const c=DL.getClass(classId);
+    grid.appendChild(h("div",{class:"tile col gap"},[
+      h("div",{class:"row gap"},[iconBadge(PORTRAITS[classId],56), h("div",{},[h("div",{style:{fontWeight:"bold"}},[c.display_name]), h("div",{class:"muted"},[c.role])])]),
+      h("div",{class:"muted"},[c.description]),
+      h("button",{class:"wide",onClick:()=>{
+        PS.startNewCharacter(classId, nameInput.value||"Hero", GF.selected_slot, hardcoreBox.checked);
+        PS.saveGame();
+        GF.goto("town");
+      }},["Begin as "+c.display_name]),
+    ]));
+  }
+  root.appendChild(grid);
+  root.appendChild(h("div",{style:{marginTop:"10px"}},[h("span",{class:"linklike",onClick:()=>GF.goto("mainMenuSlots")},["← Back"])]));
+  return root;
+}
+
+function screenGraveyard(){
+  const root=h("div",{});
+  root.appendChild(h("h2",{},["Graveyard"]));
+  root.appendChild(h("div",{class:"lore"},["Final resting place for our fallen heroes."]));
+  if(Net.online && Net.graveyardCache===null){
+    root.appendChild(h("div",{class:"muted"},["Loading..."]));
+    Net.fetchGraveyard().then(render).catch(()=>{ setToast("Could not load the graveyard from the server."); render(); });
+    root.appendChild(h("button",{onClick:()=>GF.goto("mainMenuSlots")},["← Back"]));
+    return root;
+  }
+  const entries=readGraveyard();
+  if(entries.length===0){
+    root.appendChild(h("div",{class:"muted"},["No one has fallen yet."]));
+  } else {
+    for(const e of entries){
+      root.appendChild(h("div",{class:"tile",style:{marginBottom:"8px"}},[
+        h("div",{style:{fontWeight:"bold"}},[`${e.name} -- Lv ${e.level} ${e.class_name}`]),
+        h("div",{class:"muted"},[`${e.cause||"Died in the wilds"} -- ${new Date(e.date||e.died_at).toLocaleString()}`]),
+      ]));
+    }
+  }
+  root.appendChild(h("button",{onClick:()=>GF.goto("mainMenuSlots")},["← Back"]));
+  return root;
+}
+
+/* ================= LEADERBOARD (online only) ================= */
+
+function screenLeaderboard(){
+  const root=h("div",{});
+  root.appendChild(h("h2",{},["Leaderboard"]));
+  root.appendChild(h("div",{class:"lore"},["The furthest any traveler has made it, across every account on this server."]));
+  if(Net.leaderboardCache===null){
+    root.appendChild(h("div",{class:"muted"},["Loading..."]));
+    Net.fetchLeaderboard().then(render).catch(()=>{ setToast("Could not load the leaderboard."); render(); });
+    root.appendChild(h("button",{onClick:()=>GF.goto("mainMenuSlots")},["← Back"]));
+    return root;
+  }
+  const entries=Net.leaderboardCache;
+  if(entries.length===0) root.appendChild(h("div",{class:"muted"},["No one has made a mark yet -- be the first!"]));
+  entries.forEach((e,i)=>{
+    root.appendChild(h("div",{class:"tile row",style:{marginBottom:"6px",justifyContent:"space-between"}},[
+      h("div",{},[h("span",{class:"muted"},[`#${i+1} `]), h("span",{style:{fontWeight:"bold"}},[`${e.character_name}`]), h("span",{class:"muted"},[` (${e.player})`])]),
+      h("div",{class:"muted"},[`Lv ${e.level} ${e.class_name} -- Tier ${e.highest_tier_reached} -- ${e.gold}g`]),
+    ]));
+  });
+  root.appendChild(h("button",{style:{marginTop:"10px"},onClick:()=>GF.goto("mainMenuSlots")},["← Back"]));
+  return root;
+}
+
+/* ================= GLOBAL CHAT (online only) ================= */
+
+function screenChat(){
+  Net.ensureChat();
+  const root=h("div",{});
+  root.appendChild(h("h2",{},["Global Chat"]));
+  const log=h("div",{class:"panel",style:{height:"320px",overflowY:"auto",display:"flex",flexDirection:"column",gap:"4px"}});
+  for(const m of Net.chatMessages){
+    log.appendChild(h("div",{},[h("span",{class:"muted"},[`[${new Date(m.created_at).toLocaleTimeString()}] `]), h("span",{style:{fontWeight:"bold"}},[m.username+": "]), m.message]));
+  }
+  root.appendChild(log);
+  const input=h("input",{type:"text",placeholder:"Say something...",style:{flex:"1"}});
+  const send=()=>{ const msg=input.value.trim(); if(!msg) return; Net.sendChat(msg); input.value=""; };
+  input.addEventListener("keydown",(e)=>{ if(e.key==="Enter") send(); });
+  root.appendChild(h("div",{class:"row",style:{marginTop:"8px"}},[input, h("button",{onClick:send},["Send"])]));
+  root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
+  setTimeout(()=>{ log.scrollTop=log.scrollHeight; },0);
+  return root;
+}
+
+/* ================= TOWN ================= */
+
+function serviceButton(label,icon,onClick){
+  return h("button",{class:"wide",onClick},[icon?icon+" ":"",label]);
+}
+
+function screenTown(){
+  const root=h("div",{});
+  root.appendChild(h("h2",{},[Balance.TOWN_1_NAME]));
+  root.appendChild(h("div",{class:"lore"},["A quiet camp on the edge of a vast, overgrown forest. The fire needs protecting, but for now, all is calm."]));
+  const t=toastBox(); if(t) root.appendChild(t);
+  root.appendChild(statHeader());
+
+  root.appendChild(h("div",{class:"services"},[
+    serviceButton(`Merchant (${Balance.NPC_MERCHANT_NAME})`,"💰",()=>GF.goto("merchant")),
+    serviceButton(`Blacksmith (${Balance.NPC_BLACKSMITH_NAME})`,"🔨",()=>GF.goto("blacksmith")),
+    serviceButton(`Alchemist (${Balance.NPC_ALCHEMIST_NAME})`,"⚗",()=>GF.goto("alchemist")),
+    serviceButton("Auction House","📜",()=>GF.goto("auctionHouse")),
+    serviceButton("Inventory","🎒",()=>GF.goto("inventory")),
+    PS.canAttemptTrial()?serviceButton("Master Trial","⭐",()=>GF.goto("masterTrial")):h("button",{disabled:true},[`Master Trial (reach Lv ${Balance.LEVEL_CAP})`]),
+    Net.online?serviceButton("Global Chat","💬",()=>GF.goto("chat")):h("button",{disabled:true},["Global Chat (log in online)"]),
+    Net.online?serviceButton("Leaderboard","🏆",()=>GF.goto("leaderboard")):h("button",{disabled:true},["Leaderboard (log in online)"]),
+  ]));
+
+  root.appendChild(h("div",{class:"row",style:{marginTop:"6px"}},[
+    h("button",{onClick:()=>{
+      PS.current_hp=PS.getMaxHp(); PS.current_stamina=PS.getMaxStamina(); PS.saveGame();
+      setToast("You rest by the campfire. HP and Stamina fully restored.");
+      render();
+    }},["Rest at the Campfire"]),
+    h("button",{onClick:()=>{ PS.resetKillStreak(); GF.overworld_snapshot=null; GF.goto("maze",{maze_depth: PS.level}); }},["🌳 Venture into the Woods"]),
+  ]));
+
+  root.appendChild(h("hr"));
+  root.appendChild(h("div",{class:"row"},[
+    h("button",{onClick:()=>{ PS.saveGame(); GF.goto("mainMenuSlots"); }},["Save & Return to Menu"]),
+    h("span",{class:"linklike",style:{marginLeft:"auto"},onClick:()=>GF.goto("adminPanel")},["dev tools"]),
+  ]));
+  return root;
+}
+
+
+/* ================= MAZE / OVERWORLD ================= */
+
+const MAZE_SIZE=6;
+
+function generateMaze(depth){
+  const size=MAZE_SIZE;
+  const cells=[];
+  for(let y=0;y<size;y++) for(let x=0;x<size;x++) cells.push({x,y,conn:new Set(),type:"empty",visited:false,cleared:false});
+  const idx=(x,y)=>y*size+x;
+  const stack=[cells[0]]; cells[0].visited=true;
+  while(stack.length){
+    const cur=stack[stack.length-1];
+    const dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+    shuffle(dirs);
+    let advanced=false;
+    for(const [dx,dy] of dirs){
+      const nx=cur.x+dx, ny=cur.y+dy;
+      if(nx>=0&&nx<size&&ny>=0&&ny<size){
+        const n=cells[idx(nx,ny)];
+        if(!n.visited){
+          cur.conn.add(idx(nx,ny)); n.conn.add(idx(cur.x,cur.y));
+          n.visited=true; stack.push(n); advanced=true; break;
+        }
+      }
+    }
+    if(!advanced) stack.pop();
+  }
+  // BFS distances from start to find a far cell for the exit
+  const dist=new Array(cells.length).fill(-1);
+  dist[0]=0; let q=[0];
+  while(q.length){
+    const cIdx=q.shift();
+    for(const nIdx of cells[cIdx].conn){ if(dist[nIdx]===-1){ dist[nIdx]=dist[cIdx]+1; q.push(nIdx); } }
+  }
+  let exitIdx=0, best=-1;
+  for(let i=0;i<cells.length;i++) if(dist[i]>best){ best=dist[i]; exitIdx=i; }
+  cells[exitIdx].type="exit";
+  cells[0].type="start";
+
+  const candidates=cells.filter(c=>c.type==="empty");
+  shuffle(candidates);
+  let ci=0;
+  if(Math.random()<Balance.CHEST_CHANCE_PER_MAZE && candidates[ci]) candidates[ci++].type="chest";
+  if(Math.random()<Balance.SHRINE_CHANCE_PER_MAZE && candidates[ci]) candidates[ci++].type="shrine";
+  for(let i=0;i<Balance.HERB_NODE_COUNT && candidates[ci]; i++) candidates[ci++].type="herb";
+  for(let i=ci;i<candidates.length;i++){
+    if(Math.random()<Balance.TRAP_CHANCE_PER_TILE) candidates[i].type="trap";
+  }
+  return {size, cells, depth, playerIdx:0};
+}
+
+function ensureMaze(depth){
+  if(!GF.overworld_snapshot || GF.overworld_snapshot.depth!==depth) GF.overworld_snapshot=generateMaze(depth);
+  return GF.overworld_snapshot;
+}
+
+const TILE_GLYPH={start:"🏕",exit:"⬇",chest:"🎁",shrine:"✨",trap:"?",herb:"🌿",empty:""};
+const TILE_COLOR={start:"#2a4a2a",exit:"#3a3a6a",chest:"#5a4a1a",shrine:"#3a5a5a",trap:"#4a2020",herb:"#2a4a2a",empty:"#1a1c14"};
+
+function screenMaze(){
+  const depth=GF.maze_depth||PS.level;
+  const maze=ensureMaze(depth);
+  const root=h("div",{});
+  root.appendChild(h("h2",{},[`The Woods -- Depth ${depth}`]));
+  root.appendChild(h("div",{class:"lore"},["Overgrown paths wind between the trees. Move to an adjacent lit tile."]));
+  const t=toastBox(); if(t) root.appendChild(t);
+  root.appendChild(statHeader());
+
+  const grid=h("div",{class:"maze-grid",style:{gridTemplateColumns:`repeat(${maze.size},34px)`}});
+  for(let y=0;y<maze.size;y++){
+    for(let x=0;x<maze.size;x++){
+      const i=y*maze.size+x; const cell=maze.cells[i];
+      const isPlayer=maze.playerIdx===i;
+      const isAdjacent=maze.cells[maze.playerIdx].conn.has(i);
+      const known = cell.visited!==undefined && (cell===maze.cells[maze.playerIdx] || isAdjacent || cell.discovered);
+      let bg=TILE_COLOR.empty, label="";
+      if(isPlayer){ bg="#e0c96a"; label="@"; }
+      else if(cell.discovered || cell.type==="exit" || cell.type==="start"){ bg=TILE_COLOR[cell.type]||TILE_COLOR.empty; label=cell.cleared?"":(TILE_GLYPH[cell.type]||""); }
+      const tile=h("div",{class:"maze-tile",style:{background:bg,display:"flex",alignItems:"center",justifyContent:"center",cursor:isAdjacent&&!isPlayer?"pointer":"default",fontSize:"16px",border:isAdjacent&&!isPlayer?"1px solid #6a7a4a":"1px solid #222"}},[label]);
+      if(isAdjacent && !isPlayer){ tile.addEventListener("click",()=>onStepMaze(maze,i)); }
+      grid.appendChild(tile);
+    }
+  }
+  root.appendChild(h("div",{class:"maze-wrap"},[grid,
+    h("div",{class:"side-panel"},[
+      h("div",{class:"muted"},["🏕 start   ⬇ exit   🎁 chest","✨ shrine   🌿 herb   ? trap"].join("\n")),
+      h("button",{onClick:()=>GF.goto("town")},["← Retreat to Town"]),
+    ]),
+  ]));
+  return root;
+}
+
+function onStepMaze(maze,targetIdx){
+  const cell=maze.cells[targetIdx];
+  maze.playerIdx=targetIdx; cell.discovered=true; cell.visited=true;
+  PS.spendStamina(Balance.STAMINA_COST_PER_STEP);
+  PS.tickXpBuff();
+  if(PS.current_stamina<=0){
+    setToast("You're exhausted and stumble back to camp.");
+    PS.restoreStamina(Balance.STAMINA_MAX_BASE*0.25);
+    GF.goto("town"); return;
+  }
+
+  if(cell.type==="exit" && !cell.cleared){
+    cell.cleared=true;
+    setToast(`You find the way deeper into the woods. (Depth ${maze.depth+Balance.EXIT_DEPTH_BONUS_PER_DESCENT})`);
+    GF.overworld_snapshot=null;
+    GF.goto("maze",{maze_depth:maze.depth+Balance.EXIT_DEPTH_BONUS_PER_DESCENT});
+    return;
+  }
+  if(cell.type==="trap" && !cell.cleared){
+    cell.cleared=true;
+    const dmg=randRange(Balance.TRAP_DAMAGE_MIN,Balance.TRAP_DAMAGE_MAX);
+    PS.current_hp=Math.max(1,PS.current_hp-dmg);
+    PS.spendStamina(Balance.TRAP_STAMINA_LOSS);
+    setToast(`A hidden snare! You take ${Math.round(dmg)} damage.`);
+    if(Math.random()<Balance.TRAP_REGENERATE_MAZE_CHANCE){
+      GF.overworld_snapshot=null;
+      GF.goto("maze",{maze_depth:Math.max(1,maze.depth-Balance.TRAPDOOR_DEPTH_PENALTY)});
+      return;
+    }
+    render(); return;
+  }
+  if(cell.type==="shrine" && !cell.cleared){
+    cell.cleared=true;
+    if(Math.random()<0.5){ PS.addStaminaShrineBuff(Balance.STAMINA_MAX_BASE*Balance.SHRINE_STAMINA_BUFF_PCT); setToast("A quiet shrine restores your stamina and grants a lasting reserve!"); }
+    else { PS.applyXpShrineBuff(); setToast("A quiet shrine blesses you -- bonus experience for a while!"); }
+    render(); return;
+  }
+  if(cell.type==="herb" && !cell.cleared){
+    cell.cleared=true;
+    const herbId=pick(DL.allHerbIds());
+    PS.addHerb(herbId,1);
+    setToast(`You gather ${(DL.getHerb(herbId).name)}.`);
+    render(); return;
+  }
+  if(cell.type==="chest" && !cell.cleared){
+    GF.goto("chestEncounter",{maze_depth:maze.depth, chest_cell_idx:targetIdx});
+    return;
+  }
+
+  if(Math.random()<Balance.ENCOUNTER_CHANCE_PER_STEP){
+    const monster=DL.pickRandomMonsterForArea(maze.depth);
+    GF.goto("combat",{maze_depth:maze.depth, pending_monster_id:monster.id});
+    return;
+  }
+  render();
+}
+
+
+/* ================= COMBAT ================= */
+
+function ensureCombat(){
+  if(!GF.combat || GF.combat.monster_id!==GF.pending_monster_id){
+    const base=DL.getMonster(GF.pending_monster_id);
+    const streakMult=Balance.killStreakStatMult(PS.kill_streak);
+    const maxHp=Balance.monsterHp(base.base_hp,GF.maze_depth)*streakMult;
+    GF.combat={monster_id:base.id, name:base.name, hp:maxHp, maxHp, dmgMin:Balance.monsterDamage(base.base_damage_min,GF.maze_depth)*streakMult, dmgMax:Balance.monsterDamage(base.base_damage_max,GF.maze_depth)*streakMult, xp:Balance.monsterXpReward(base.base_xp,GF.maze_depth), goldMin:base.gold_min, goldMax:base.gold_max, loot_table:base.loot_table, log:[]};
+  }
+  return GF.combat;
+}
+
+function combatLog(cb,msg){ cb.log.push(msg); if(cb.log.length>5) cb.log.shift(); }
+
+function grantLoot(lootTable, mult){
+  const loot=DL.rollLoot(lootTable);
+  if(loot.type==="gear"){
+    const tier=Balance.itemTierForAreaLevel(GF.maze_depth);
+    const inst=IF.generate(tier);
+    if(PS.addGear(inst)) return `Found ${IF.displayName(inst)}!`;
+    return `Found gear but your bags are full -- it was left behind.`;
+  }
+  if(loot.type==="consumable"){ PS.addConsumable(loot.item_id,1); return `Found a ${DL.getItem(loot.item_id).name}.`; }
+  if(loot.type==="herb"){ PS.addHerb(loot.herb_id,1); return `Found ${DL.getHerb(loot.herb_id).name}.`; }
+  return "";
+}
+
+function endCombatDeath(){
+  const wasHardcore=PS.hardcore;
+  const dead=PS.handleDeath(`Slain by a ${GF.combat.name}`);
+  GF.combat=null;
+  if(dead){ setToast("Your journey ends here. A new entry has been added to the Graveyard."); GF.goto("mainMenuSlots"); }
+  else { setToast("You were defeated. You wake up back at camp, having lost some gold."); PS.saveGame(); GF.goto("town"); }
+}
+
+function screenCombat(){
+  const cb=ensureCombat();
+  const root=h("div",{});
+  root.appendChild(h("h2",{},[`A wild ${cb.name} blocks the path!`]));
+  root.appendChild(statHeader());
+  root.appendChild(h("div",{class:"panel"},[
+    h("div",{style:{fontWeight:"bold"}},[cb.name]),
+    h("div",{},[`HP ${Math.round(Math.max(0,cb.hp))}/${Math.round(cb.maxHp)}`]),
+    bar(Math.max(0,cb.hp)/cb.maxHp*100,"bar-hp"),
+  ]));
+  const logDiv=h("div",{class:"muted",style:{margin:"8px 0",minHeight:"70px"}},cb.log.map(l=>h("div",{},[l])));
+  root.appendChild(logDiv);
+
+  function playerTurn(){
+    const [lo,hi]=PS.getDamageRange();
+    let dmg=randRange(lo,hi);
+    const crit=Math.random()<PS.getCritChance();
+    if(crit) dmg*=Balance.CRIT_MULTIPLIER;
+    cb.hp-=dmg;
+    combatLog(cb,`You hit the ${cb.name} for ${Math.round(dmg)}${crit?" (Critical!)":""}.`);
+    if(cb.hp<=0){
+      const streakMult=Balance.killStreakLootMult(PS.kill_streak);
+      const gold=randIntRange(cb.goldMin,cb.goldMax)*streakMult;
+      const leveled=PS.addXp(cb.xp*streakMult);
+      PS.addGold(gold);
+      PS.incrementKillStreak();
+      const lootMsg=grantLoot(cb.loot_table, streakMult);
+      GF.combat=null;
+      PS.saveGame();
+      setToast(`${cb.name} defeated! +${Math.round(cb.xp*streakMult)} XP, +${Math.round(gold)} gold. ${lootMsg}`);
+      GF.goto("maze",{maze_depth:GF.maze_depth});
+      return;
+    }
+    // monster turn
+    let mdmg=randRange(cb.dmgMin,cb.dmgMax);
+    mdmg*=(1.0-PS.getArmor());
+    PS.current_hp-=mdmg;
+    combatLog(cb,`The ${cb.name} hits you for ${Math.round(mdmg)}.`);
+    if(PS.current_hp<=0){ endCombatDeath(); return; }
+    render();
+  }
+
+  root.appendChild(h("div",{class:"row"},[
+    h("button",{class:"play",onClick:playerTurn},["Attack"]),
+    h("button",{disabled:!PS.canUseConsumable(PS.bestAvailableConsumable("health")),onClick:()=>{ PS.useConsumable(PS.bestAvailableConsumable("health")); render(); }},["Use Health Potion"]),
+    h("button",{disabled:!PS.canUseConsumable(PS.bestAvailableConsumable("stamina")),onClick:()=>{ PS.useConsumable(PS.bestAvailableConsumable("stamina")); render(); }},["Use Stamina Potion"]),
+    h("button",{class:"danger",onClick:()=>{ GF.combat=null; setToast("You flee back toward camp."); GF.goto("maze",{maze_depth:GF.maze_depth}); }},["Flee"]),
+  ]));
+  return root;
+}
+
+/* ================= CHEST ================= */
+
+function ensureChest(){
+  if(!GF.chest || GF.chest.cell_idx!==GF.chest_cell_idx){
+    GF.chest={cell_idx:GF.chest_cell_idx, hits_required:randIntRange(Balance.CHEST_HITS_MIN,Balance.CHEST_HITS_MAX), hits_done:0};
+  }
+  return GF.chest;
+}
+
+function screenChest(){
+  const chest=ensureChest();
+  const root=h("div",{});
+  root.appendChild(h("h2",{},["A weathered chest, bound in vines"]));
+  root.appendChild(statHeader());
+  root.appendChild(h("div",{class:"panel"},[
+    h("div",{},[`Pry it open: ${chest.hits_done}/${chest.hits_required} hits`]),
+    bar(chest.hits_done/chest.hits_required*100,"bar-gold"),
+  ]));
+  root.appendChild(h("div",{class:"row"},[
+    h("button",{class:"play",onClick:()=>{
+      chest.hits_done++;
+      if(chest.hits_done>=chest.hits_required){
+        const tier=Balance.itemTierForAreaLevel(GF.maze_depth);
+        const mult=Balance.CHEST_LOOT_MULTIPLIER;
+        let msgs=[];
+        const g1=grantLoot("epic",mult); if(g1) msgs.push(g1);
+        if(Math.random()<Balance.CHEST_SCROLL_CHANCE){
+          const scroll=pick(["scroll_of_challenge_1","scroll_of_challenge_2","scroll_of_challenge_3"]);
+          PS.addConsumable(scroll,1); msgs.push(`Found a ${DL.getItem(scroll).name}!`);
+        }
+        const goldFound=Math.round(randIntRange(10,30)*mult);
+        PS.addGold(goldFound); msgs.push(`+${goldFound} gold.`);
+        if(GF.overworld_snapshot) GF.overworld_snapshot.cells[chest.cell_idx].cleared=true;
+        GF.chest=null; PS.saveGame();
+        setToast("The chest creaks open! "+msgs.join(" "));
+        GF.goto("maze",{maze_depth:GF.maze_depth});
+        return;
+      }
+      render();
+    }},["Pry it open"]),
+    h("button",{onClick:()=>{ GF.chest=null; GF.goto("maze",{maze_depth:GF.maze_depth}); }},["Leave it"]),
+  ]));
+  return root;
+}
+
+
+/* ================= INVENTORY ================= */
+
+function gearRow(inst, actions){
+  return h("div",{class:"tile",style:{marginBottom:"6px"}},[
+    h("div",{class:"tooltip",style:{fontWeight:"bold"},"data-tip":IF.tooltipText(inst)},[IF.displayName(inst)+` (T${inst.tier})`]),
+    h("div",{class:"muted"},[IF.affixSummary(inst)]),
+    h("div",{class:"row",style:{marginTop:"6px"}},actions),
+  ]);
+}
+
+function screenInventory(){
+  const root=h("div",{});
+  root.appendChild(h("h2",{},["Inventory"]));
+  const t=toastBox(); if(t) root.appendChild(t);
+  root.appendChild(statHeader());
+  root.appendChild(h("div",{class:"muted"},[PS.getGearBonusSummary()]));
+
+  root.appendChild(h("h3",{style:{marginTop:"12px"}},["Equipped"]));
+  const eqGrid=h("div",{class:"grid3"});
+  for(const slot of IF.EQUIPPED_SLOT_KEYS){
+    const inst=PS.equipped[slot];
+    eqGrid.appendChild(h("div",{class:"tile"},[
+      h("div",{class:"muted"},[IF.slotLabel(slot)]),
+      inst?h("div",{class:"tooltip","data-tip":IF.tooltipText(inst)},[IF.displayName(inst)]):h("div",{class:"muted"},["(empty)"]),
+      inst?h("button",{style:{marginTop:"6px"},onClick:()=>{PS.unequipSlot(slot);PS.saveGame();render();}},["Unequip"]):null,
+    ]));
+  }
+  root.appendChild(eqGrid);
+
+  root.appendChild(h("h3",{},[`Backpack (${PS.getInventoryUsed()}/${PS.getInventoryCapacity()})`]));
+  if(PS.gear_instances.length===0) root.appendChild(h("div",{class:"muted"},["Empty. Go find some loot in the woods."]));
+  for(const inst of [...PS.gear_instances]){
+    root.appendChild(gearRow(inst,[
+      h("button",{onClick:()=>{PS.equipGear(inst.instance_id);PS.saveGame();render();}},["Equip"]),
+      h("button",{onClick:()=>{PS.salvageGear(inst.instance_id);PS.saveGame();render();}},[`Salvage (+${Balance.salvageValue(inst.tier,IF.slotCount(inst))} mat)`]),
+      h("button",{onClick:()=>{PS.sellGear(inst.instance_id);PS.saveGame();render();}},[`Sell (+${Balance.sellValue(inst.tier,IF.slotCount(inst))}g)`]),
+    ]));
+  }
+
+  root.appendChild(h("h3",{},["Bags"]));
+  root.appendChild(h("div",{class:"muted"},[`Equipped bags: ${PS.equipped_bags.length}/${Balance.MAX_BAG_SLOTS}`]));
+  for(const bagId of [...PS.equipped_bags]){
+    root.appendChild(h("div",{class:"row",style:{marginBottom:"4px"}},[DL.getItem(bagId).name, h("button",{onClick:()=>{PS.unequipBag(bagId);PS.saveGame();render();}},["Unequip"])]));
+  }
+
+  root.appendChild(h("h3",{},["Consumables"]));
+  const consEntries=Object.keys(PS.consumables).filter(k=>PS.consumables[k]>0);
+  if(consEntries.length===0) root.appendChild(h("div",{class:"muted"},["None."]));
+  for(const itemId of consEntries){
+    const item=DL.getItem(itemId);
+    root.appendChild(h("div",{class:"row",style:{marginBottom:"4px"}},[
+      `${item.name} x${PS.consumables[itemId]}`,
+      item.type==="consumable"?h("button",{disabled:!PS.canUseConsumable(itemId),onClick:()=>{PS.useConsumable(itemId);PS.saveGame();render();}},["Use"]):
+        h("button",{onClick:()=>{PS.useScroll(itemId);PS.saveGame();setToast(`${item.name} will boost your next descent by ${item.level_bonus} levels.`);render();}},["Use"]),
+    ]));
+  }
+
+  root.appendChild(h("h3",{},["Herbs"]));
+  const herbEntries=Object.keys(PS.herbs).filter(k=>PS.herbs[k]>0);
+  if(herbEntries.length===0) root.appendChild(h("div",{class:"muted"},["None."]));
+  for(const herbId of herbEntries) root.appendChild(h("div",{},[`${DL.getHerb(herbId).name} x${PS.herbs[herbId]}`]));
+
+  root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
+  return root;
+}
+
+/* ================= BLACKSMITH ================= */
+
+function screenBlacksmith(){
+  const root=h("div",{});
+  root.appendChild(h("div",{class:"row gap"},[iconBadge(`<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="19" fill="#5a4028"/><rect x="10" y="26" width="20" height="6" rx="1" fill="#333"/></svg>`,52),h("div",{},[h("h2",{},[Balance.NPC_BLACKSMITH_NAME]),h("div",{class:"flavor"},["\"Bring me your battered gear. I'll see what can be salvaged, or improved.\""])])]));
+  const t=toastBox(); if(t) root.appendChild(t);
+  root.appendChild(statHeader());
+
+  root.appendChild(h("h3",{},["Reroll Gear (uses materials)"]));
+  if(PS.gear_instances.length===0) root.appendChild(h("div",{class:"muted"},["Bring gear from your backpack to reroll its bonuses."]));
+  for(const inst of PS.gear_instances){
+    const cost=Balance.rerollCost(inst.tier,IF.slotCount(inst));
+    root.appendChild(gearRow(inst,[
+      h("button",{disabled:PS.materials<cost,onClick:()=>{ if(PS.rerollGear(inst.instance_id)){PS.saveGame(); setToast("Rerolled!");} render(); }},[`Reroll (${cost} mat)`]),
+      h("button",{onClick:()=>{PS.salvageGear(inst.instance_id);PS.saveGame();render();}},[`Salvage (+${Balance.salvageValue(inst.tier,IF.slotCount(inst))} mat)`]),
+    ]));
+  }
+
+  root.appendChild(h("h3",{},["Craft Bags (uses materials)"]));
+  root.appendChild(h("div",{class:"muted"},[`Materials: ${PS.materials}`]));
+  const bagGrid=h("div",{class:"grid3"});
+  for(const itemId in ITEMS){
+    const item=ITEMS[itemId]; if(item.type!=="bag") continue;
+    const cost=Balance.bagCraftCost(item.capacity);
+    bagGrid.appendChild(h("div",{class:"tile"},[
+      h("div",{style:{fontWeight:"bold"}},[item.name]),
+      h("div",{class:"muted"},[`Capacity +${item.capacity}`]),
+      h("button",{style:{marginTop:"6px"},disabled:PS.materials<cost||PS.equipped_bags.length>=Balance.MAX_BAG_SLOTS,onClick:()=>{
+        const r=PS.craftBag(itemId); if(r.success){PS.saveGame(); setToast(`Crafted ${item.name}!`);} else setToast(r.reason); render();
+      }},[`Craft (${cost} mat)`]),
+    ]));
+  }
+  root.appendChild(bagGrid);
+  root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
+  return root;
+}
+
+/* ================= ALCHEMIST ================= */
+
+function screenAlchemist(){
+  const root=h("div",{});
+  root.appendChild(h("div",{class:"row gap"},[iconBadge(`<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="19" fill="#2a5a4a"/><rect x="16" y="10" width="8" height="18" rx="3" fill="#8fd0aa"/></svg>`,52),h("div",{},[h("h2",{},[Balance.NPC_ALCHEMIST_NAME]),h("div",{class:"flavor"},["\"The forest gives freely, if you know what to pick.\""])])]));
+  const t=toastBox(); if(t) root.appendChild(t);
+  root.appendChild(statHeader());
+
+  root.appendChild(h("h3",{},["Your Herbs"]));
+  const herbEntries=Object.keys(PS.herbs).filter(k=>PS.herbs[k]>0);
+  root.appendChild(h("div",{class:"muted"},[herbEntries.length?herbEntries.map(id=>`${DL.getHerb(id).name} x${PS.herbs[id]}`).join(", "):"None yet -- gather herbs in the woods."]));
+
+  root.appendChild(h("h3",{},["Recipes"]));
+  const grid=h("div",{class:"grid3"});
+  for(const recipe of RECIPES){
+    const result=DL.getItem(recipe.result_item);
+    const can=PS.canAffordRecipe(recipe);
+    grid.appendChild(h("div",{class:"tile"},[
+      h("div",{style:{fontWeight:"bold"}},[result.name]),
+      h("div",{class:"muted"},[Object.keys(recipe.herbs).map(h2=>`${DL.getHerb(h2).name} x${recipe.herbs[h2]}`).join(", ")]),
+      h("button",{style:{marginTop:"6px"},disabled:!can,onClick:()=>{ if(PS.brewRecipe(recipe)){PS.saveGame(); setToast(`Brewed ${result.name}!`);} render(); }},["Brew"]),
+    ]));
+  }
+  root.appendChild(grid);
+  root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
+  return root;
+}
+
+/* ================= MERCHANT ================= */
+
+function screenMerchant(){
+  const root=h("div",{});
+  root.appendChild(h("div",{class:"row gap"},[iconBadge(`<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="19" fill="#6a4a20"/><circle cx="20" cy="24" r="10" fill="#c99a50"/></svg>`,52),h("div",{},[h("h2",{},[`${Balance.NPC_MERCHANT_NAME} the Merchant`]),h("div",{class:"flavor"},["\"Best prices this side of the treeline. Probably.\""])])]));
+  const t=toastBox(); if(t) root.appendChild(t);
+  root.appendChild(statHeader());
+
+  root.appendChild(h("h3",{},["Buy"]));
+  const grid=h("div",{class:"grid3"});
+  for(const itemId in ITEMS){
+    const item=ITEMS[itemId]; if(item.type==="bag") continue;
+    const price=Math.round((item.sell_value||1)*Balance.VENDOR_MARKUP);
+    grid.appendChild(h("div",{class:"tile"},[
+      h("div",{style:{fontWeight:"bold"}},[item.name]),
+      h("div",{class:"muted"},[`${price} gold`]),
+      h("button",{style:{marginTop:"6px"},disabled:PS.gold<price,onClick:()=>{ if(PS.buyConsumable(itemId)){PS.saveGame(); setToast(`Bought ${item.name}.`);} render(); }},["Buy"]),
+    ]));
+  }
+  root.appendChild(grid);
+
+  root.appendChild(h("h3",{},["Buy Bags"]));
+  const bagGrid=h("div",{class:"grid3"});
+  for(const itemId in ITEMS){
+    const item=ITEMS[itemId]; if(item.type!=="bag") continue;
+    const price=Balance.bagBuyPrice(item.capacity);
+    bagGrid.appendChild(h("div",{class:"tile"},[
+      h("div",{style:{fontWeight:"bold"}},[item.name]),
+      h("div",{class:"muted"},[`Capacity +${item.capacity} -- ${price} gold`]),
+      h("button",{style:{marginTop:"6px"},disabled:PS.gold<price||PS.equipped_bags.length>=Balance.MAX_BAG_SLOTS,onClick:()=>{
+        const r=PS.buyBag(itemId); if(r.success){PS.saveGame(); setToast(`Bought ${item.name}!`);} else setToast(r.reason); render();
+      }},["Buy"]),
+    ]));
+  }
+  root.appendChild(bagGrid);
+
+  root.appendChild(h("h3",{},["Sell Gear"]));
+  if(PS.gear_instances.length===0) root.appendChild(h("div",{class:"muted"},["Nothing to sell."]));
+  for(const inst of PS.gear_instances){
+    root.appendChild(gearRow(inst,[h("button",{onClick:()=>{PS.sellGear(inst.instance_id);PS.saveGame();render();}},[`Sell (+${Balance.sellValue(inst.tier,IF.slotCount(inst))}g)`])]));
+  }
+  root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
+  return root;
+}
+
+/* ================= AUCTION HOUSE (preview shell) ================= */
+
+function screenAuctionHouse(){
+  const root=h("div",{});
+  root.appendChild(h("h2",{},["Auction House"]));
+  root.appendChild(h("div",{class:"lore"},["A dusty ledger and an idle gavel. Word is a proper auction house is coming to camp soon -- for now, the block sits empty."]));
+  root.appendChild(h("div",{class:"muted"},["Coming soon: list gear for other travelers, bid on rare finds."]));
+  root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
+  return root;
+}
+
+
+/* ================= MASTER TRIAL ================= */
+
+function getTrialProgress(){
+  if(!PS.trial_progress) PS.trial_progress={};
+  if(!PS.trial_progress[PS.class_id]) PS.trial_progress[PS.class_id]={stage:0,discovered:0};
+  return PS.trial_progress[PS.class_id];
+}
+
+function screenMasterTrial(){
+  const root=h("div",{});
+  const c=PS.getClassData();
+  const nextId=DL.getNextClassId(PS.class_id);
+  root.appendChild(h("h2",{},["The Master Trial"]));
+  if(!PS.canAttemptTrial()){
+    root.appendChild(h("div",{class:"lore"},[`You must reach Level ${Balance.LEVEL_CAP} as a ${c.display_name} before the elders will test you.`]));
+    root.appendChild(h("button",{onClick:()=>GF.goto("town")},["← Back to Town"]));
+    return root;
+  }
+  if(!nextId){
+    root.appendChild(h("div",{class:"lore"},[`${c.display_name} is the final form of your path. There is nothing left to prove -- you have mastered the woods.`]));
+    root.appendChild(h("button",{onClick:()=>GF.goto("town")},["← Back to Town"]));
+    return root;
+  }
+  const t=toastBox(); if(t) root.appendChild(t);
+  root.appendChild(h("div",{class:"lore"},[`Cross the ancient plank bridge to prove yourself worthy of becoming a ${DL.getClass(nextId).display_name}. Fall, and you must try again -- but the bridge remembers every safe step you've already found.`]));
+
+  const trialIndex=c.tier||1;
+  const stagesRequired=Balance.trialStagesRequired(trialIndex);
+  const rows=Balance.BRIDGE_ROWS_PER_STAGE;
+  const rowChance=Balance.bridgeRowSurvivalChance(Balance.TRIAL_STAGE_PASS_CHANCE, rows);
+  const progress=getTrialProgress();
+
+  root.appendChild(h("div",{class:"panel"},[
+    h("div",{},[`Stage ${progress.stage+1} of ${stagesRequired}`]),
+    h("div",{class:"muted"},[`Odds per unknown plank: ${Math.round(rowChance*100)}%`]),
+  ]));
+
+  const plankRow=h("div",{class:"plank-row"});
+  for(let i=0;i<rows;i++){
+    const known=i<progress.discovered;
+    plankRow.appendChild(h("button",{class:known?"locked-safe":"",disabled:true},[known?`✓ ${i+1}`:`${i+1}`]));
+  }
+  root.appendChild(plankRow);
+
+  root.appendChild(h("div",{class:"row"},[
+    h("button",{class:"play",onClick:()=>{
+      if(Math.random()<rowChance){
+        progress.discovered++;
+        if(progress.discovered>=rows){
+          progress.stage++; progress.discovered=0;
+          if(progress.stage>=stagesRequired){
+            const result=PS.resolveMasterTrial(true);
+            delete PS.trial_progress[c.chain+"_done_marker"];
+            PS.trial_progress[PS.class_id]={stage:0,discovered:0};
+            PS.saveGame();
+            setToast(result.final_tier?`You have mastered the ${c.chain} path completely!`:`You are promoted to ${DL.getClass(PS.class_id).display_name}!`);
+            GF.goto("town"); return;
+          } else setToast(`Stage ${progress.stage} cleared! Onward.`);
+        }
+      } else {
+        setToast("The plank gives way beneath you! You fall back to camp -- but you remember the safe planks you'd already found.");
+        PS.current_hp=Math.max(1,PS.current_hp-15);
+      }
+      PS.saveGame(); render();
+    }},["Step onto the next plank"]),
+    h("button",{onClick:()=>GF.goto("town")},["← Retreat to Town"]),
+  ]));
+  return root;
+}
+
+/* ================= ADMIN PANEL ================= */
+
+function screenAdminPanel(){
+  const root=h("div",{});
+  root.appendChild(h("h2",{},["Dev Tools"]));
+  if(!GF.admin_unlocked){
+    const pw=h("input",{type:"text",placeholder:"password"});
+    root.appendChild(h("div",{class:"row gap"},[pw,
+      h("button",{onClick:()=>{ if(pw.value===Balance.ADMIN_PASSWORD){GF.admin_unlocked=true;} else setToast("Incorrect password."); render(); }},["Unlock"]),
+    ]));
+    const t=toastBox(); if(t) root.appendChild(t);
+    root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
+    return root;
+  }
+  root.appendChild(h("div",{class:"muted"},["For local testing only -- affects the currently loaded character."]));
+  root.appendChild(h("div",{class:"row",style:{marginTop:"10px",flexWrap:"wrap"}},[
+    h("button",{onClick:()=>{PS.gold+=500;PS.saveGame();render();}},["+500 gold"]),
+    h("button",{onClick:()=>{PS.materials+=200;PS.saveGame();render();}},["+200 materials"]),
+    h("button",{onClick:()=>{for(let i=0;i<10;i++)PS.addXp(PS.xp_to_next);PS.saveGame();render();}},["+10 levels"]),
+    h("button",{onClick:()=>{PS.level=Balance.LEVEL_CAP;PS.xp=0;PS.xp_to_next=Balance.xpRequiredForLevel(PS.level);PS.current_hp=PS.getMaxHp();PS.saveGame();render();}},["Set level to cap"]),
+    h("button",{onClick:()=>{PS.addGear(IF.generate(Balance.itemTierForAreaLevel(PS.level)));PS.saveGame();render();}},["Spawn random gear"]),
+    h("button",{class:"danger",onClick:()=>{ if(confirm("Wipe this save?")){ if(PS.current_slot>=0) deleteSave(PS.current_slot); GF.goto("mainMenuSlots"); } }},["Wipe this save"]),
+  ]));
+  root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
+  return root;
+}
+
+/* ================= SCREEN ROUTER ================= */
+
+const SCREENS={
+  authGate: screenAuthGate,
+  login: screenLogin,
+  register: screenRegister,
+  mainMenuSlots: screenMainMenuSlots,
+  classPicker: screenClassPicker,
+  graveyard: screenGraveyard,
+  leaderboard: screenLeaderboard,
+  chat: screenChat,
+  town: screenTown,
+  maze: screenMaze,
+  combat: screenCombat,
+  chestEncounter: screenChest,
+  inventory: screenInventory,
+  blacksmith: screenBlacksmith,
+  alchemist: screenAlchemist,
+  merchant: screenMerchant,
+  auctionHouse: screenAuctionHouse,
+  masterTrial: screenMasterTrial,
+  adminPanel: screenAdminPanel,
+};
+
+render();
+</script>
+</body>
+</html>
