@@ -1418,49 +1418,69 @@ function screenTown(){
 
 /* ================= MAZE / OVERWORLD ================= */
 
-const MAZE_SIZE=20;
+const MAZE_W=20, MAZE_H=10;
 
 function generateMaze(depth){
-  const size=MAZE_SIZE;
-  const cells=[];
-  for(let y=0;y<size;y++) for(let x=0;x<size;x++) cells.push({x,y,conn:new Set(),type:"empty",visited:false,cleared:false});
+  const size=MAZE_W, sizeH=MAZE_H;
   const idx=(x,y)=>y*size+x;
-  const stack=[cells[0]]; cells[0].visited=true;
-  while(stack.length){
-    const cur=stack[stack.length-1];
-    const dirs=[[1,0],[-1,0],[0,1],[0,-1]];
-    shuffle(dirs);
-    let advanced=false;
-    for(const [dx,dy] of dirs){
-      const nx=cur.x+dx, ny=cur.y+dy;
-      if(nx>=0&&nx<size&&ny>=0&&ny<size){
-        const n=cells[idx(nx,ny)];
-        if(!n.visited){
-          cur.conn.add(idx(nx,ny)); n.conn.add(idx(cur.x,cur.y));
-          n.visited=true; stack.push(n); advanced=true; break;
-        }
+  const dirs4=[[1,0],[-1,0],[0,1],[0,-1]];
+
+  // Terrain, obstruction placement, and reachability are regenerated together and
+  // retried if the start ends up boxed in -- exceedingly unlikely at 18% density,
+  // but cheap to guard against.
+  let cells, dist;
+  for(let attempt=0;attempt<20;attempt++){
+    cells=[];
+    for(let y=0;y<sizeH;y++) for(let x=0;x<size;x++) cells.push({x,y,type:"dirt",discovered:false,cleared:false});
+
+    // Cosmetic grass patches (tall grass = "hides mobs" flavor; dirt = plain path).
+    // Purely visual -- both are freely walkable.
+    for(let p=0;p<Balance.GRASS_PATCH_COUNT;p++){
+      let cx=randi(size), cy=randi(sizeH);
+      const patchSize=3+randi(4);
+      for(let s=0;s<patchSize;s++){
+        if(cx>=0&&cx<size&&cy>=0&&cy<sizeH) cells[idx(cx,cy)].type="grass";
+        const [ddx,ddy]=pick(dirs4); cx+=ddx; cy+=ddy;
       }
     }
-    if(!advanced) stack.pop();
+
+    // Boulders: impassable whole tiles (not walls between tiles) -- any two
+    // 4-directionally adjacent non-boulder cells are always mutually reachable.
+    for(const c of cells){
+      if(c.x===0&&c.y===0) continue; // never block the starting tile itself
+      if(Math.random()<Balance.OBSTACLE_DENSITY) c.type="boulder";
+    }
+
+    // BFS reachability (4-directional, boulders block) from the start tile.
+    dist=new Array(cells.length).fill(-1);
+    dist[0]=0; const q=[0];
+    while(q.length){
+      const cur=q.shift();
+      const cx=cur%size, cy=Math.floor(cur/size);
+      for(const [dx,dy] of dirs4){
+        const nx=cx+dx, ny=cy+dy;
+        if(nx<0||nx>=size||ny<0||ny>=sizeH) continue;
+        const ni=idx(nx,ny);
+        if(cells[ni].type==="boulder") continue;
+        if(dist[ni]===-1){ dist[ni]=dist[cur]+1; q.push(ni); }
+      }
+    }
+    const reachableCount=dist.filter(d=>d>=0).length;
+    if(reachableCount>=cells.length*0.6) break; // good enough, keep this layout
   }
-  // BFS distances from start to find a far cell for the exit
-  const dist=new Array(cells.length).fill(-1);
-  dist[0]=0; let q=[0];
-  while(q.length){
-    const cIdx=q.shift();
-    for(const nIdx of cells[cIdx].conn){ if(dist[nIdx]===-1){ dist[nIdx]=dist[cIdx]+1; q.push(nIdx); } }
-  }
+
+  cells[0].type="start";
   let exitIdx=0, best=-1;
   for(let i=0;i<cells.length;i++) if(dist[i]>best){ best=dist[i]; exitIdx=i; }
   cells[exitIdx].type="exit";
-  cells[0].type="start";
 
-  const candidates=cells.filter(c=>c.type==="empty");
+  // Content only ever lands on reachable, plain (grass/dirt) tiles.
+  const candidates=cells.filter((c,i)=>dist[i]>0 && (c.type==="grass"||c.type==="dirt"));
   shuffle(candidates);
   let ci=0;
   // Content density was tuned for the original 6x6 (36-cell) maze; scale proportionally
-  // for larger grids so a 20x20 maze doesn't feel emptied out.
-  const densityScale=(size*size)/36;
+  // for larger grids so a 20x10 maze doesn't feel emptied out or overstuffed.
+  const densityScale=(size*sizeH)/36;
   const chestCount=Math.max(1,Math.round(Balance.CHEST_CHANCE_PER_MAZE*densityScale));
   const shrineCount=Math.max(1,Math.round(Balance.SHRINE_CHANCE_PER_MAZE*densityScale));
   const herbCount=Math.max(1,Math.round(Balance.HERB_NODE_COUNT*densityScale));
@@ -1470,7 +1490,10 @@ function generateMaze(depth){
   for(let i=ci;i<candidates.length;i++){
     if(Math.random()<Balance.TRAP_CHANCE_PER_TILE) candidates[i].type="trap";
   }
-  return {size, cells, depth, playerIdx:0};
+
+  const maze={size, sizeH, cells, depth, playerIdx:0};
+  revealAround(maze,0,PS.getEyesightRadius()); // see your own starting neighborhood immediately
+  return maze;
 }
 
 function ensureMaze(depth){
@@ -1478,68 +1501,54 @@ function ensureMaze(depth){
   return GF.overworld_snapshot;
 }
 
-const TILE_GLYPH={start:"🏕",exit:"⬇",chest:"🎁",shrine:"✨",trap:"⚠",herb:"🌿",empty:""};
-const TILE_COLOR={start:"#2a4a2a",exit:"#3a3a6a",chest:"#5a4a1a",shrine:"#3a5a5a",trap:"#4a2020",herb:"#2a4a2a",empty:"#1a1c14"};
+const TILE_GLYPH={start:"🏕",exit:"⬇",chest:"🎁",shrine:"✨",trap:"⚠",herb:"🌿",boulder:"🪨",grass:"",dirt:""};
+const TILE_COLOR={start:"#2a4a2a",exit:"#3a3a6a",chest:"#5a4a1a",shrine:"#3a5a5a",trap:"#4a2020",herb:"#2a4a2a",boulder:"#3a3a34",grass:"#274a1e",dirt:"#4a3a26"};
+
+function isAdjacent4(x1,y1,x2,y2){
+  const dx=Math.abs(x1-x2), dy=Math.abs(y1-y2);
+  return (dx+dy)===1;
+}
 
 function screenMaze(){
   const depth=GF.maze_depth||PS.level;
   const maze=ensureMaze(depth);
   const root=h("div",{});
   root.appendChild(h("h2",{},[`The Woods -- Depth ${depth}`]));
-  root.appendChild(h("div",{class:"lore"},["Overgrown paths wind between the trees. Move with the arrow keys, on-screen arrows, or by clicking a lit tile."]));
+  root.appendChild(h("div",{class:"lore"},["Overgrown paths wind between the trees. Move with the arrow keys or by clicking a yellow-bordered tile."]));
   const t=toastBox(); if(t) root.appendChild(t);
   root.appendChild(statHeader());
 
   const px=maze.playerIdx%maze.size, py=Math.floor(maze.playerIdx/maze.size);
-  const sightRadius=PS.getEyesightRadius();
   const grid=h("div",{class:"maze-grid",style:{gridTemplateColumns:`repeat(${maze.size},34px)`}});
-  for(let y=0;y<maze.size;y++){
+  for(let y=0;y<maze.sizeH;y++){
     for(let x=0;x<maze.size;x++){
       const i=y*maze.size+x; const cell=maze.cells[i];
       const isPlayer=maze.playerIdx===i;
-      const isWalkable=maze.cells[maze.playerIdx].conn.has(i);
-      const chebyshevDist=Math.max(Math.abs(x-px),Math.abs(y-py));
-      const isGeoNeighbor=!isPlayer && chebyshevDist<=sightRadius;
-      let bg=TILE_COLOR.empty, label="", border="1px solid #222", opacity="1";
+      const isWalkable=!isPlayer && cell.type!=="boulder" && isAdjacent4(x,y,px,py);
+      const isKnown=cell.discovered || cell.type==="exit" || cell.type==="start";
+      let bg="#050505", label="", border="1px solid #222", opacity="1";
       if(isPlayer){ bg="#e0c96a"; }
-      else if(cell.discovered || cell.type==="exit" || cell.type==="start"){
-        bg=TILE_COLOR[cell.type]||TILE_COLOR.empty;
+      else if(isKnown){
+        bg=TILE_COLOR[cell.type]||TILE_COLOR.dirt;
         label=TILE_GLYPH[cell.type]||"";
         if(cell.cleared) opacity="0.4";
-      } else if(isWalkable){
-        border="1px solid #8fce6a";
-      } else if(isGeoNeighbor){
-        label="🪨"; bg="#241f1a"; border="1px solid #444";
       }
+      if(isWalkable){ border="2px solid #e0c96a"; if(!isKnown) bg="#161611"; }
       const inner=h("span",{style:{opacity}},[label]);
-      const tile=h("div",{class:"maze-tile",style:{background:bg,display:"flex",alignItems:"center",justifyContent:"center",cursor:isWalkable&&!isPlayer?"pointer":"default",fontSize:"16px",border}},[inner]);
-      if(isWalkable && !isPlayer){ tile.addEventListener("click",()=>onStepMaze(maze,i)); }
+      const tile=h("div",{class:"maze-tile",style:{background:bg,display:"flex",alignItems:"center",justifyContent:"center",cursor:isWalkable?"pointer":"default",fontSize:"16px",border}},[inner]);
+      if(isWalkable){ tile.addEventListener("click",()=>onStepMaze(maze,i)); }
       grid.appendChild(tile);
     }
   }
 
-  function arrowTarget(dx,dy){
-    const nx=px+dx, ny=py+dy;
-    if(nx<0||nx>=maze.size||ny<0||ny>=maze.size) return -1;
-    const ni=ny*maze.size+nx;
-    return maze.cells[maze.playerIdx].conn.has(ni) ? ni : -1;
-  }
-  function arrowBtn(dx,dy,label){
-    const ni=arrowTarget(dx,dy);
-    return h("button",{disabled:ni===-1,onClick:()=>onStepMaze(maze,ni)},[label]);
-  }
-
   root.appendChild(h("div",{class:"maze-wrap"},[grid,
     h("div",{class:"side-panel"},[
-      h("div",{class:"col gap",style:{alignItems:"center",marginBottom:"6px"}},[
-        arrowBtn(0,-1,"↑"),
-        h("div",{class:"row gap"},[arrowBtn(-1,0,"←"), arrowBtn(1,0,"→")]),
-        arrowBtn(0,1,"↓"),
-      ]),
       h("div",{class:"col",style:{gap:"2px"}},[
         h("div",{class:"muted"},["🏕 start   ⬇ exit   🎁 chest"]),
         h("div",{class:"muted"},["✨ shrine   🌿 herb   ⚠ trap"]),
-        h("div",{class:"muted"},["🪨 blocked path -- can't be reached from here"]),
+        h("div",{class:"muted"},["🪨 boulder -- impassable"]),
+        h("div",{class:"muted"},["Green tile = grass, brown tile = dirt (both walkable)"]),
+        h("div",{class:"muted"},["Yellow border = you can step there right now"]),
         h("div",{class:"muted"},["Faded icon = already used"]),
       ]),
       h("button",{onClick:()=>GF.goto("town")},["← Retreat to Town"]),
@@ -1553,7 +1562,7 @@ function revealAround(maze,centerIdx,radius){
   for(let dy=-radius;dy<=radius;dy++){
     for(let dx=-radius;dx<=radius;dx++){
       const nx=cx+dx, ny=cy+dy;
-      if(nx<0||nx>=maze.size||ny<0||ny>=maze.size) continue;
+      if(nx<0||nx>=maze.size||ny<0||ny>=maze.sizeH) continue;
       maze.cells[ny*maze.size+nx].discovered=true;
     }
   }
@@ -1633,9 +1642,9 @@ window.addEventListener("keydown",(e)=>{
   e.preventDefault();
   const px=maze.playerIdx%maze.size, py=Math.floor(maze.playerIdx/maze.size);
   const nx=px+d[0], ny=py+d[1];
-  if(nx<0||nx>=maze.size||ny<0||ny>=maze.size) return;
+  if(nx<0||nx>=maze.size||ny<0||ny>=maze.sizeH) return;
   const ni=ny*maze.size+nx;
-  if(!maze.cells[maze.playerIdx].conn.has(ni)) return;
+  if(maze.cells[ni].type==="boulder") return;
   onStepMaze(maze,ni);
 });
 
