@@ -50,6 +50,15 @@ will reconcile either way.)
   set this env var yourself if you want the file renamed)
 - `CORS_ORIGIN`, lock this to your real domain once deployed (default `*`, fine for
   local testing, not for production if you ever split client and server across origins)
+- `ADMIN_TOKEN`, a real secret enabling the leaderboard moderation endpoints used by the
+  Dev Tools panel's "Leaderboard Moderation" section (view every entry, delete buggy or
+  cheated ones). Unset by default, the admin endpoints return 503 until you set it. This
+  must be a different string from the client's cosmetic Dev Tools password (`atldp0`),
+  since that password ships inside `index.html` and anyone can read it by viewing page
+  source, it only gates the local cheat buttons, not anything server-side. `ADMIN_TOKEN`
+  never appears in the client code; you type it into the Dev Tools panel's admin-token
+  field yourself each time you want to moderate the leaderboard, and it's only ever sent
+  over HTTPS in a request header, never saved to disk or localStorage.
 
 ## Deploying on your own domain
 
@@ -73,6 +82,20 @@ run a long-lived Node process.
    server's `public/` folder, add `?api=https://yourdomain.com` to the client URL so it
    knows where to send API/WebSocket calls, and set `CORS_ORIGIN` on the server to that
    client's origin.
+5. To enable leaderboard moderation, set `ADMIN_TOKEN` on the droplet before starting the
+   process with pm2, picking your own long random string, for example:
+   ```
+   ADMIN_TOKEN="pick-a-long-random-string-here" pm2 start server.js --name wandrian
+   ```
+   If wandrian is already running under pm2, set it and restart with the env var attached:
+   ```
+   ADMIN_TOKEN="pick-a-long-random-string-here" pm2 restart wandrian --update-env
+   ```
+   pm2 does not persist one-off shell env vars across reboots on its own, so if you use
+   `pm2 save` / `pm2 resurrect`, either export `ADMIN_TOKEN` in your shell profile first,
+   or add it to an `env` block in a pm2 ecosystem file. Once set, open Dev Tools in the
+   game, unlock it with the usual password, and paste this same `ADMIN_TOKEN` value into
+   the new "Leaderboard Moderation" admin-token field to load and delete entries.
 
 ## What's next (not built yet)
 

@@ -34,6 +34,17 @@ const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const MAX_CHARACTER_SLOTS = 6;
 const CHAT_HISTORY_LIMIT = 50;
 
+// Leaderboard-moderation token (v0.10.1): deliberately NOT the client's Dev Tools
+// "atldp0" password -- that one ships inside index.html, so anyone who views page
+// source knows it. This token is a real server-side secret: set it as an env var
+// before starting the server, then paste the same value into the Dev Tools screen's
+// "Admin Token" field in-game. Without it set, the admin endpoints below refuse to
+// run at all (rather than silently accepting an empty/guessable token).
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || null;
+if (!ADMIN_TOKEN) {
+  console.warn("ADMIN_TOKEN is not set -- leaderboard moderation endpoints are disabled until you set it.");
+}
+
 /* ---------------- DB setup ---------------- */
 
 const db = new DatabaseSync(DB_PATH);
@@ -182,6 +193,19 @@ function requireAuth(req, res, next) {
   const account = accountForToken(token);
   if (!account) return res.status(401).json({ error: "Not authenticated." });
   req.account = account;
+  next();
+}
+
+// Leaderboard moderation is gated behind requireAuth (must be logged in) AND this
+// separate admin token, checked with a timing-safe comparison. Always run requireAuth
+// first on any route using this.
+function requireAdmin(req, res, next) {
+  if (!ADMIN_TOKEN) return res.status(503).json({ error: "Admin moderation is not configured on this server (ADMIN_TOKEN not set)." });
+  const supplied = req.headers["x-admin-token"] || "";
+  const a = Buffer.from(String(supplied));
+  const b = Buffer.from(ADMIN_TOKEN);
+  const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
+  if (!ok) return res.status(403).json({ error: "Invalid admin token." });
   next();
 }
 
@@ -349,6 +373,53 @@ app.get("/api/leaderboard", (req, res) => {
     };
   });
   res.json({ entries: withNames });
+});
+
+/* ---------------- admin: leaderboard moderation ----------------
+   For cleaning up entries that look buggy or clearly cheated -- e.g. a record that
+   doesn't correspond to anything in your own accessible characters, or stats far
+   outside what normal play could produce. This only removes the leaderboard_bests
+   row (the ranking entry itself), not the underlying character save, graveyard
+   history, or account -- it just takes the entry off the ladder. */
+
+app.get("/api/admin/leaderboard", requireAuth, requireAdmin, (req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT account_id, character_name, class_name, level, highest_tier_reached, gold, lifetime_xp, hardcore, is_dead, updated_at
+       FROM leaderboard_bests ORDER BY highest_tier_reached DESC, level DESC, lifetime_xp DESC, gold DESC`
+    )
+    .all();
+  const withNames = rows.map((r) => {
+    const acc = db.prepare("SELECT username FROM accounts WHERE id = ?").get(r.account_id);
+    return {
+      account_id: r.account_id,
+      player: acc ? acc.username : "?",
+      character_name: r.character_name,
+      class_name: r.class_name,
+      level: r.level,
+      highest_tier_reached: r.highest_tier_reached,
+      gold: r.gold,
+      lifetime_xp: r.lifetime_xp || 0,
+      hardcore: !!r.hardcore,
+      is_dead: !!r.is_dead,
+      updated_at: r.updated_at,
+    };
+  });
+  res.json({ entries: withNames });
+});
+
+app.delete("/api/admin/leaderboard/:accountId/:characterName", requireAuth, requireAdmin, (req, res) => {
+  const accountId = Number(req.params.accountId);
+  const characterName = decodeURIComponent(req.params.characterName);
+  if (!Number.isInteger(accountId)) return res.status(400).json({ error: "Invalid account id." });
+  const info = db
+    .prepare("DELETE FROM leaderboard_bests WHERE account_id = ? AND character_name = ?")
+    .run(accountId, characterName);
+  console.log(
+    `[admin] ${req.account.username} removed leaderboard entry account_id=${accountId} character_name="${characterName}" (${info.changes} row(s) affected)`
+  );
+  if (info.changes === 0) return res.status(404).json({ error: "No matching leaderboard entry found." });
+  res.json({ ok: true, removed: info.changes });
 });
 
 app.get("/api/health", (req, res) => res.json({ ok: true, time: nowIso() }));

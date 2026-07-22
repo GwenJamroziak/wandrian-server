@@ -606,6 +606,22 @@ const Net = {
     const json=await res.json().catch(()=>({entries:[]}));
     this.leaderboardCache=json.entries||[];
   },
+  // Leaderboard moderation (Dev Tools only): a separate, server-verified admin token,
+  // never the client's cosmetic Dev Tools password. Not persisted anywhere -- typed in
+  // fresh each session, sent only in the X-Admin-Token header of these two calls.
+  async fetchAdminLeaderboard(adminToken){
+    const res=await fetch(this.apiBase()+"/api/admin/leaderboard",{headers:this.authHeaders({"X-Admin-Token":adminToken})});
+    const json=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(json.error||"Could not load the full leaderboard.");
+    return json.entries||[];
+  },
+  async adminDeleteLeaderboardEntry(accountId,characterName,adminToken){
+    const url=this.apiBase()+`/api/admin/leaderboard/${accountId}/${encodeURIComponent(characterName)}`;
+    const res=await fetch(url,{method:"DELETE",headers:this.authHeaders({"X-Admin-Token":adminToken})});
+    const json=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(json.error||"Could not delete that leaderboard entry.");
+    return json;
+  },
   async announceTrialResult(payload){
     if(!this.online) return;
     try{ await fetch(this.apiBase()+"/api/announce/trial",{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify(payload)}); }catch(e){}
@@ -1059,6 +1075,7 @@ const GF = {
   brewing:null, brewInterval:null, crafting:null, craftInterval:null,
   trialJustFailed:false, trialFailedSide:null, trialFailedStepIndex:-1,
   ventureDepth:null, mazeOverlay:null, gambleReveal:null,
+  admin_token:"", admin_leaderboard_cache:null, admin_leaderboard_error:"",
   goto(screen, extra={}){
     Object.assign(this, extra);
     if(PS.isRestingAtCampfire && !NO_REGEN_SCREENS_ON_LEAVE.includes(screen)) PS.isRestingAtCampfire=false;
@@ -2671,6 +2688,57 @@ function screenAdminPanel(){
     h("button",{onClick:()=>{PS.addGear(IF.generate(Balance.itemTierForAreaLevel(PS.level)));PS.saveGame();render();}},["Spawn random gear"]),
     h("button",{class:"danger",onClick:()=>{ if(confirm("Wipe this save?")){ if(PS.current_slot>=0) deleteSave(PS.current_slot); GF.goto("mainMenuSlots"); } }},["Wipe this save"]),
   ]));
+
+  root.appendChild(h("h3",{style:{marginTop:"18px"}},["Leaderboard Moderation"]));
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},[
+    "Remove buggy or clearly-cheated entries from the shared leaderboard. Requires the server's real admin token (set via the ADMIN_TOKEN environment variable on the server), separate from the Dev Tools password above.",
+  ]));
+  const tokenInput=h("input",{type:"password",placeholder:"Admin token",value:GF.admin_token||""});
+  tokenInput.addEventListener("input",()=>{ GF.admin_token=tokenInput.value; });
+  root.appendChild(h("div",{class:"row gap",style:{marginBottom:"8px"}},[
+    tokenInput,
+    h("button",{onClick:async ()=>{
+      GF.admin_leaderboard_error="";
+      try{
+        GF.admin_leaderboard_cache=await Net.fetchAdminLeaderboard(GF.admin_token||"");
+      }catch(e){
+        GF.admin_leaderboard_error=e.message||"Could not load the leaderboard.";
+        GF.admin_leaderboard_cache=null;
+      }
+      render();
+    }},["Load Full Leaderboard"]),
+  ]));
+  if(GF.admin_leaderboard_error) root.appendChild(h("div",{class:"muted",style:{color:"#e07a7a",marginBottom:"8px"}},[GF.admin_leaderboard_error]));
+  if(GF.admin_leaderboard_cache){
+    if(GF.admin_leaderboard_cache.length===0){
+      root.appendChild(h("div",{class:"muted"},["No leaderboard entries."]));
+    } else {
+      for(const entry of GF.admin_leaderboard_cache){
+        root.appendChild(h("div",{class:"tile row",style:{justifyContent:"space-between",alignItems:"center",marginBottom:"6px",gap:"10px"}},[
+          h("div",{},[
+            h("div",{},[
+              h("span",{style:{fontWeight:"bold"}},[entry.character_name]),
+              h("span",{class:"muted"},[` (${entry.player}, acct #${entry.account_id})`]),
+              entry.hardcore?h("span",{style:{color:"#e0b23d",fontWeight:"bold"}},[" [Hardcore]"]):null,
+              entry.is_dead?h("span",{class:"muted"},[" [Dead]"]):null,
+            ]),
+            h("div",{class:"muted"},[`Lv ${entry.level} ${entry.class_name} (Tier ${entry.highest_tier_reached}), ${entry.lifetime_xp} Experience, ${entry.gold} Gold, updated ${new Date(entry.updated_at).toLocaleString()}`]),
+          ]),
+          h("button",{class:"danger",onClick:async ()=>{
+            if(!confirm(`Remove "${entry.character_name}" (${entry.player}) from the leaderboard? This cannot be undone.`)) return;
+            try{
+              await Net.adminDeleteLeaderboardEntry(entry.account_id,entry.character_name,GF.admin_token||"");
+              GF.admin_leaderboard_cache=GF.admin_leaderboard_cache.filter(x=>!(x.account_id===entry.account_id && x.character_name===entry.character_name));
+            }catch(err){
+              GF.admin_leaderboard_error=err.message||"Could not delete that entry.";
+            }
+            render();
+          }},["Delete"]),
+        ]));
+      }
+    }
+  }
+
   root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
   return root;
 }
