@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Evergrind</title>
+<title>Wandrian</title>
 <style>
 :root{
   --hp:#d94a4a; --stamina:#eae6d9; --xp:#9e59d9; --gold:#e0b23d;
@@ -65,6 +65,14 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 .dim-note{color:#8a8676;font-size:.82em;}
 .version-tag{position:fixed;bottom:8px;right:12px;color:rgba(230,225,210,.6);font-size:.8em;}
 ::-webkit-scrollbar{width:10px;} ::-webkit-scrollbar-thumb{background:#3a4230;border-radius:5px;}
+.top-bar{display:flex;justify-content:flex-end;align-items:center;gap:14px;margin-bottom:12px;flex-wrap:wrap;}
+.chat-toggle{display:flex;align-items:center;gap:6px;cursor:pointer;color:#cbd9a0;}
+.chat-toggle:hover{color:#e8e4d8;}
+.chat-panel{position:fixed;top:0;right:0;height:100vh;width:25%;min-width:280px;max-width:420px;background:var(--panel);border-left:1px solid var(--border);box-shadow:-6px 0 20px rgba(0,0,0,.55);z-index:80;display:flex;flex-direction:column;padding:14px;}
+.chat-private-msg{background:#2a3a20;border:1px solid #4a6a3a;border-radius:6px;padding:4px 8px;margin:2px 0;}
+.trash-btn{flex:0 0 auto;padding:8px 10px;}
+.blocked-icon{opacity:.85;}
+.dim-icon{opacity:.4;}
 </style>
 </head>
 <body>
@@ -176,6 +184,14 @@ druid:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx=
 
 const LOGO_SVG = `<svg viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="badgeBg" cx="50%" cy="42%" r="65%"><stop offset="0%" stop-color="#2c4a2e"/><stop offset="70%" stop-color="#16281a"/><stop offset="100%" stop-color="#0d1a10"/></radialGradient><linearGradient id="ring" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#f0c96a"/><stop offset="50%" stop-color="#b8862f"/><stop offset="100%" stop-color="#f0c96a"/></linearGradient><linearGradient id="bladeLight" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#3f7a3a"/><stop offset="100%" stop-color="#8fce6a"/></linearGradient><linearGradient id="bladeDark" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#2c5c2a"/><stop offset="100%" stop-color="#5e9b4c"/></linearGradient></defs><circle cx="80" cy="80" r="76" fill="url(#ring)"/><circle cx="80" cy="80" r="70" fill="url(#badgeBg)"/><path d="M 80,118 C 68,100 52,86 40,54 C 58,66 72,82 78,104 Z" fill="url(#bladeDark)"/><path d="M 80,118 C 92,100 108,86 120,54 C 102,66 88,82 82,104 Z" fill="url(#bladeDark)"/><path d="M 80,120 C 72,96 66,74 62,42 C 76,58 82,82 82,110 Z" fill="url(#bladeLight)"/><path d="M 80,120 C 88,96 94,74 98,42 C 84,58 78,82 78,110 Z" fill="url(#bladeLight)"/><circle cx="80" cy="122" r="16" fill="#ff9d3d" opacity="0.5"/><circle cx="80" cy="124" r="5" fill="#ffdd9a"/></svg>`;
 
+const TRASH_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>`;
+const PLUS_CIRCLE_SVG = `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="18" fill="#2a3a20" stroke="#8fce6a" stroke-width="2"/><path d="M20 11v18M11 20h18" stroke="#c9e8a0" stroke-width="3.2" stroke-linecap="round"/></svg>`;
+const CHAT_BUBBLE_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>`;
+const BOULDER_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M4 16c-1.2-1.6-1-4 .8-5.4 .3-2.4 2.3-4.2 4.7-4.2 .9 0 1.7.3 2.4.7 .9-1.1 2.3-1.8 3.8-1.8 2.7 0 4.9 2.2 4.9 4.9 0 .3 0 .6-.1.9 1.4.8 2.4 2.3 2.4 4.1 0 2.6-2.1 4.6-4.6 4.6H6.9C5.3 19.8 4 18.5 4 16z" fill="#6b6b64" stroke="#3a3a34" stroke-width="1"/></svg>`;
+const CHARSELECT_BG_SVG = `<svg viewBox="0 0 900 200" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMax slice"><rect width="900" height="200" fill="none"/><path d="M0,200 L0,120 Q60,90 120,120 L120,200 Z" fill="#152016"/><path d="M90,200 L90,100 Q150,70 210,100 L210,200 Z" fill="#0f1811"/><path d="M700,200 L700,110 Q760,80 820,110 L820,200 Z" fill="#0f1811"/><path d="M790,200 L790,95 Q850,65 900,95 L900,200 Z" fill="#152016"/><circle cx="450" cy="150" r="26" fill="#ff9d3d" opacity="0.18"/><circle cx="450" cy="150" r="12" fill="#ffcf7a" opacity="0.28"/><path d="M420,200 Q450,175 480,200 Z" fill="#241a12"/></svg>`;
+
+function inlineIcon(svg,size=18){ const d=h("span",{style:{display:"inline-flex",alignItems:"center",justifyContent:"center",width:size+"px",height:size+"px",verticalAlign:"middle"}}); d.innerHTML=svg; return d; }
+
 /* ---------- BALANCE ---------- */
 
 const Balance = {
@@ -194,7 +210,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.7.3-web",
+  GAME_VERSION:"v0.8-web",
   TOWN_1_NAME:"Emberroot Camp", NPC_BLACKSMITH_NAME:"Thane Ironvein", NPC_ALCHEMIST_NAME:"Ysolde Frostvine", NPC_MERCHANT_NAME:"Barnaby Fitch",
   ITEM_TIER_MAX:5, ITEM_STAT_PER_TIER:5, ITEM_TIER_ADJECTIVES:["Withered","Budding","Blooming","Ancient","Eternal"],
   RARITY_TABLE:[{name:"Common",slots:1,weight:60},{name:"Uncommon",slots:2,weight:25},{name:"Rare",slots:3,weight:10},{name:"Epic",slots:5,weight:4},{name:"Legendary",slots:8,weight:1}],
@@ -204,7 +220,8 @@ const Balance = {
   SALVAGE_MATERIALS_PER_SLOT:3, REROLL_MATERIAL_COST_MULT:2, SELL_GOLD_PER_TIER:8, SELL_GOLD_PER_SLOT:4,
   TRIAL_STAGE_PASS_CHANCE:0.65, TRIAL_MAX_STAGES:3, BRIDGE_ROWS_PER_STAGE:10,
   KILL_STREAK_STAT_GROWTH_PER_KILL:0.015, KILL_STREAK_LOOT_GROWTH_PER_KILL:0.02, KILL_STREAK_CAP:40,
-  ADMIN_PASSWORD:"devmode", MAX_CHARACTER_SLOTS:6,
+  ADMIN_PASSWORD:"atldp0", MAX_CHARACTER_SLOTS:6,
+  MASTER_TRIAL_LEVEL_REQUIREMENT:10, // temporarily lowered from LEVEL_CAP for early-access feedback; set back to LEVEL_CAP for the 1.0 launch
 
   killStreakStatMult(s){return 1.0+this.KILL_STREAK_STAT_GROWTH_PER_KILL*Math.min(s,this.KILL_STREAK_CAP);},
   killStreakLootMult(s){return 1.0+this.KILL_STREAK_LOOT_GROWTH_PER_KILL*Math.min(s,this.KILL_STREAK_CAP);},
@@ -382,15 +399,34 @@ Storage_.init();
      chat and on the leaderboard. A `?api=https://example.com` query param can point the
      client at a server hosted on a different origin than the page itself. ---------- */
 
+const NET_TOKEN_KEY="wandrian_web_token";
+const NET_USERNAME_KEY="wandrian_web_username";
+
 const Net = {
   online:false, token:null, username:null,
   cache:null,            // array of 6 slot entries from GET /api/characters
   graveyardCache:null,
-  leaderboardCache:null,
-  chatMessages:[], chatSocket:null,
+  leaderboardCache:null, leaderboardCacheHardcore:null,
+  auctionCache:null,
+  chatMessages:[], privateMessages:[], chatSocket:null,
   apiBase(){
     const params=new URLSearchParams(location.search);
     return params.get("api") || "";
+  },
+  persistSession(){ Storage_.setItem(NET_TOKEN_KEY,this.token||""); Storage_.setItem(NET_USERNAME_KEY,this.username||""); },
+  clearPersistedSession(){ Storage_.removeItem(NET_TOKEN_KEY); Storage_.removeItem(NET_USERNAME_KEY); },
+  async tryResumeSession(){
+    const token=Storage_.getItem(NET_TOKEN_KEY);
+    const username=Storage_.getItem(NET_USERNAME_KEY);
+    if(!token) return false;
+    this.token=token; this.username=username; this.online=true;
+    try{
+      await this.refreshCharacters();
+      return true;
+    }catch(e){
+      this.online=false; this.token=null; this.username=null; this.clearPersistedSession();
+      return false;
+    }
   },
   authHeaders(extra={}){ return Object.assign({"Authorization":"Bearer "+this.token}, extra); },
   async register(username,passcode){
@@ -407,6 +443,7 @@ const Net = {
   },
   async afterAuth(username,token){
     this.username=username; this.token=token; this.online=true;
+    this.persistSession();
     await this.refreshCharacters();
   },
   async refreshCharacters(){
@@ -417,8 +454,10 @@ const Net = {
   },
   logout(){
     this.online=false; this.token=null; this.username=null; this.cache=null;
-    this.graveyardCache=null; this.leaderboardCache=null; this.chatMessages=[];
+    this.graveyardCache=null; this.leaderboardCache=null; this.leaderboardCacheHardcore=null;
+    this.auctionCache=null; this.chatMessages=[]; this.privateMessages=[];
     if(this.chatSocket){ try{this.chatSocket.close();}catch(e){} this.chatSocket=null; }
+    this.clearPersistedSession();
   },
   saveCharacter(slot,data){
     if(this.cache) this.cache[slot]={slot,data,updated_at:new Date().toISOString(),empty:false};
@@ -436,10 +475,42 @@ const Net = {
     const json=await res.json().catch(()=>({entries:[]}));
     this.graveyardCache=json.entries||[];
   },
-  async fetchLeaderboard(){
-    const res=await fetch(this.apiBase()+"/api/leaderboard");
+  async fetchLeaderboard(hardcore){
+    const res=await fetch(this.apiBase()+"/api/leaderboard"+(hardcore?"?hardcore=1":""));
     const json=await res.json().catch(()=>({entries:[]}));
-    this.leaderboardCache=json.entries||[];
+    if(hardcore) this.leaderboardCacheHardcore=json.entries||[];
+    else this.leaderboardCache=json.entries||[];
+  },
+  async announceTrialResult(payload){
+    if(!this.online) return;
+    try{ await fetch(this.apiBase()+"/api/announce/trial",{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify(payload)}); }catch(e){}
+  },
+  async announceDeath(payload){
+    if(!this.online) return;
+    try{ await fetch(this.apiBase()+"/api/announce/death",{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify(payload)}); }catch(e){}
+  },
+  async fetchAuction(){
+    const res=await fetch(this.apiBase()+"/api/auction",{headers:this.authHeaders()});
+    const json=await res.json().catch(()=>({listings:[]}));
+    this.auctionCache=json.listings||[];
+  },
+  async createAuctionListing(payload){
+    const res=await fetch(this.apiBase()+"/api/auction",{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify(payload)});
+    const json=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(json.error||"Could not create listing.");
+    return json;
+  },
+  async buyAuctionListing(id,payload){
+    const res=await fetch(this.apiBase()+"/api/auction/"+id+"/buy",{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify(payload)});
+    const json=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(json.error||"Could not complete purchase.");
+    return json;
+  },
+  async cancelAuctionListing(id,payload){
+    const res=await fetch(this.apiBase()+"/api/auction/"+id,{method:"DELETE",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify(payload)});
+    const json=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(json.error||"Could not cancel listing.");
+    return json;
   },
   ensureChat(){
     if(this.chatSocket || !this.online) return;
@@ -453,7 +524,9 @@ const Net = {
           const msg=JSON.parse(ev.data);
           if(msg.type==="history") this.chatMessages=msg.messages||[];
           else if(msg.type==="chat"){ this.chatMessages.push(msg); if(this.chatMessages.length>200) this.chatMessages.shift(); }
-          if(GF.screen==="chat") render();
+          else if(msg.type==="private_history"){ this.privateMessages=this.privateMessages.concat(msg.messages||[]); }
+          else if(msg.type==="private"){ this.privateMessages.push(msg); }
+          if(GF.screen==="chat" || GF.chatOpen) render();
         }catch(e){}
       };
       ws.onclose=()=>{ if(this.chatSocket===ws) this.chatSocket=null; };
@@ -516,6 +589,7 @@ const PS = {
   consumables:{}, materials:0, herbs:{}, pending_scroll_bonus:0,
   xp_buff_multiplier:1.0, xp_buff_encounters_left:0, stamina_shrine_buff:0.0,
   highest_tier_reached:1, season_won:false, kill_streak:0, hardcore:false, current_slot:-1,
+  lifetime_xp:0, isRestingAtCampfire:false,
 
   getClassData(){return DL.getClass(this.class_id);},
   gearBonus(stat){
@@ -557,6 +631,7 @@ const PS = {
     let buffed=amount*this.getXpFindMult();
     if(this.xp_buff_encounters_left>0) buffed*=this.xp_buff_multiplier;
     this.xp+=Math.round(buffed);
+    this.lifetime_xp+=Math.round(buffed);
     let leveled=false;
     while(this.xp>=this.xp_to_next && this.level<Balance.LEVEL_CAP){
       this.xp-=this.xp_to_next; this.level++; this.xp_to_next=Balance.xpRequiredForLevel(this.level);
@@ -565,7 +640,7 @@ const PS = {
     if(this.level>=Balance.LEVEL_CAP) this.xp=0;
     return leveled;
   },
-  canAttemptTrial(){return this.level>=Balance.LEVEL_CAP;},
+  canAttemptTrial(){return this.level>=Balance.MASTER_TRIAL_LEVEL_REQUIREMENT;},
   resolveMasterTrial(success){
     const currentTier=this.getClassData().tier||1;
     const nextId=DL.getNextClassId(this.class_id);
@@ -726,6 +801,7 @@ const PS = {
     this.xp_buff_encounters_left=0; this.stamina_shrine_buff=0.0; this.highest_tier_reached=1;
     this.season_won=false; this.kill_streak=0; this.xp_to_next=Balance.xpRequiredForLevel(this.level);
     this.current_hp=this.getMaxHp(); this.current_stamina=this.getMaxStamina();
+    this.lifetime_xp=0; this.isRestingAtCampfire=false;
   },
   saveGame(){
     if(this.current_slot<0) return;
@@ -734,7 +810,7 @@ const PS = {
       xp:this.xp,xp_to_next:this.xp_to_next,gold:this.gold,materials:this.materials,herbs:this.herbs,
       current_hp:this.current_hp,current_stamina:this.current_stamina,consumables:this.consumables,
       gear_instances:this.gear_instances,equipped:this.equipped,equipped_bags:this.equipped_bags,
-      highest_tier_reached:this.highest_tier_reached,season_won:this.season_won};
+      highest_tier_reached:this.highest_tier_reached,season_won:this.season_won,lifetime_xp:this.lifetime_xp};
     if(Net.online) Net.saveCharacter(this.current_slot, data);
     else Storage_.setItem(SAVE_KEY(this.current_slot), JSON.stringify(data));
   },
@@ -751,6 +827,7 @@ const PS = {
     this.current_hp=parsed.current_hp!=null?parsed.current_hp:this.getMaxHp();
     this.current_stamina=parsed.current_stamina!=null?parsed.current_stamina:this.getMaxStamina();
     this.pending_scroll_bonus=0; this.xp_buff_multiplier=1.0; this.xp_buff_encounters_left=0; this.stamina_shrine_buff=0.0;
+    this.lifetime_xp=parsed.lifetime_xp||0; this.isRestingAtCampfire=false;
     return true;
   },
   loadGame(slot){
@@ -766,12 +843,19 @@ const PS = {
 
 /* ---------- GameFlow-equivalent (screen router) ---------- */
 
+const NO_REGEN_SCREENS_ON_LEAVE=["town","inventory","merchant","alchemist","blacksmith","auctionHouse"];
+
 const GF = {
   screen:"authGate", selected_slot:-1, pending_delete_slot:-1,
   pending_monster_id:"", pending_area_level:1,
   pending_chest_hits_required:3, pending_chest_tier:1, pending_chest_area_level:1,
   overworld_snapshot:null,
-  goto(screen, extra={}){ Object.assign(this, extra); this.screen=screen; render(); },
+  chatOpen:false, inventory_return_to:"town",
+  goto(screen, extra={}){
+    Object.assign(this, extra);
+    if(PS.isRestingAtCampfire && !NO_REGEN_SCREENS_ON_LEAVE.includes(screen)) PS.isRestingAtCampfire=false;
+    this.screen=screen; render();
+  },
 };
 
 /* ---------- Tiny DOM helper ---------- */
@@ -801,6 +885,51 @@ function iconBadge(svg, size){ const d=h("div",{class:"icon-badge",style:size?{w
 const app=document.getElementById("app");
 document.getElementById("versionTag").textContent=Balance.GAME_VERSION;
 
+const NO_TOPBAR_SCREENS=["authGate","login","register"];
+
+function toggleChat(){ GF.chatOpen=!GF.chatOpen; if(GF.chatOpen) Net.ensureChat(); render(); }
+
+function topBar(){
+  const right=[];
+  if(Net.online){
+    right.push(h("span",{class:"muted"},[`Playing online as ${Net.username}`]));
+    right.push(h("span",{class:"linklike",onClick:()=>{ Net.logout(); GF.goto("authGate"); }},["Log out"]));
+    right.push(h("span",{class:"chat-toggle",onClick:toggleChat},[inlineIcon(CHAT_BUBBLE_SVG,18),"Global Chat"]));
+  } else {
+    right.push(h("span",{class:"muted"},["Playing offline (this browser only)"]));
+    right.push(h("span",{class:"linklike",onClick:()=>{ Net.logout(); GF.goto("authGate"); }},["Switch to online"]));
+  }
+  return h("div",{class:"top-bar"},right);
+}
+
+function chatLogEntries(){
+  const entries=[];
+  for(const m of Net.chatMessages) entries.push({t:new Date(m.created_at).getTime(), node:h("div",{},[h("span",{class:"muted"},[`[${new Date(m.created_at).toLocaleTimeString()}] `]), h("span",{style:{fontWeight:"bold"}},[m.username+": "]), m.message])});
+  for(const m of Net.privateMessages) entries.push({t:new Date(m.created_at).getTime(), node:h("div",{class:"chat-private-msg"},[h("span",{class:"muted"},[`[${new Date(m.created_at).toLocaleTimeString()}] `]), h("span",{style:{fontWeight:"bold"}},["System: "]), m.message])});
+  entries.sort((a,b)=>a.t-b.t);
+  return entries.map(e=>e.node);
+}
+
+function chatBody(closeBtn){
+  Net.ensureChat();
+  const log=h("div",{class:"panel",style:{flex:"1",overflowY:"auto",display:"flex",flexDirection:"column",gap:"4px",marginBottom:"8px"}},chatLogEntries());
+  const input=h("input",{type:"text",placeholder:"Say something...",style:{flex:"1"}});
+  const send=()=>{ const msg=input.value.trim(); if(!msg) return; Net.sendChat(msg); input.value=""; };
+  input.addEventListener("keydown",(e)=>{ if(e.key==="Enter") send(); });
+  const root=h("div",{style:{display:"flex",flexDirection:"column",height:"100%"}},[
+    h("div",{class:"row",style:{justifyContent:"space-between",marginBottom:"8px"}},[h("h2",{style:{margin:0}},["Global Chat"]), closeBtn?h("span",{class:"linklike",onClick:closeBtn},["Close ✕"]):null]),
+    log,
+    h("div",{class:"row"},[input, h("button",{onClick:send},["Send"])]),
+  ]);
+  setTimeout(()=>{ log.scrollTop=log.scrollHeight; },0);
+  return root;
+}
+
+function chatPanel(){
+  if(!GF.chatOpen || !Net.online) return null;
+  return h("div",{class:"chat-panel"},[chatBody(()=>{ GF.chatOpen=false; render(); })]);
+}
+
 function render(){
   app.innerHTML="";
   if(!Net.online && !Storage_.available){
@@ -808,8 +937,10 @@ function render(){
       "Your browser is blocking local saves for this file (this can happen when opening the file directly instead of through a web server or a hosted link). Progress will work this session but won't be remembered after you close the tab. Host this file online (or open it via a local server) to get persistent saves."
     ]));
   }
+  if(!NO_TOPBAR_SCREENS.includes(GF.screen)) app.appendChild(topBar());
   const fn=SCREENS[GF.screen]||SCREENS.mainMenuSlots;
   app.appendChild(fn());
+  const cp=chatPanel(); if(cp) app.appendChild(cp);
 }
 
 
@@ -820,6 +951,22 @@ function toastBox(){
   return h("div",{class:"panel",style:{background:"#2a3a20",borderColor:"#5a7a3a",marginBottom:"12px"}},[msg]);
 }
 function setToast(msg){ GF.toast=msg; }
+
+function inventoryPreview(){
+  const equippedCount=IF.EQUIPPED_SLOT_KEYS.filter(s=>PS.equipped[s]).length;
+  const consumableParts=Object.keys(PS.consumables).filter(k=>PS.consumables[k]>0).map(k=>`${DL.getItem(k).name} x${PS.consumables[k]}`);
+  const herbParts=Object.keys(PS.herbs).filter(k=>PS.herbs[k]>0).map(k=>`${DL.getHerb(k).name} x${PS.herbs[k]}`);
+  return h("div",{class:"col gap",style:{flex:"1",minWidth:"0"}},[
+    h("div",{class:"row",style:{justifyContent:"space-between"}},[
+      h("div",{style:{fontWeight:"bold"}},["Inventory"]),
+      GF.screen==="inventory"?h("span",{class:"muted"},["(open)"]):h("span",{class:"linklike",onClick:()=>GF.goto("inventory",{inventory_return_to:GF.screen})},["Open →"]),
+    ]),
+    h("div",{class:"muted"},[`Gear: ${PS.getInventoryUsed()}/${PS.getInventoryCapacity()} slots -- Equipped: ${equippedCount}/${IF.EQUIPPED_SLOT_KEYS.length}`]),
+    h("div",{class:"muted"},[`Bags: ${PS.equipped_bags.length}/${Balance.MAX_BAG_SLOTS}`]),
+    h("div",{class:"muted",style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},[consumableParts.length?`Consumables: ${consumableParts.join(", ")}`:"Consumables: none"]),
+    h("div",{class:"muted",style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},[herbParts.length?`Herbs: ${herbParts.join(", ")}`:"Herbs: none"]),
+  ]);
+}
 
 function statHeader(){
   const c=PS.getClassData();
@@ -834,13 +981,16 @@ function statHeader(){
         h("div",{class:"muted"},[`${PS.materials} materials`]),
       ]),
     ]),
-    h("div",{class:"col gap",style:{marginTop:"8px"}},[
-      h("div",{},[h("span",{class:"hp-text"},[`HP ${Math.round(PS.current_hp)}/${Math.round(PS.getMaxHp())}`])]),
-      bar(PS.current_hp/PS.getMaxHp()*100,"bar-hp"),
-      h("div",{},[h("span",{class:"stamina-text"},[`Stamina ${Math.round(PS.current_stamina)}/${Math.round(PS.getMaxStamina())}`])]),
-      bar(PS.current_stamina/PS.getMaxStamina()*100,"bar-stamina"),
-      h("div",{},[h("span",{class:"xp-text"},[`XP ${PS.xp}/${PS.xp_to_next}`])]),
-      bar(PS.xp/PS.xp_to_next*100,"bar-xp"),
+    h("div",{class:"row",style:{marginTop:"8px",alignItems:"flex-start",gap:"14px"}},[
+      h("div",{class:"col gap",style:{flex:"0 0 33%",maxWidth:"33%",minWidth:"0"}},[
+        h("div",{},[h("span",{class:"xp-text"},[`XP ${PS.xp}/${PS.xp_to_next}`])]),
+        bar(PS.xp/PS.xp_to_next*100,"bar-xp"),
+        h("div",{},[h("span",{class:"hp-text"},[`HP ${Math.round(PS.current_hp)}/${Math.round(PS.getMaxHp())}`])]),
+        bar(PS.current_hp/PS.getMaxHp()*100,"bar-hp"),
+        h("div",{},[h("span",{class:"stamina-text"},[`Stamina ${Math.round(PS.current_stamina)}/${Math.round(PS.getMaxStamina())}`])]),
+        bar(PS.current_stamina/PS.getMaxStamina()*100,"bar-stamina"),
+      ]),
+      inventoryPreview(),
     ]),
   ]);
 }
@@ -851,7 +1001,7 @@ function screenAuthGate(){
   const root=h("div",{});
   root.appendChild(h("div",{class:"row",style:{gap:"14px",marginBottom:"14px"}},[
     iconBadge(LOGO_SVG,72),
-    h("div",{},[h("h1",{},["Evergrind"]), h("div",{class:"subtitle"},["A nature-fantasy dungeon crawl"])]),
+    h("div",{},[h("h1",{},["Wandrian"]), h("div",{class:"subtitle"},["A nature-fantasy dungeon crawl"])]),
   ]));
   const t=toastBox(); if(t) root.appendChild(t);
   root.appendChild(h("div",{class:"panel",style:{maxWidth:"440px"}},[
@@ -861,7 +1011,7 @@ function screenAuthGate(){
   ]));
   root.appendChild(h("div",{class:"panel",style:{maxWidth:"440px",marginTop:"12px"}},[
     h("div",{style:{fontWeight:"bold",marginBottom:"6px"}},["Play Online"]),
-    h("div",{class:"muted",style:{marginBottom:"8px"}},["Log in to a hosted Evergrind server to save your characters there, chat with other players, and appear on the leaderboard."]),
+    h("div",{class:"muted",style:{marginBottom:"8px"}},["Log in to a hosted Wandrian server to save your characters there, chat with other players, and appear on the leaderboard."]),
     h("div",{class:"row"},[
       h("button",{style:{flex:"1"},onClick:()=>GF.goto("login")},["Log In"]),
       h("button",{style:{flex:"1"},onClick:()=>GF.goto("register")},["Create Account"]),
@@ -904,17 +1054,16 @@ function screenRegister(){ return authForm("register"); }
 /* ================= MAIN MENU / SLOTS ================= */
 
 function screenMainMenuSlots(){
-  const root=h("div",{});
-  root.appendChild(h("div",{class:"row",style:{gap:"14px",marginBottom:"4px"}},[
+  const root=h("div",{style:{position:"relative"}});
+  const bgWrap=h("div",{style:{position:"absolute",left:"0",right:"0",bottom:"0",height:"200px",overflow:"hidden",pointerEvents:"none",opacity:"0.85",zIndex:"0"}});
+  bgWrap.innerHTML=CHARSELECT_BG_SVG;
+  root.appendChild(bgWrap);
+  const content=h("div",{style:{position:"relative",zIndex:"1"}});
+  content.appendChild(h("div",{class:"row",style:{gap:"14px",marginBottom:"4px"}},[
     iconBadge(LOGO_SVG,72),
-    h("div",{},[h("h1",{},["Evergrind"]), h("div",{class:"subtitle"},["A nature-fantasy dungeon crawl"])]),
+    h("div",{},[h("h1",{},["Wandrian"]), h("div",{class:"subtitle"},["A nature-fantasy dungeon crawl"])]),
   ]));
-  root.appendChild(h("div",{class:"row",style:{marginBottom:"10px"}},[
-    h("span",{class:"muted"},[Net.online?`Playing online as ${Net.username}`:"Playing offline (this browser only)"]),
-    h("span",{class:"linklike",style:{marginLeft:"10px"},onClick:()=>{ Net.logout(); GF.goto("authGate"); }},[Net.online?"Log out":"Switch to online"]),
-    Net.online?h("span",{class:"linklike",style:{marginLeft:"10px"},onClick:()=>GF.goto("leaderboard")},["Leaderboard"]):null,
-  ]));
-  const t=toastBox(); if(t) root.appendChild(t);
+  const t=toastBox(); if(t) content.appendChild(t);
 
   const summaries=listCharacterSummaries();
   const grid=h("div",{class:"grid3"});
@@ -932,40 +1081,62 @@ function screenMainMenuSlots(){
           h("div",{class:"muted"},[`Lv ${s.level} ${s.display_name}`]),
         ]),
       ]),
-      h("div",{class:"row",style:{marginTop:"10px"}},[
-        h("button",{class:"play",style:{flex:"1"},onClick:()=>{ PS.loadGame(s.slot); PS.resetKillStreak(); GF.goto("town"); }},["Play"]),
-        h("button",{class:"danger",style:{flex:"1"},onClick:()=>{
+      h("div",{class:"row",style:{marginTop:"10px",gap:"6px"}},[
+        h("button",{class:"play",style:{flex:"4"},onClick:()=>{ PS.loadGame(s.slot); PS.resetKillStreak(); GF.goto("town"); }},["Play"]),
+        h("button",{class:"danger trash-btn",style:{flex:"1"},title:"Delete",onClick:()=>{
           if(confirm(`Delete ${s.character_name} (Lv ${s.level} ${s.display_name})? This cannot be undone.`)){
             deleteSave(s.slot); render();
           }
-        }},["Delete"]),
+        }},[inlineIcon(TRASH_SVG,16)]),
       ]),
     ]));
   }
-  root.appendChild(grid);
+  content.appendChild(grid);
 
   const full=filled>=Balance.MAX_CHARACTER_SLOTS;
-  root.appendChild(h("div",{class:"row",style:{marginTop:"10px"}},[
-    h("div",{style:{width:"240px"}},[
-      h("button",{class:"wide",disabled:full,onClick:()=>{ if(firstEmpty!==-1) GF.goto("classPicker",{selected_slot:firstEmpty}); }},[
-        full?"Character limit reached.":"+ Create New Character"
+  content.appendChild(h("div",{class:"row",style:{marginTop:"10px",alignItems:"stretch"}},[
+    h("div",{style:{width:"300px"}},[
+      h("button",{class:"wide play",style:{display:"flex",alignItems:"center",justifyContent:"center",gap:"10px",padding:"18px",fontSize:"1.1em"},disabled:full,onClick:()=>{ if(firstEmpty!==-1) GF.goto("classPicker",{selected_slot:firstEmpty}); }},[
+        full?null:inlineIcon(PLUS_CIRCLE_SVG,28),
+        full?"Character limit reached.":"Create New Character"
       ]),
     ]),
-    h("div",{class:"col",style:{width:"240px"}},[
-      h("button",{class:"wide",onClick:()=>GF.goto("graveyard")},["† Graveyard"]),
-      h("div",{class:"dim-note"},["Final resting place for our fallen heroes"]),
+    h("div",{style:{width:"240px"}},[
+      h("button",{class:"wide",style:{textAlign:"center",lineHeight:"1.3",padding:"10px 14px"},onClick:()=>GF.goto("graveyard")},[
+        h("div",{},["† Graveyard"]),
+        h("div",{class:"dim-note",style:{marginTop:"2px"}},["Final resting place for our fallen heroes"]),
+      ]),
+    ]),
+    h("div",{style:{width:"240px"}},[
+      Net.online?h("button",{class:"wide",style:{textAlign:"center",lineHeight:"1.3",padding:"10px 14px"},onClick:()=>GF.goto("leaderboard")},[
+        h("div",{},["🏆 Leaderboard"]),
+        h("div",{class:"dim-note",style:{marginTop:"2px"}},["See how your heroes rank"]),
+      ]):h("button",{class:"wide",disabled:true,style:{textAlign:"center",lineHeight:"1.3",padding:"10px 14px"}},[
+        h("div",{},["🏆 Leaderboard"]),
+        h("div",{class:"dim-note",style:{marginTop:"2px"}},["Log in online to see rankings"]),
+      ]),
     ]),
   ]));
+  root.appendChild(content);
   return root;
 }
 
 function screenClassPicker(){
   const root=h("div",{});
   root.appendChild(h("h2",{},["Create Your Hero"]));
-  const nameInput=h("input",{type:"text",value:"Hero",maxlength:String(Balance.CHARACTER_NAME_MAX_LEN)});
+  const nameInput=h("input",{type:"text",value:"",placeholder:"Enter a character name...",maxlength:String(Balance.CHARACTER_NAME_MAX_LEN)});
+  const nameError=h("div",{class:"muted",style:{color:"#e07a7a",marginTop:"4px",minHeight:"1.2em"}},[""]);
   const hardcoreBox=h("input",{type:"checkbox",id:"hcbox"});
+  hardcoreBox.addEventListener("change",()=>{
+    if(hardcoreBox.checked){
+      const ok=confirm("Hardcore characters only have 1 life. Upon death, they are moved to the graveyard as a memorial, but are no longer accessible for play.");
+      if(!ok) hardcoreBox.checked=false;
+    }
+  });
+  nameInput.addEventListener("input",()=>{ if(nameInput.value.trim()){ nameError.textContent=""; nameInput.style.borderColor=""; } });
   root.appendChild(h("div",{class:"panel",style:{marginBottom:"14px"}},[
     h("div",{class:"row gap"},[h("span",{},["Character name:"]), nameInput]),
+    nameError,
     h("div",{class:"row gap",style:{marginTop:"8px"}},[hardcoreBox, h("label",{for:"hcbox"},["Hardcore mode -- permadeath, sent to the Graveyard on death."])]),
   ]));
   const grid=h("div",{class:"grid3"});
@@ -975,7 +1146,14 @@ function screenClassPicker(){
       h("div",{class:"row gap"},[iconBadge(PORTRAITS[classId],56), h("div",{},[h("div",{style:{fontWeight:"bold"}},[c.display_name]), h("div",{class:"muted"},[c.role])])]),
       h("div",{class:"muted"},[c.description]),
       h("button",{class:"wide",onClick:()=>{
-        PS.startNewCharacter(classId, nameInput.value||"Hero", GF.selected_slot, hardcoreBox.checked);
+        const name=nameInput.value.trim();
+        if(!name){
+          nameError.textContent="Please enter a character name before you begin.";
+          nameInput.style.borderColor="#8a4a3a";
+          nameInput.focus();
+          return;
+        }
+        PS.startNewCharacter(classId, name, GF.selected_slot, hardcoreBox.checked);
         PS.saveGame();
         GF.goto("town");
       }},["Begin as "+c.display_name]),
@@ -1017,41 +1195,27 @@ function screenLeaderboard(){
   const root=h("div",{});
   root.appendChild(h("h2",{},["Leaderboard"]));
   root.appendChild(h("div",{class:"lore"},["The furthest any traveler has made it, across every account on this server."]));
-  if(Net.leaderboardCache===null){
+  const tab=GF.leaderboard_tab||"regular";
+  root.appendChild(h("div",{class:"row gap",style:{marginBottom:"10px"}},[
+    h("button",{class:tab==="regular"?"play":"",onClick:()=>{ GF.leaderboard_tab="regular"; render(); }},["Regular"]),
+    h("button",{class:tab==="hardcore"?"play":"",onClick:()=>{ GF.leaderboard_tab="hardcore"; render(); }},["Hardcore"]),
+  ]));
+  const cache = tab==="hardcore" ? Net.leaderboardCacheHardcore : Net.leaderboardCache;
+  if(cache===null||cache===undefined){
     root.appendChild(h("div",{class:"muted"},["Loading..."]));
-    Net.fetchLeaderboard().then(render).catch(()=>{ setToast("Could not load the leaderboard."); render(); });
+    Net.fetchLeaderboard(tab==="hardcore").then(render).catch(()=>{ setToast("Could not load the leaderboard."); render(); });
     root.appendChild(h("button",{onClick:()=>GF.goto("mainMenuSlots")},["← Back"]));
     return root;
   }
-  const entries=Net.leaderboardCache;
-  if(entries.length===0) root.appendChild(h("div",{class:"muted"},["No one has made a mark yet -- be the first!"]));
+  const entries=cache;
+  if(entries.length===0) root.appendChild(h("div",{class:"muted"},[tab==="hardcore"?"No hardcore travelers have made a mark yet -- be the first!":"No one has made a mark yet -- be the first!"]));
   entries.forEach((e,i)=>{
     root.appendChild(h("div",{class:"tile row",style:{marginBottom:"6px",justifyContent:"space-between"}},[
       h("div",{},[h("span",{class:"muted"},[`#${i+1} `]), h("span",{style:{fontWeight:"bold"}},[`${e.character_name}`]), h("span",{class:"muted"},[` (${e.player})`])]),
-      h("div",{class:"muted"},[`Lv ${e.level} ${e.class_name} -- Tier ${e.highest_tier_reached} -- ${e.gold}g`]),
+      h("div",{class:"muted"},[`Lv ${e.level} ${e.class_name} -- ${e.lifetime_xp||0} Experience -- ${e.gold}g`]),
     ]));
   });
   root.appendChild(h("button",{style:{marginTop:"10px"},onClick:()=>GF.goto("mainMenuSlots")},["← Back"]));
-  return root;
-}
-
-/* ================= GLOBAL CHAT (online only) ================= */
-
-function screenChat(){
-  Net.ensureChat();
-  const root=h("div",{});
-  root.appendChild(h("h2",{},["Global Chat"]));
-  const log=h("div",{class:"panel",style:{height:"320px",overflowY:"auto",display:"flex",flexDirection:"column",gap:"4px"}});
-  for(const m of Net.chatMessages){
-    log.appendChild(h("div",{},[h("span",{class:"muted"},[`[${new Date(m.created_at).toLocaleTimeString()}] `]), h("span",{style:{fontWeight:"bold"}},[m.username+": "]), m.message]));
-  }
-  root.appendChild(log);
-  const input=h("input",{type:"text",placeholder:"Say something...",style:{flex:"1"}});
-  const send=()=>{ const msg=input.value.trim(); if(!msg) return; Net.sendChat(msg); input.value=""; };
-  input.addEventListener("keydown",(e)=>{ if(e.key==="Enter") send(); });
-  root.appendChild(h("div",{class:"row",style:{marginTop:"8px"}},[input, h("button",{onClick:send},["Send"])]));
-  root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
-  setTimeout(()=>{ log.scrollTop=log.scrollHeight; },0);
   return root;
 }
 
@@ -1068,24 +1232,23 @@ function screenTown(){
   const t=toastBox(); if(t) root.appendChild(t);
   root.appendChild(statHeader());
 
+  root.appendChild(h("div",{class:"row",style:{marginTop:"6px"}},[
+    h("button",{class:"wide play",onClick:()=>{ PS.resetKillStreak(); GF.overworld_snapshot=null; GF.goto("maze",{maze_depth: PS.level}); }},["🌳 Venture into the Woods"]),
+  ]));
+  root.appendChild(h("div",{class:"row",style:{marginTop:"8px",marginBottom:"6px"}},[
+    h("button",{class:"wide",disabled:PS.isRestingAtCampfire && PS.current_hp>=PS.getMaxHp() && PS.current_stamina>=PS.getMaxStamina(),onClick:()=>{
+      PS.isRestingAtCampfire=true; PS.saveGame();
+      setToast("You settle in by the campfire. HP and Stamina will recover gradually while you stay in camp.");
+      render();
+    }},[PS.isRestingAtCampfire?"Resting by the Campfire...":"Rest at the Campfire"]),
+  ]));
+
   root.appendChild(h("div",{class:"services"},[
     serviceButton(`Merchant (${Balance.NPC_MERCHANT_NAME})`,"💰",()=>GF.goto("merchant")),
     serviceButton(`Blacksmith (${Balance.NPC_BLACKSMITH_NAME})`,"🔨",()=>GF.goto("blacksmith")),
     serviceButton(`Alchemist (${Balance.NPC_ALCHEMIST_NAME})`,"⚗",()=>GF.goto("alchemist")),
     serviceButton("Auction House","📜",()=>GF.goto("auctionHouse")),
-    serviceButton("Inventory","🎒",()=>GF.goto("inventory")),
-    PS.canAttemptTrial()?serviceButton("Master Trial","⭐",()=>GF.goto("masterTrial")):h("button",{disabled:true},[`Master Trial (reach Lv ${Balance.LEVEL_CAP})`]),
-    Net.online?serviceButton("Global Chat","💬",()=>GF.goto("chat")):h("button",{disabled:true},["Global Chat (log in online)"]),
-    Net.online?serviceButton("Leaderboard","🏆",()=>GF.goto("leaderboard")):h("button",{disabled:true},["Leaderboard (log in online)"]),
-  ]));
-
-  root.appendChild(h("div",{class:"row",style:{marginTop:"6px"}},[
-    h("button",{onClick:()=>{
-      PS.current_hp=PS.getMaxHp(); PS.current_stamina=PS.getMaxStamina(); PS.saveGame();
-      setToast("You rest by the campfire. HP and Stamina fully restored.");
-      render();
-    }},["Rest at the Campfire"]),
-    h("button",{onClick:()=>{ PS.resetKillStreak(); GF.overworld_snapshot=null; GF.goto("maze",{maze_depth: PS.level}); }},["🌳 Venture into the Woods"]),
+    PS.canAttemptTrial()?serviceButton("Master Trial","⭐",()=>GF.goto("masterTrial")):h("button",{disabled:true},[`Master Trial (reach Lv ${Balance.MASTER_TRIAL_LEVEL_REQUIREMENT})`]),
   ]));
 
   root.appendChild(h("hr"));
@@ -1153,7 +1316,7 @@ function ensureMaze(depth){
   return GF.overworld_snapshot;
 }
 
-const TILE_GLYPH={start:"🏕",exit:"⬇",chest:"🎁",shrine:"✨",trap:"?",herb:"🌿",empty:""};
+const TILE_GLYPH={start:"🏕",exit:"⬇",chest:"🎁",shrine:"✨",trap:"⚠",herb:"🌿",empty:""};
 const TILE_COLOR={start:"#2a4a2a",exit:"#3a3a6a",chest:"#5a4a1a",shrine:"#3a5a5a",trap:"#4a2020",herb:"#2a4a2a",empty:"#1a1c14"};
 
 function screenMaze(){
@@ -1161,28 +1324,60 @@ function screenMaze(){
   const maze=ensureMaze(depth);
   const root=h("div",{});
   root.appendChild(h("h2",{},[`The Woods -- Depth ${depth}`]));
-  root.appendChild(h("div",{class:"lore"},["Overgrown paths wind between the trees. Move to an adjacent lit tile."]));
+  root.appendChild(h("div",{class:"lore"},["Overgrown paths wind between the trees. Move to an adjacent lit tile, or use the arrows."]));
   const t=toastBox(); if(t) root.appendChild(t);
   root.appendChild(statHeader());
 
+  const px=maze.playerIdx%maze.size, py=Math.floor(maze.playerIdx/maze.size);
   const grid=h("div",{class:"maze-grid",style:{gridTemplateColumns:`repeat(${maze.size},34px)`}});
   for(let y=0;y<maze.size;y++){
     for(let x=0;x<maze.size;x++){
       const i=y*maze.size+x; const cell=maze.cells[i];
       const isPlayer=maze.playerIdx===i;
-      const isAdjacent=maze.cells[maze.playerIdx].conn.has(i);
-      const known = cell.visited!==undefined && (cell===maze.cells[maze.playerIdx] || isAdjacent || cell.discovered);
-      let bg=TILE_COLOR.empty, label="";
-      if(isPlayer){ bg="#e0c96a"; label="@"; }
-      else if(cell.discovered || cell.type==="exit" || cell.type==="start"){ bg=TILE_COLOR[cell.type]||TILE_COLOR.empty; label=cell.cleared?"":(TILE_GLYPH[cell.type]||""); }
-      const tile=h("div",{class:"maze-tile",style:{background:bg,display:"flex",alignItems:"center",justifyContent:"center",cursor:isAdjacent&&!isPlayer?"pointer":"default",fontSize:"16px",border:isAdjacent&&!isPlayer?"1px solid #6a7a4a":"1px solid #222"}},[label]);
-      if(isAdjacent && !isPlayer){ tile.addEventListener("click",()=>onStepMaze(maze,i)); }
+      const isWalkable=maze.cells[maze.playerIdx].conn.has(i);
+      const isGeoNeighbor=!isPlayer && (Math.abs(x-px)+Math.abs(y-py)===1);
+      let bg=TILE_COLOR.empty, label="", border="1px solid #222", opacity="1";
+      if(isPlayer){ bg="#e0c96a"; }
+      else if(cell.discovered || cell.type==="exit" || cell.type==="start"){
+        bg=TILE_COLOR[cell.type]||TILE_COLOR.empty;
+        label=TILE_GLYPH[cell.type]||"";
+        if(cell.cleared) opacity="0.4";
+      } else if(isWalkable){
+        border="1px solid #8fce6a";
+      } else if(isGeoNeighbor){
+        label="🪨"; bg="#241f1a"; border="1px solid #444";
+      }
+      const inner=h("span",{style:{opacity}},[label]);
+      const tile=h("div",{class:"maze-tile",style:{background:bg,display:"flex",alignItems:"center",justifyContent:"center",cursor:isWalkable&&!isPlayer?"pointer":"default",fontSize:"16px",border}},[inner]);
+      if(isWalkable && !isPlayer){ tile.addEventListener("click",()=>onStepMaze(maze,i)); }
       grid.appendChild(tile);
     }
   }
+
+  function arrowTarget(dx,dy){
+    const nx=px+dx, ny=py+dy;
+    if(nx<0||nx>=maze.size||ny<0||ny>=maze.size) return -1;
+    const ni=ny*maze.size+nx;
+    return maze.cells[maze.playerIdx].conn.has(ni) ? ni : -1;
+  }
+  function arrowBtn(dx,dy,label){
+    const ni=arrowTarget(dx,dy);
+    return h("button",{disabled:ni===-1,onClick:()=>onStepMaze(maze,ni)},[label]);
+  }
+
   root.appendChild(h("div",{class:"maze-wrap"},[grid,
     h("div",{class:"side-panel"},[
-      h("div",{class:"muted"},["🏕 start   ⬇ exit   🎁 chest","✨ shrine   🌿 herb   ? trap"].join("\n")),
+      h("div",{class:"col gap",style:{alignItems:"center",marginBottom:"6px"}},[
+        arrowBtn(0,-1,"↑"),
+        h("div",{class:"row gap"},[arrowBtn(-1,0,"←"), arrowBtn(1,0,"→")]),
+        arrowBtn(0,1,"↓"),
+      ]),
+      h("div",{class:"col",style:{gap:"2px"}},[
+        h("div",{class:"muted"},["🏕 start   ⬇ exit   🎁 chest"]),
+        h("div",{class:"muted"},["✨ shrine   🌿 herb   ⚠ trap"]),
+        h("div",{class:"muted"},["🪨 blocked path -- can't be reached from here"]),
+        h("div",{class:"muted"},["Faded icon = already used"]),
+      ]),
       h("button",{onClick:()=>GF.goto("town")},["← Retreat to Town"]),
     ]),
   ]));
@@ -1276,16 +1471,23 @@ function grantLoot(lootTable, mult){
 
 function endCombatDeath(){
   const wasHardcore=PS.hardcore;
-  const dead=PS.handleDeath(`Slain by a ${GF.combat.name}`);
+  const monsterName=GF.combat.name;
+  const cd=PS.getClassData();
+  const announcePayload={character_name:PS.character_name, level:PS.level, class_name:cd.display_name||PS.class_id, cause:`been slain by a ${monsterName}`};
+  const dead=PS.handleDeath(`Slain by a ${monsterName}`);
   GF.combat=null;
-  if(dead){ setToast("Your journey ends here. A new entry has been added to the Graveyard."); GF.goto("mainMenuSlots"); }
+  if(dead){
+    setToast("Your journey ends here. A new entry has been added to the Graveyard.");
+    Net.announceDeath(announcePayload);
+    GF.goto("mainMenuSlots");
+  }
   else { setToast("You were defeated. You wake up back at camp, having lost some gold."); PS.saveGame(); GF.goto("town"); }
 }
 
 function screenCombat(){
   const cb=ensureCombat();
   const root=h("div",{});
-  root.appendChild(h("h2",{},[`A wild ${cb.name} blocks the path!`]));
+  root.appendChild(h("h2",{},[cb.defeated?`The ${cb.name} lies defeated.`:`A wild ${cb.name} blocks the path!`]));
   root.appendChild(statHeader());
   root.appendChild(h("div",{class:"panel"},[
     h("div",{style:{fontWeight:"bold"}},[cb.name]),
@@ -1295,6 +1497,14 @@ function screenCombat(){
   const logDiv=h("div",{class:"muted",style:{margin:"8px 0",minHeight:"70px"}},cb.log.map(l=>h("div",{},[l])));
   root.appendChild(logDiv);
 
+  if(cb.defeated){
+    root.appendChild(h("div",{class:"panel",style:{background:"#2a3a20",borderColor:"#5a7a3a",marginBottom:"12px"}},[cb.result_text]));
+    root.appendChild(h("div",{class:"row"},[
+      h("button",{class:"play",onClick:()=>{ GF.combat=null; GF.goto("maze",{maze_depth:GF.maze_depth}); }},["Continue Wandering"]),
+    ]));
+    return root;
+  }
+
   function playerTurn(){
     const [lo,hi]=PS.getDamageRange();
     let dmg=randRange(lo,hi);
@@ -1303,16 +1513,17 @@ function screenCombat(){
     cb.hp-=dmg;
     combatLog(cb,`You hit the ${cb.name} for ${Math.round(dmg)}${crit?" (Critical!)":""}.`);
     if(cb.hp<=0){
+      cb.hp=0;
       const streakMult=Balance.killStreakLootMult(PS.kill_streak);
       const gold=randIntRange(cb.goldMin,cb.goldMax)*streakMult;
       const leveled=PS.addXp(cb.xp*streakMult);
       PS.addGold(gold);
       PS.incrementKillStreak();
       const lootMsg=grantLoot(cb.loot_table, streakMult);
-      GF.combat=null;
+      cb.defeated=true;
+      cb.result_text=`${cb.name} defeated! +${Math.round(cb.xp*streakMult)} XP, +${Math.round(gold)} gold. ${lootMsg}`;
       PS.saveGame();
-      setToast(`${cb.name} defeated! +${Math.round(cb.xp*streakMult)} XP, +${Math.round(gold)} gold. ${lootMsg}`);
-      GF.goto("maze",{maze_depth:GF.maze_depth});
+      render();
       return;
     }
     // monster turn
@@ -1441,7 +1652,7 @@ function screenInventory(){
   if(herbEntries.length===0) root.appendChild(h("div",{class:"muted"},["None."]));
   for(const herbId of herbEntries) root.appendChild(h("div",{},[`${DL.getHerb(herbId).name} x${PS.herbs[herbId]}`]));
 
-  root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
+  root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto(GF.inventory_return_to||"town")},["← Back"]));
   return root;
 }
 
@@ -1555,13 +1766,118 @@ function screenMerchant(){
   return root;
 }
 
-/* ================= AUCTION HOUSE (preview shell) ================= */
+/* ================= AUCTION HOUSE ================= */
 
 function screenAuctionHouse(){
   const root=h("div",{});
   root.appendChild(h("h2",{},["Auction House"]));
-  root.appendChild(h("div",{class:"lore"},["A dusty ledger and an idle gavel. Word is a proper auction house is coming to camp soon -- for now, the block sits empty."]));
-  root.appendChild(h("div",{class:"muted"},["Coming soon: list gear for other travelers, bid on rare finds."]));
+  root.appendChild(h("div",{class:"lore"},["A dusty ledger and an idle gavel. List your own finds, or see what other travelers are selling."]));
+  const t=toastBox(); if(t) root.appendChild(t);
+  root.appendChild(statHeader());
+
+  if(!Net.online){
+    root.appendChild(h("div",{class:"muted"},["Log in online to buy and sell with other travelers."]));
+    root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
+    return root;
+  }
+
+  root.appendChild(h("h3",{},["List an Item"]));
+  const gearOptions=[h("option",{value:""},["-- choose gear to sell --"])].concat(
+    PS.gear_instances.map(inst=>h("option",{value:inst.instance_id},[`${IF.displayName(inst)} (T${inst.tier})`]))
+  );
+  const gearSelect=h("select",{},gearOptions);
+  const gearPriceInput=h("input",{type:"number",min:"1",value:"10",style:{width:"90px"}});
+  root.appendChild(h("div",{class:"row gap",style:{marginBottom:"10px"}},[
+    gearSelect, h("span",{},["Price:"]), gearPriceInput,
+    h("button",{onClick:async ()=>{
+      const instId=gearSelect.value;
+      if(!instId){ setToast("Choose a gear item first."); render(); return; }
+      const price=parseInt(gearPriceInput.value,10);
+      if(!price||price<1){ setToast("Enter a valid price."); render(); return; }
+      const idx=PS.findGearIndex(instId); if(idx===-1) return;
+      const inst=PS.gear_instances[idx];
+      try{
+        await Net.createAuctionListing({type:"gear", price, character_name:PS.character_name, seller_slot:PS.current_slot, item:inst, display_name:IF.displayName(inst)});
+        PS.gear_instances.splice(idx,1); PS.saveGame();
+        Net.auctionCache=null; setToast(`Listed ${IF.displayName(inst)} for ${price} gold.`);
+      }catch(e){ setToast(e.message); }
+      render();
+    }},["List Gear"]),
+  ]));
+
+  const stackables=[];
+  for(const id of Object.keys(PS.consumables)) if(PS.consumables[id]>0) stackables.push({kind:"consumable", id, name:DL.getItem(id).name, have:PS.consumables[id]});
+  for(const id of Object.keys(PS.herbs)) if(PS.herbs[id]>0) stackables.push({kind:"herb", id, name:DL.getHerb(id).name, have:PS.herbs[id]});
+  const stackOptions=[h("option",{value:""},["-- choose consumable/herb to sell --"])].concat(
+    stackables.map(s=>h("option",{value:s.kind+":"+s.id},[`${s.name} (have ${s.have})`]))
+  );
+  const stackSelect=h("select",{},stackOptions);
+  const stackQtyInput=h("input",{type:"number",min:"1",value:"1",style:{width:"70px"}});
+  const stackPriceInput=h("input",{type:"number",min:"1",value:"5",style:{width:"90px"}});
+  root.appendChild(h("div",{class:"row gap",style:{marginBottom:"14px"}},[
+    stackSelect, h("span",{},["Qty:"]), stackQtyInput, h("span",{},["Price (total):"]), stackPriceInput,
+    h("button",{onClick:async ()=>{
+      const val=stackSelect.value; if(!val){ setToast("Choose an item first."); render(); return; }
+      const [kind,id]=val.split(":");
+      const qty=parseInt(stackQtyInput.value,10), price=parseInt(stackPriceInput.value,10);
+      const have=(kind==="consumable"?PS.consumables[id]:PS.herbs[id])||0;
+      if(!qty||qty<1||qty>have){ setToast("Enter a valid quantity you actually have."); render(); return; }
+      if(!price||price<1){ setToast("Enter a valid price."); render(); return; }
+      const displayName=kind==="consumable"?DL.getItem(id).name:DL.getHerb(id).name;
+      try{
+        await Net.createAuctionListing({type:kind, item_key:id, quantity:qty, price, character_name:PS.character_name, seller_slot:PS.current_slot, display_name:displayName});
+        if(kind==="consumable") PS.consumables[id]-=qty; else PS.herbs[id]-=qty;
+        PS.saveGame(); Net.auctionCache=null;
+        setToast(`Listed ${displayName} x${qty} for ${price} gold.`);
+      }catch(e){ setToast(e.message); }
+      render();
+    }},["List"]),
+  ]));
+
+  root.appendChild(h("h3",{},["Current Listings"]));
+  if(Net.auctionCache===null||Net.auctionCache===undefined){
+    root.appendChild(h("div",{class:"muted"},["Loading..."]));
+    Net.fetchAuction().then(render).catch(()=>{ setToast("Could not load the auction house."); render(); });
+  } else if(Net.auctionCache.length===0){
+    root.appendChild(h("div",{class:"muted"},["The block is empty right now -- be the first to list something."]));
+  } else {
+    for(const listing of Net.auctionCache){
+      const isMine=listing.seller_username===Net.username;
+      const label=listing.quantity>1?`${listing.display_name} x${listing.quantity}`:listing.display_name;
+      root.appendChild(h("div",{class:"tile row",style:{marginBottom:"6px",justifyContent:"space-between"}},[
+        h("div",{},[h("span",{style:{fontWeight:"bold"}},[label]), h("span",{class:"muted"},[` -- listed by ${listing.seller_character_name} (${listing.seller_username})`])]),
+        h("div",{class:"row gap"},[
+          h("span",{class:"gold-text"},[`${listing.price}g`]),
+          isMine?h("button",{class:"danger",onClick:async ()=>{
+            try{
+              const r=await Net.cancelAuctionListing(listing.id,{character_name:PS.character_name});
+              if(r.refund){
+                if(r.refund.type==="gear" && r.refund.item) PS.addGear(r.refund.item);
+                else if(r.refund.type==="consumable") PS.addConsumable(r.refund.item_key,r.refund.quantity);
+                else if(r.refund.type==="herb") PS.addHerb(r.refund.item_key,r.refund.quantity);
+                PS.saveGame();
+              }
+              Net.auctionCache=null; setToast("Listing cancelled -- item returned to your bags.");
+            }
+            catch(e){ setToast(e.message); }
+            render();
+          }},["Cancel"]):h("button",{disabled:PS.gold<listing.price,onClick:async ()=>{
+            try{
+              await Net.buyAuctionListing(listing.id,{character_name:PS.character_name, buyer_slot:PS.current_slot});
+              PS.gold-=listing.price;
+              if(listing.type==="gear") PS.addGear(listing.item);
+              else if(listing.type==="consumable") PS.addConsumable(listing.item_key,listing.quantity);
+              else if(listing.type==="herb") PS.addHerb(listing.item_key,listing.quantity);
+              PS.saveGame(); Net.auctionCache=null;
+              setToast(`Bought ${label} for ${listing.price} gold.`);
+            }catch(e){ setToast(e.message); }
+            render();
+          }},["Buy"]),
+        ]),
+      ]));
+    }
+  }
+
   root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
   return root;
 }
@@ -1581,7 +1897,7 @@ function screenMasterTrial(){
   const nextId=DL.getNextClassId(PS.class_id);
   root.appendChild(h("h2",{},["The Master Trial"]));
   if(!PS.canAttemptTrial()){
-    root.appendChild(h("div",{class:"lore"},[`You must reach Level ${Balance.LEVEL_CAP} as a ${c.display_name} before the elders will test you.`]));
+    root.appendChild(h("div",{class:"lore"},[`You must reach Level ${Balance.MASTER_TRIAL_LEVEL_REQUIREMENT} as a ${c.display_name} before the elders will test you.`]));
     root.appendChild(h("button",{onClick:()=>GF.goto("town")},["← Back to Town"]));
     return root;
   }
@@ -1618,10 +1934,12 @@ function screenMasterTrial(){
         if(progress.discovered>=rows){
           progress.stage++; progress.discovered=0;
           if(progress.stage>=stagesRequired){
+            const nameBefore=c.display_name, levelBefore=PS.level;
             const result=PS.resolveMasterTrial(true);
             delete PS.trial_progress[c.chain+"_done_marker"];
             PS.trial_progress[PS.class_id]={stage:0,discovered:0};
             PS.saveGame();
+            Net.announceTrialResult({character_name:PS.character_name, level:levelBefore, class_name:nameBefore, result:"passed"});
             setToast(result.final_tier?`You have mastered the ${c.chain} path completely!`:`You are promoted to ${DL.getClass(PS.class_id).display_name}!`);
             GF.goto("town"); return;
           } else setToast(`Stage ${progress.stage} cleared! Onward.`);
@@ -1629,6 +1947,7 @@ function screenMasterTrial(){
       } else {
         setToast("The plank gives way beneath you! You fall back to camp -- but you remember the safe planks you'd already found.");
         PS.current_hp=Math.max(1,PS.current_hp-15);
+        Net.announceTrialResult({character_name:PS.character_name, level:PS.level, class_name:c.display_name, result:"failed"});
       }
       PS.saveGame(); render();
     }},["Step onto the next plank"]),
@@ -1674,7 +1993,6 @@ const SCREENS={
   classPicker: screenClassPicker,
   graveyard: screenGraveyard,
   leaderboard: screenLeaderboard,
-  chat: screenChat,
   town: screenTown,
   maze: screenMaze,
   combat: screenCombat,
@@ -1688,7 +2006,23 @@ const SCREENS={
   adminPanel: screenAdminPanel,
 };
 
-render();
+/* ---------- Campfire regen tick: gradual HP/Stamina recovery while resting in camp ---------- */
+const REGEN_ACTIVE_SCREENS=["town","inventory"];
+setInterval(()=>{
+  if(!PS.isRestingAtCampfire || PS.current_slot<0) return;
+  if(!REGEN_ACTIVE_SCREENS.includes(GF.screen)) return;
+  let changed=false;
+  if(PS.current_hp<PS.getMaxHp()){ PS.current_hp=Math.min(PS.getMaxHp(),PS.current_hp+Balance.CAMPFIRE_REGEN_PER_SECOND); changed=true; }
+  if(PS.current_stamina<PS.getMaxStamina()){ PS.current_stamina=Math.min(PS.getMaxStamina(),PS.current_stamina+Balance.CAMPFIRE_STAMINA_REGEN_PER_SECOND); changed=true; }
+  if(PS.current_hp>=PS.getMaxHp() && PS.current_stamina>=PS.getMaxStamina()) PS.isRestingAtCampfire=false;
+  if(changed){ PS.saveGame(); render(); }
+},1000);
+
+(async function boot(){
+  const resumed = await Net.tryResumeSession();
+  if(resumed) GF.screen="mainMenuSlots";
+  render();
+})();
 </script>
 </body>
 </html>
