@@ -2215,27 +2215,31 @@ function kindleBonfirePanel(){
       ? `Bonfire is kindled: +${Math.round(activeBonus)} HP/sec and +${Math.round(activeBonus)} Stamina/sec regen, ${minutesLeft} minute${minutesLeft===1?"":"s"} left.`
       : `You have ${have} Dry Branch${have===1?"":"es"}. Each one adds +${Balance.DRY_BRANCH_REGEN_PER_UNIT} HP/sec and Stamina/sec regen for 10 minutes.`);
 
-  return h("div",{class:"col gap"},[
-    h("div",{class:"row venture-row"},[
-      h("div",{class:"panel venture-card",style:{cursor:"default"}},[
-        h("div",{class:"venture-title"},[inlineIcon(BONFIRE_SVG,18)," Kindle the Bonfire"]),
-        h("div",{class:"muted",style:{fontSize:".8em",marginTop:"2px"}},[subtext]),
-      ]),
-      h("div",{class:"panel venture-chevrons"},[
-        h("div",{class:"muted",style:{fontSize:".72em"}},["Branches"]),
-        h("button",{disabled:picked>=have,onClick:()=>{ GF.bonfireBranchesToKindle=Math.min(have,picked+1); render(); }},["▲"]),
-        h("span",{style:{fontWeight:"bold"}},[String(picked)]),
-        h("button",{disabled:picked<=0,onClick:()=>{ GF.bonfireBranchesToKindle=Math.max(0,picked-1); render(); }},["▼"]),
-      ]),
-    ]),
-    h("button",{class:"wide",disabled:picked<=0,onClick:()=>{
+  // v0.13.1: the card itself IS the confirm button now (same "whole card is clickable"
+  // pattern as "Venture into the Woods" above it, with venture-clickable giving it the
+  // same flex:1 that keeps it on one line beside the chevrons instead of wrapping) --
+  // a separate wide "Kindle the Bonfire" button below was redundant with this dark
+  // flame-icon card and got cut per Gwen's feedback from live testers.
+  return h("div",{class:"row venture-row"},[
+    h("div",{class:"panel venture-card venture-clickable",onClick:()=>{
+      if(picked<=0){ setToast("Use the chevrons to choose how many Dry Branches to feed first."); render(); return; }
       const ok=PS.kindleBonfire(picked);
       if(ok){
+        const fed=picked;
         GF.bonfireBranchesToKindle=0; autosave();
-        pushSystemChatMessage(`You feed ${picked} Dry Branch${picked===1?"":"es"} into the bonfire. Regen surges for 10 minutes.`);
+        pushSystemChatMessage(`You feed ${fed} Dry Branch${fed===1?"":"es"} into the bonfire. Regen surges for 10 minutes.`);
       }
       render();
-    }},["Kindle the Bonfire"]),
+    }},[
+      h("div",{class:"venture-title"},[inlineIcon(BONFIRE_SVG,18)," Kindle the Bonfire"]),
+      h("div",{class:"muted",style:{fontSize:".8em",marginTop:"2px"}},[subtext]),
+    ]),
+    h("div",{class:"panel venture-chevrons"},[
+      h("div",{class:"muted",style:{fontSize:".72em"}},["Branches"]),
+      h("button",{disabled:picked>=have,onClick:(e)=>{ e.stopPropagation(); GF.bonfireBranchesToKindle=Math.min(have,picked+1); render(); }},["▲"]),
+      h("span",{style:{fontWeight:"bold"}},[String(picked)]),
+      h("button",{disabled:picked<=0,onClick:(e)=>{ e.stopPropagation(); GF.bonfireBranchesToKindle=Math.max(0,picked-1); render(); }},["▼"]),
+    ]),
   ]);
 }
 
