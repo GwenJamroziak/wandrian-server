@@ -36,10 +36,36 @@ button:disabled{opacity:.45;cursor:not-allowed;}
 button.play:hover:not(:disabled){background:#3a4a2a;border-color:#5a7a3a;}
 button.danger:hover:not(:disabled){background:#5a2a24;border-color:#8a4a3a;}
 button.wide{width:100%;}
-input[type=text],input[type=password],input[type=email]{
+input[type=text],input[type=password],input[type=email],input[type=number],select{
   font-family:inherit;background:#1a1c14;border:1px solid var(--border);color:var(--text);
   border-radius:5px;padding:8px 10px;font-size:.95em;
 }
+input[type=text]:focus,input[type=password]:focus,input[type=email]:focus,input[type=number]:focus,select:focus{
+  outline:none;border-color:#5a7a3a;box-shadow:0 0 0 2px rgba(90,122,58,.3);
+}
+select{cursor:pointer;}
+/* Browsers force a white/yellow background on autofilled fields regardless of author
+   CSS (username/password fields on the login/register screens are exactly the ones
+   that trigger this), this is the standard workaround: paint the fill color via an
+   absurdly long inset box-shadow transition instead of background, which autofill
+   styling doesn't override. */
+input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus{
+  -webkit-text-fill-color:var(--text)!important;
+  -webkit-box-shadow:0 0 0px 1000px #1a1c14 inset!important;
+  box-shadow:0 0 0px 1000px #1a1c14 inset!important;
+  transition:background-color 9999s ease-in-out 0s;
+  caret-color:var(--text);
+}
+input[type=checkbox]{
+  appearance:none;-webkit-appearance:none;width:19px;height:19px;border:1px solid var(--border);
+  border-radius:4px;background:#1a1c14;cursor:pointer;position:relative;vertical-align:middle;flex:none;
+}
+input[type=checkbox]:hover{border-color:#5a7a3a;}
+input[type=checkbox]:checked{background:var(--accent);border-color:#5a7a3a;}
+input[type=checkbox]:checked::after{content:"✓";position:absolute;top:-3px;left:2.5px;color:#eef7e4;font-size:14px;font-weight:bold;}
+.modal-backdrop{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:200;padding:16px;}
+.modal-box{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:20px 22px;max-width:420px;box-shadow:0 8px 30px rgba(0,0,0,.6);}
+.modal-box .row{justify-content:flex-end;margin-top:16px;}
 .social-login-btn{display:flex;align-items:center;justify-content:center;gap:8px;}
 .bar-bg{background:#000;border-radius:4px;overflow:hidden;height:16px;border:1px solid rgba(255,255,255,.08);}
 .bar-fill{height:100%;transition:width .25s;}
@@ -64,7 +90,9 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 .plank-row button.locked-safe{background:#254a25;color:#9fe89f;border-color:#3a7a3a;}
 .plank-row button.locked-fail{background:#4a2020;color:#e89f9f;border-color:#7a3a3a;}
 .dim-note{color:#8a8676;font-size:.82em;}
-.version-tag{position:fixed;bottom:8px;right:12px;color:rgba(230,225,210,.6);font-size:.8em;}
+.version-tag{position:fixed;bottom:24px;right:12px;color:rgba(230,225,210,.6);font-size:.8em;}
+.changelog-link{position:fixed;bottom:8px;right:12px;color:rgba(180,210,150,.75);font-size:.75em;cursor:pointer;text-decoration:none;}
+.changelog-link:hover{color:#cbd9a0;text-decoration:underline;}
 ::-webkit-scrollbar{width:10px;} ::-webkit-scrollbar-thumb{background:#3a4230;border-radius:5px;}
 .top-bar{display:flex;justify-content:flex-end;align-items:center;gap:14px;margin-bottom:12px;flex-wrap:wrap;}
 .chat-toggle{display:flex;align-items:center;gap:6px;cursor:pointer;color:#cbd9a0;}
@@ -109,7 +137,9 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 </head>
 <body>
 <div id="app"></div>
+<div id="modalRoot"></div>
 <div class="version-tag" id="versionTag"></div>
+<div class="changelog-link" id="changelogLink">Changelog</div>
 <script>
 "use strict";
 
@@ -140,7 +170,7 @@ const CLASSES = {
   warlock:{display_name:"Warlock",chain:"wizard",tier:3,next_class:"necromancer",role:"summoner",description:"Dark pacts trade a little self-healing for serious power.",base_hp:105,hp_per_level:13,base_damage_min:16,base_damage_max:26,damage_per_level:2.4,base_crit:0.10,armor:0.0,regen:1.0,base_str:3,base_dex:10,base_vit:27,base_int:26},
   treesinger:{display_name:"Treesinger",chain:"thornguard",tier:3,next_class:"rootbinder",role:"hybrid",description:"Calls the grove to its side, disciplined, and mends wounds mid-fight.",base_hp:160,hp_per_level:20,base_damage_min:14,base_damage_max:22,damage_per_level:2.0,base_crit:0.15,armor:0.18,regen:2.5,base_str:27,base_dex:10,base_vit:26,base_int:3},
   shadowbloom:{display_name:"Shadowbloom",chain:"windrider",tier:3,next_class:"druid",role:"stealth",description:"Blooms in the shadows between strikes, pure burst damage built around crits.",base_hp:125,hp_per_level:16,base_damage_min:18,base_damage_max:28,damage_per_level:2.4,base_crit:0.35,armor:0.0,regen:0.0,base_str:7,base_dex:26,base_vit:26,base_int:7},
-  necromancer:{display_name:"Necromancer",chain:"wizard",tier:4,next_class:"archmage",role:"summoner",description:"Commands dark power and a steady drain of life.",base_hp:135,hp_per_level:17,base_damage_min:22,base_damage_max:34,damage_per_level:3.0,base_crit:0.12,armor:0.0,regen:1.5,base_str:4,base_dex:12,base_vit:33,base_int:33},
+  necromancer:{display_name:"Summoner",chain:"wizard",tier:4,next_class:"archmage",role:"summoner",description:"Commands dark power and a steady drain of life.",base_hp:135,hp_per_level:17,base_damage_min:22,base_damage_max:34,damage_per_level:3.0,base_crit:0.12,armor:0.0,regen:1.5,base_str:4,base_dex:12,base_vit:33,base_int:33},
   rootbinder:{display_name:"Rootbinder",chain:"thornguard",tier:4,next_class:"emberpriest",role:"hybrid",description:"Binds foes in living roots to shield its allies, heals as reliably as it blocks.",base_hp:210,hp_per_level:26,base_damage_min:18,base_damage_max:28,damage_per_level:2.6,base_crit:0.12,armor:0.25,regen:3.5,base_str:33,base_dex:12,base_vit:33,base_int:4},
   druid:{display_name:"Druid",chain:"windrider",tier:4,next_class:"galeshaper",role:"hybrid",description:"Nature's balance of bite and resilience.",base_hp:160,hp_per_level:20,base_damage_min:24,base_damage_max:36,damage_per_level:3.1,base_crit:0.20,armor:0.08,regen:2.0,base_str:8,base_dex:33,base_vit:33,base_int:8},
   emberpriest:{display_name:"Emberpriest",chain:"thornguard",tier:5,next_class:null,role:"healer",description:"Thornguard chain's endgame form, carries the last ember, trades raw damage for huge sustain.",base_hp:190,hp_per_level:24,base_damage_min:16,base_damage_max:24,damage_per_level:2.3,base_crit:0.10,armor:0.20,regen:6.0,base_str:40,base_dex:15,base_vit:40,base_int:5},
@@ -175,10 +205,22 @@ const ITEMS = {
   greater_health_potion:{name:"Greater Health Potion",type:"consumable",heal_amount:60,sell_value:7},
   stamina_potion:{name:"Stamina Potion",type:"consumable",stamina_amount:50,sell_value:4},
   greater_stamina_potion:{name:"Greater Stamina Potion",type:"consumable",stamina_amount:100,sell_value:9},
-  scroll_of_challenge_1:{name:"Scroll of Challenge I",type:"scroll",level_bonus:1,sell_value:6},
-  scroll_of_challenge_2:{name:"Scroll of Challenge II",type:"scroll",level_bonus:2,sell_value:14},
-  scroll_of_challenge_3:{name:"Scroll of Challenge III",type:"scroll",level_bonus:3,sell_value:30},
-  elixir_of_eyesight:{name:"Elixir of Eyesight",type:"consumable",eyesight_steps:500,sell_value:20},
+  // v0.12: sell_value tripled on all 3 scrolls (was 6/14/30), so their Merchant buy price
+  // (sell_value * VENDOR_MARKUP) triples too, alongside the Stronghold loot buff below --
+  // makes the loot chest's 25% chance at one of these feel like a real prize.
+  scroll_of_challenge_1:{name:"Scroll of Challenge I",type:"scroll",level_bonus:1,sell_value:18},
+  scroll_of_challenge_2:{name:"Scroll of Challenge II",type:"scroll",level_bonus:2,sell_value:42},
+  scroll_of_challenge_3:{name:"Scroll of Challenge III",type:"scroll",level_bonus:3,sell_value:90},
+  // v0.12: buy_price fixes the Merchant price at an exact 320g (overriding the usual
+  // sell_value*VENDOR_MARKUP formula, see Balance.itemBuyPrice), sell_value stays as the
+  // salvage-back value.
+  elixir_of_eyesight:{name:"Elixir of Eyesight",type:"consumable",eyesight_steps:500,sell_value:20,buy_price:320},
+  // v0.12: Stronghold guardians have a small chance to drop this; it's the only way to
+  // open a Stronghold's locked chest (see screenStrongholdChest). Plain "consumable" type
+  // so it rides the existing stackable-item plumbing (inventory, vault, auction house)
+  // for free, it just never satisfies canUseConsumable() since it has no heal/stamina/
+  // eyesight field, so the maze's quick-use buttons never touch it by accident.
+  stronghold_key:{name:"Stronghold Key",type:"consumable",sell_value:150},
   traveler_pouch:{name:"Traveler's Pouch",type:"bag",capacity:8,sell_value:10},
   woven_bag:{name:"Woven Bramble Bag",type:"bag",capacity:16,sell_value:20},
   bramble_sack:{name:"Bramble Sack",type:"bag",capacity:24,sell_value:32},
@@ -327,7 +369,13 @@ const Balance = {
   // that, so venturing several area levels above your own level gets punishing fast.
   // This is a first pass, expect further tuning as real playtesting comes in.
   MONSTER_HP_MULT:2.0, MONSTER_DAMAGE_MULT:2.0,
-  CRIT_MULTIPLIER:1.75, DEATH_GOLD_LOSS_PCT:0.10,
+  CRIT_MULTIPLIER:1.75,
+  // v0.12: softcore death used to cost a flat, gentle 10% of gold and nothing else. Now
+  // it's a real setback: 30-60% of gold, plus a decent chance of losing gear too (see
+  // PS.applyDeathPenalty/_rollDeathItemLosses below for the exact odds).
+  DEATH_GOLD_LOSS_MIN_PCT:0.30, DEATH_GOLD_LOSS_MAX_PCT:0.60,
+  DEATH_ITEM_LOSS_CHANCE:0.50, DEATH_EQUIPPED_LOSS_WEIGHT:0.20, DEATH_BACKPACK_LOSS_WEIGHT:0.30,
+  DEATH_ITEM_LOSS_MAX_COUNT:6,
   ENCOUNTER_CHANCE_PER_STEP:0.12, TRAP_CHANCE_PER_TILE:0.05,
   OBSTACLE_DENSITY:0.25, GRASS_PATCH_COUNT:18,
   // Independent per-tile roll chances (a 20x10 maze = 200 tiles), replacing the old
@@ -339,13 +387,24 @@ const Balance = {
   SHRINE_STAMINA_BUFF_PCT:1.0, SHRINE_XP_BUFF_MULT:1.5, SHRINE_XP_BUFF_ENCOUNTERS:20,
   TRAP_DAMAGE_MIN:4.0, TRAP_DAMAGE_MAX:12.0, TRAP_STAMINA_LOSS:20.0,
   CHEST_LOOT_MULTIPLIER:2.5, CHEST_SCROLL_CHANCE:0.12, CHEST_HITS_MIN:3, CHEST_HITS_MAX:5,
+  // v0.12: Stronghold -- one guaranteed 3x3 structure per maze (center: a locked chest,
+  // guarded on all 4 orthogonal sides by a tough "guardian" monster, decorative broken-
+  // fencing on the 4 diagonal corners that's fully walkable so the chest can never be
+  // soft-locked). STRONGHOLD_GUARDIAN_HP_MULT applies on top of the normal per-area-level
+  // monster HP curve; guardian damage is left at the normal per-area rate on purpose.
+  STRONGHOLD_GUARDIAN_HP_MULT:3.0, STRONGHOLD_KEY_DROP_CHANCE:0.05,
+  STRONGHOLD_CHEST_GOLD_MIN:500, STRONGHOLD_CHEST_GOLD_MAX:1500,
+  STRONGHOLD_CHEST_HERBS_MIN:5, STRONGHOLD_CHEST_HERBS_MAX:15,
+  STRONGHOLD_CHEST_GEAR_COUNT_MIN:2, STRONGHOLD_CHEST_GEAR_COUNT_MAX:4,
+  STRONGHOLD_CHEST_SCROLL_CHANCE:0.25, STRONGHOLD_CHEST_EYESIGHT_CHANCE:0.10, STRONGHOLD_CHEST_BAG_CHANCE:0.30,
+  STRONGHOLD_CHEST_POTIONS_MIN:3, STRONGHOLD_CHEST_POTIONS_MAX:9,
   CAMPFIRE_REGEN_PER_SECOND:1.0, CAMPFIRE_STAMINA_REGEN_PER_SECOND:5.0,
   EXIT_DEPTH_BONUS_PER_DESCENT:1, TRAPDOOR_DEPTH_PENALTY:1,
   CHARACTER_NAME_MAX_LEN:20, ELEMENT_ITEM_CHANCE:0.3,
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.11-web",
+  GAME_VERSION:"v0.12-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   NPC_BLACKSMITH_NAME:"Grondar Emberhand", NPC_ALCHEMIST_NAME:"Maren Thistlebrew", NPC_MERCHANT_NAME:"Cassius Wraithcoin",
@@ -353,7 +412,21 @@ const Balance = {
   ITEM_TIER_MAX:5, ITEM_STAT_PER_TIER:5, ITEM_TIER_ADJECTIVES:["Withered","Budding","Blooming","Ancient","Eternal"],
   RARITY_TABLE:[{name:"Common",slots:1,weight:60},{name:"Uncommon",slots:2,weight:25},{name:"Rare",slots:3,weight:10},{name:"Epic",slots:5,weight:4},{name:"Legendary",slots:8,weight:1}],
   AFFIX_POOL:["damage","hp","crit","armor","regen","gold_find","xp_find","stamina_max","strength","dexterity","vitality","intelligence"],
-  BASE_INVENTORY_SLOTS:16, MAX_BAG_SLOTS:3, BAG_BUY_GOLD_PER_CAPACITY:4, BAG_CRAFT_MATERIALS_PER_CAPACITY:3,
+  // v0.12: weapons should feel like the slot that defines your damage output. 70% of the
+  // time a weapon's affix pool gets "damage" pinned first (guaranteeing it rolls, instead
+  // of competing 1-in-12 with every other stat), and when it does, the rolled value is 40%
+  // higher than that same affix would roll on a non-weapon slot.
+  WEAPON_DAMAGE_GUARANTEE_CHANCE:0.70, WEAPON_DAMAGE_AFFIX_MULT:1.40,
+  // v0.12: weapon-type proficiency. Landing a hit with a weapon type equipped counts
+  // toward that type's permanent skill progression: level L requires (L)*WEAPON_SKILL_
+  // HIT_STEP MORE hits than level L-1 (100 for level 1, 200 more for level 2, 300 more
+  // for level 3, ...), so the grind slows down over time by design. Each level is a flat
+  // +1 damage while that weapon type is equipped. This progression is per-character and
+  // never resets -- not on Broken Bridge promotion, not on a season reset.
+  WEAPON_SKILL_HIT_STEP:100, WEAPON_SKILL_DAMAGE_PER_LEVEL:1,
+  // v0.12: bag prices moved x10 (was 4/capacity -> 32/64/96/160g; now 320/640/960/1600g)
+  // to match the new Stronghold chests being worth chasing for their 30% chance at a bag.
+  BASE_INVENTORY_SLOTS:16, MAX_BAG_SLOTS:3, BAG_BUY_GOLD_PER_CAPACITY:40, BAG_CRAFT_MATERIALS_PER_CAPACITY:3,
   VENDOR_MARKUP:3,
   SALVAGE_MATERIALS_PER_SLOT:3, REROLL_MATERIAL_COST_MULT:2, SELL_GOLD_PER_TIER:8, SELL_GOLD_PER_SLOT:4,
   // Broken Bridge Challenge (v0.11 rework): one continuous 10-step crossing per
@@ -396,10 +469,25 @@ const Balance = {
   bridgePlankCount(tier){return clampi((tier||1)+1,this.BRIDGE_MIN_PLANKS,this.BRIDGE_MAX_PLANKS);},
   bridgeStepPassChance(tier){return 1.0/this.bridgePlankCount(tier);},
   trialLevelRequirement(tier){return clampi(tier||1,1,4)*this.TRIAL_LEVEL_REQUIREMENT_PER_TIER;},
+  // v0.12: weapon skill hit-count math. Level L is reached once cumulative hits pass
+  // WEAPON_SKILL_HIT_STEP * L*(L+1)/2 (a triangular number: 100, 300, 600, 1000, ...),
+  // i.e. level L costs L*100 more hits than level L-1 -- matches Gwen's "100 strikes for
+  // level 1, 200 more for level 2, 300 more for level 3" spec, extended indefinitely.
+  weaponSkillCumulativeHitsForLevel(level){ return this.WEAPON_SKILL_HIT_STEP*level*(level+1)/2; },
+  weaponSkillLevelForHits(hits){
+    let level=0;
+    while(this.weaponSkillCumulativeHitsForLevel(level+1)<=hits) level++;
+    return level;
+  },
   salvageValue(tier,slots){return tier*slots*this.SALVAGE_MATERIALS_PER_SLOT;},
   rerollCost(tier,slots){return this.salvageValue(tier,slots)*this.REROLL_MATERIAL_COST_MULT;},
   sellValue(tier,slots){return tier*this.SELL_GOLD_PER_TIER+slots*this.SELL_GOLD_PER_SLOT;},
   bagBuyPrice(cap){return cap*this.BAG_BUY_GOLD_PER_CAPACITY;},
+  // v0.12: Merchant buy price for any consumable/scroll -- item.buy_price overrides the
+  // default sell_value*VENDOR_MARKUP formula when an item needs an exact price point
+  // (see elixir_of_eyesight). Shared by screenMerchant's display price and PS.buyConsumable
+  // so the two can never drift out of sync.
+  itemBuyPrice(item){ return item.buy_price!=null ? item.buy_price : Math.round((item.sell_value||1)*this.VENDOR_MARKUP); },
   bagCraftCost(cap){return cap*this.BAG_CRAFT_MATERIALS_PER_CAPACITY;},
 };
 
@@ -467,17 +555,38 @@ const IF = {
   EQUIPPED_SLOT_KEYS:["weapon","head","shoulders","armor","pants","gloves","boots","ring1","ring2","amulet","belt"],
   SLOT_LABELS:{weapon:"Weapon",head:"Head",shoulders:"Shoulders",armor:"Armor",pants:"Pants",gloves:"Gloves",boots:"Boots",ring1:"Ring 1",ring2:"Ring 2",amulet:"Amulet",belt:"Belt"},
 
+  // v0.12: Weapon skill/proficiency system. Every generated weapon's base_name maps to
+  // one of a handful of weapon types, and each character tracks permanent, per-type
+  // progression (see PS.weapon_skills) built up purely by landing hits with that type
+  // equipped -- see registerWeaponHit() in the combat screen's playerTurn().
+  WEAPON_TYPE_BY_BASE_NAME:{"Twig Wand":"wand","Bramblestaff":"staff","Rootcarver":"sword","Thornbow":"bow","Charwood Axe":"axe","Emberbrand":"sword"},
+  WEAPON_TYPE_LIST:["wand","staff","sword","axe","bow"],
+  WEAPON_TYPE_LABELS:{wand:"Wand",staff:"Staff",sword:"Sword",axe:"Axe",bow:"Bow"},
+  weaponTypeForInstance(inst){ return (inst&&inst.base_name) ? (this.WEAPON_TYPE_BY_BASE_NAME[inst.base_name]||null) : null; },
+
   slotLabel(slot){return this.SLOT_LABELS[slot]||slot;},
 
-  generate(tier, slot=""){
+  // forcedRarityName (v0.12, used by the Stronghold chest): when given, skips the normal
+  // rarity roll and guarantees that exact rarity, e.g. so Stronghold loot can promise
+  // "rare/epic items" instead of rolling the same 60%-common odds as everyday loot.
+  generate(tier, slot="", forcedRarityName=""){
     let chosenSlot=slot;
     if(!chosenSlot||!this.BASE_NAMES[chosenSlot]) chosenSlot=pick(this.GENERATION_SLOTS);
     const baseName=pick(this.BASE_NAMES[chosenSlot]||["Item"]);
-    const rarity=Balance.rollRarity();
+    const rarity=forcedRarityName ? (Balance.RARITY_TABLE.find(r=>r.name===forcedRarityName)||Balance.rollRarity()) : Balance.rollRarity();
     const slotCount=rarity.slots;
     const [lo,hi]=Balance.itemTierStatRange(tier);
     let pool=[...Balance.AFFIX_POOL];
     shuffle(pool);
+    // v0.12: weapons lean hard into damage now, instead of rolling it as just one of 12
+    // equally-likely affixes. Below Balance.WEAPON_DAMAGE_GUARANTEE_CHANCE, "damage" is
+    // pinned to the front of the pool (so any weapon with at least 1 affix slot gets it),
+    // and whenever a weapon does roll damage, the value itself rolls noticeably higher
+    // too (Balance.WEAPON_DAMAGE_AFFIX_MULT) -- both the odds AND the payoff go up.
+    if(chosenSlot==="weapon" && Math.random()<Balance.WEAPON_DAMAGE_GUARANTEE_CHANCE && pool.includes("damage")){
+      pool=pool.filter(s=>s!=="damage");
+      pool.unshift("damage");
+    }
     let element="";
     if(Math.random()<Balance.ELEMENT_ITEM_CHANCE){
       element=pick(Balance.ELEMENT_IDS);
@@ -490,7 +599,10 @@ const IF = {
     const affixCount=Math.min(slotCount,pool.length);
     const affixes=[];
     for(let i=0;i<affixCount;i++){
-      affixes.push({stat:pool[i], value:randIntRange(lo,hi)});
+      const stat=pool[i];
+      let value=randIntRange(lo,hi);
+      if(chosenSlot==="weapon" && stat==="damage") value=Math.round(value*Balance.WEAPON_DAMAGE_AFFIX_MULT);
+      affixes.push({stat, value});
     }
     if(Math.random()<Balance.EYESIGHT_AFFIX_CHANCE){
       affixes.push({stat:"eyesight", value:2});
@@ -671,6 +783,10 @@ const Net = {
     if(!this.online) return;
     try{ await fetch(this.apiBase()+"/api/announce/death",{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify(payload)}); }catch(e){}
   },
+  async announceCreated(payload){
+    if(!this.online) return;
+    try{ await fetch(this.apiBase()+"/api/announce/created",{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify(payload)}); }catch(e){}
+  },
   // Storage Vault (v0.11): one shared 200-slot chest per account, so every character
   // slot on the account can deposit into and withdraw from the same stash server-side.
   async fetchVault(){
@@ -797,7 +913,38 @@ const PS = {
   attributes:{str:0,dex:0,vit:0,int:0}, unspent_stat_points:0,
   bonus_hp_from_attributes:0, bonus_stamina_from_attributes:0,
 
+  // Weapon skill / proficiency (v0.12). Purely additive hit counters per weapon type,
+  // never reset by anything (not promotion, not a season reset) -- see IF.WEAPON_TYPE_LIST
+  // and Balance.weaponSkillLevelForHits(). Lazily backfilled by ensureWeaponSkills() so
+  // pre-v0.12 saves and brand new characters both start every type at 0/0.
+  weapon_skills:{},
+
   getClassData(){return DL.getClass(this.class_id);},
+  ensureWeaponSkills(){
+    for(const t of IF.WEAPON_TYPE_LIST) if(!this.weapon_skills[t]) this.weapon_skills[t]={hits:0};
+  },
+  getEquippedWeaponType(){ return IF.weaponTypeForInstance(this.equipped.weapon); },
+  getWeaponSkillHits(weaponType){ this.ensureWeaponSkills(); return (this.weapon_skills[weaponType]||{hits:0}).hits; },
+  getWeaponSkillLevel(weaponType){ return Balance.weaponSkillLevelForHits(this.getWeaponSkillHits(weaponType)); },
+  // Progress toward the NEXT level, for progress-bar display (e.g. "37/100").
+  getWeaponSkillProgress(weaponType){
+    const hits=this.getWeaponSkillHits(weaponType);
+    const level=Balance.weaponSkillLevelForHits(hits);
+    const hitsAtLevelStart=Balance.weaponSkillCumulativeHitsForLevel(level);
+    const hitsForNextLevel=Balance.weaponSkillCumulativeHitsForLevel(level+1)-hitsAtLevelStart;
+    const hitsIntoLevel=hits-hitsAtLevelStart;
+    return {level, hits, hitsIntoLevel, hitsForNextLevel};
+  },
+  // Called once per player attack (see screenCombat's playerTurn) when a weapon of a
+  // known type is equipped. Returns whether this hit pushed the type to a new level, so
+  // the caller can surface a small "your Sword skill increased!" toast.
+  registerWeaponHit(weaponType){
+    this.ensureWeaponSkills();
+    const before=Balance.weaponSkillLevelForHits(this.weapon_skills[weaponType].hits);
+    this.weapon_skills[weaponType].hits++;
+    const after=Balance.weaponSkillLevelForHits(this.weapon_skills[weaponType].hits);
+    return {leveledUp:after>before, newLevel:after};
+  },
   getTotalAttr(key){
     const gearStat={str:"strength",dex:"dexterity",vit:"vitality",int:"intelligence"}[key];
     return (this.attributes[key]||0)+this.gearBonus(gearStat);
@@ -807,11 +954,9 @@ const PS = {
     this.attributes[key]++; this.unspent_stat_points--; return true;
   },
   getBlockChance(){
-    const c=this.getClassData();
-    if(c.chain==="wizard"||c.chain==="thornguard"){
-      return clampf(this.getTotalAttr("dex")*Balance.BLOCK_CHANCE_PER_DEX,0,Balance.BLOCK_CHANCE_MAX);
-    }
-    return 0;
+    // v0.12: Dexterity grants Block Chance on all 3 chains now, including Windrider,
+    // where it doubles up as both the damage stat AND the block stat for that path.
+    return clampf(this.getTotalAttr("dex")*Balance.BLOCK_CHANCE_PER_DEX,0,Balance.BLOCK_CHANCE_MAX);
   },
   _resetAttributesToClassBase(){
     const c=this.getClassData();
@@ -827,16 +972,31 @@ const PS = {
     return total;
   },
   getMaxHp(){const c=this.getClassData(); return (c.base_hp||50)+(c.hp_per_level||5)*(this.level-1)+this.gearBonus("hp")+this.bonus_hp_from_attributes;},
-  getDamageRange(){
+  // v0.12: split out so the UI can show "base damage (from level+stats)" separately from
+  // "bonus damage (from currently equipped gear)" -- previously these were only visible
+  // combined, so a player had no way to tell whether e.g. +5 damage on a ring was actually
+  // meaningful next to their level/attribute damage without doing the subtraction by hand.
+  getDamageBreakdown(){
     const c=this.getClassData(); const perLevel=(c.damage_per_level||1.0)*(this.level-1);
-    let bonus=this.gearBonus("damage");
+    const gearBonus=this.gearBonus("damage");
     // Each chain has one attribute that scales its damage directly (base+points+gear,
     // recalculated live, unlike the HP/Stamina attribute bonuses below, this is not a
     // cumulative per-level-up pool, just "however much of that stat you currently have").
-    if(c.chain==="thornguard") bonus+=this.getTotalAttr("str");
-    else if(c.chain==="windrider") bonus+=this.getTotalAttr("dex");
-    else if(c.chain==="wizard") bonus+=this.getTotalAttr("int");
-    return [(c.base_damage_min||1)+perLevel+bonus, (c.base_damage_max||2)+perLevel+bonus];
+    let statBonus=0;
+    if(c.chain==="thornguard") statBonus=this.getTotalAttr("str");
+    else if(c.chain==="windrider") statBonus=this.getTotalAttr("dex");
+    else if(c.chain==="wizard") statBonus=this.getTotalAttr("int");
+    // v0.12: permanent weapon-type proficiency (see registerWeaponHit) grants a flat
+    // +1 damage per level while a weapon of that type is currently equipped -- this is
+    // deliberately kept separate from gearBonus, it comes from the character, not the item.
+    const weaponType=this.getEquippedWeaponType();
+    const weaponSkillBonus=weaponType ? this.getWeaponSkillLevel(weaponType)*Balance.WEAPON_SKILL_DAMAGE_PER_LEVEL : 0;
+    const baseMin=(c.base_damage_min||1)+perLevel+statBonus+weaponSkillBonus, baseMax=(c.base_damage_max||2)+perLevel+statBonus+weaponSkillBonus;
+    return {baseMin, baseMax, gearBonus, weaponSkillBonus, totalMin:baseMin+gearBonus, totalMax:baseMax+gearBonus};
+  },
+  getDamageRange(){
+    const d=this.getDamageBreakdown();
+    return [d.totalMin, d.totalMax];
   },
   getCritChance(){const c=this.getClassData(); return clampf((c.base_crit||0.05)+this.gearBonus("crit")/100.0,0,0.95);},
   getArmor(){const c=this.getClassData(); return clampf((c.armor||0.0)+this.gearBonus("armor")/100.0,0,0.75);},
@@ -930,7 +1090,70 @@ const PS = {
   restoreStamina(amount){ this.current_stamina=Math.min(this.getMaxStamina(),this.current_stamina+amount); },
   addStaminaShrineBuff(bonus){ this.current_stamina=this.getMaxStamina(); this.stamina_shrine_buff+=bonus; },
   addGold(amount){ this.gold=Math.max(0,Math.round(this.gold+amount*this.getGoldFindMult())); },
-  applyDeathPenalty(){ const loss=Math.round(this.gold*Balance.DEATH_GOLD_LOSS_PCT); this.gold=Math.max(0,this.gold-loss); this.current_hp=this.getMaxHp(); this.resetKillStreak(); },
+  // v0.12: softcore ("non-hardcore") death penalty. Returns {goldLost, itemsLost} so the
+  // caller can tell the player exactly what happened, this is deliberately NOT a silent
+  // penalty (players losing gear they didn't see an explanation for would look like a bug).
+  applyDeathPenalty(){
+    const pct=Balance.DEATH_GOLD_LOSS_MIN_PCT+Math.random()*(Balance.DEATH_GOLD_LOSS_MAX_PCT-Balance.DEATH_GOLD_LOSS_MIN_PCT);
+    const goldLost=Math.round(this.gold*pct);
+    this.gold=Math.max(0,this.gold-goldLost);
+    const itemsLost=this._rollDeathItemLosses();
+    this.current_hp=this.getMaxHp();
+    this.resetKillStreak();
+    return {goldLost,itemsLost};
+  },
+  // Whether anything is lost at all is a single Balance.DEATH_ITEM_LOSS_CHANCE (50%) roll.
+  // If so, how MANY items is a geometric countdown -- keep flipping a 50/50 coin and adding
+  // one more item for as long as it comes up heads -- which naturally produces exactly the
+  // falloff asked for: 50% of "something lost" cases lose just 1 item, 25% lose 2, 12.5%
+  // lose 3, 6.25% lose 4, and so on, capped so a truly disastrous run can't wipe everything.
+  _rollDeathItemLosses(){
+    const lost=[];
+    if(Math.random()>=Balance.DEATH_ITEM_LOSS_CHANCE) return lost;
+    let count=1;
+    while(Math.random()<0.5 && count<Balance.DEATH_ITEM_LOSS_MAX_COUNT) count++;
+    for(let i=0;i<count;i++){
+      const desc=this._loseOneRandomItem();
+      if(!desc) break; // nothing left to lose
+      lost.push(desc);
+    }
+    return lost;
+  },
+  // Each individual item lost is drawn from a weighted pool of "an equipped slot" (weight
+  // 20) vs "a backpack gear item or consumable stack" (weight 30), mirroring the 20%/30%
+  // split the odds were designed around, then a specific item is picked at random from
+  // whichever pool won and removed.
+  _loseOneRandomItem(){
+    const equippedSlots=IF.EQUIPPED_SLOT_KEYS.filter(s=>this.equipped[s]);
+    const consumableIds=Object.keys(this.consumables).filter(k=>this.consumables[k]>0);
+    const nonEquippedCount=this.gear_instances.length+consumableIds.length;
+    const pools=[];
+    if(equippedSlots.length) pools.push({weight:Balance.DEATH_EQUIPPED_LOSS_WEIGHT,kind:"equipped"});
+    if(nonEquippedCount) pools.push({weight:Balance.DEATH_BACKPACK_LOSS_WEIGHT,kind:"backpack"});
+    if(pools.length===0) return null;
+    const totalWeight=pools.reduce((s,p)=>s+p.weight,0);
+    let r=Math.random()*totalWeight, chosen=pools[pools.length-1].kind;
+    for(const p of pools){ if(r<p.weight){ chosen=p.kind; break; } r-=p.weight; }
+    if(chosen==="equipped"){
+      const slot=equippedSlots[randi(equippedSlots.length)];
+      const inst=this.equipped[slot];
+      this.equipped[slot]=null;
+      return `${IF.displayName(inst)} (equipped)`;
+    }
+    // backpack: gear and consumable stacks share one flat pool so a character with 1 gear
+    // item and 1 potion stack has even odds between them, not skewed by stack count.
+    const backpackChoices=this.gear_instances.map((inst,idx)=>({type:"gear",idx})).concat(consumableIds.map(id=>({type:"consumable",id})));
+    if(backpackChoices.length===0) return null;
+    const choice=backpackChoices[randi(backpackChoices.length)];
+    if(choice.type==="gear"){
+      const inst=this.gear_instances[choice.idx];
+      this.gear_instances.splice(choice.idx,1);
+      return IF.displayName(inst);
+    }
+    const qtyLost=this.consumables[choice.id];
+    delete this.consumables[choice.id];
+    return `${DL.getItem(choice.id).name} x${qtyLost}`;
+  },
   incrementKillStreak(){ this.kill_streak++; },
   resetKillStreak(){ this.kill_streak=0; },
   handleDeath(cause){
@@ -940,10 +1163,10 @@ const PS = {
       appendGraveyard(entry);
       if(this.current_slot>=0) deleteSave(this.current_slot, entry);
       this.current_slot=-1;
-      return true;
+      return {dead:true,penalty:null};
     }
-    this.applyDeathPenalty();
-    return false;
+    const penalty=this.applyDeathPenalty();
+    return {dead:false,penalty};
   },
   addConsumable(itemId,count=1){ this.consumables[itemId]=(this.consumables[itemId]||0)+count; },
   _removeConsumableOne(itemId){ const rem=(this.consumables[itemId]||0)-1; if(rem>0) this.consumables[itemId]=rem; else delete this.consumables[itemId]; },
@@ -979,7 +1202,7 @@ const PS = {
   },
   buyConsumable(itemId){
     const item=DL.getItem(itemId); if(!item.name) return false;
-    const price=(item.sell_value||1)*Balance.VENDOR_MARKUP;
+    const price=Balance.itemBuyPrice(item);
     if(this.gold<price) return false;
     this.gold-=price; this.addConsumable(itemId); return true;
   },
@@ -1063,10 +1286,22 @@ const PS = {
     this.equipped_bags=[]; this.pending_scroll_bonus=0; this.xp_buff_multiplier=1.0;
     this.xp_buff_encounters_left=0; this.stamina_shrine_buff=0.0; this.highest_tier_reached=1;
     this.season_won=false; this.kill_streak=0; this.xp_to_next=Balance.xpRequiredForLevel(this.level);
-    this.current_hp=this.getMaxHp(); this.current_stamina=this.getMaxStamina();
     this.lifetime_xp=0; this.isRestingAtCampfire=false; this.eyesight_potion_steps_left=0;
     this.max_maze_depth_reached=1;
+    // Fresh character: brand new weapon-skill progression, NOT the reused-singleton's
+    // previous character's progress (same bug class as the HP/Stamina fix just below --
+    // PS is one shared object across character creations in a session, so anything not
+    // explicitly reset here would otherwise leak from whatever was played last).
+    this.weapon_skills={}; this.ensureWeaponSkills();
+    // Bug fix (v0.12): this MUST run before getMaxHp()/getMaxStamina() below. PS is a
+    // reused singleton across character creations in the same session, so bonus_hp_from_
+    // attributes/bonus_stamina_from_attributes/attributes still held whatever the last-
+    // played character (e.g. a high-Vitality one) left behind until this reset runs. Any
+    // brand new character created without a full page reload was inheriting that stale
+    // Vitality bonus into its starting HP/Stamina (this is what produced Gwen's ~430 HP /
+    // ~418 Stamina level-1 Thornguard report).
     this._resetAttributesToClassBase();
+    this.current_hp=this.getMaxHp(); this.current_stamina=this.getMaxStamina();
   },
   saveGame(){
     if(this.current_slot<0) return;
@@ -1079,7 +1314,8 @@ const PS = {
       eyesight_potion_steps_left:this.eyesight_potion_steps_left,
       max_maze_depth_reached:this.max_maze_depth_reached,
       attributes:this.attributes,unspent_stat_points:this.unspent_stat_points,
-      bonus_hp_from_attributes:this.bonus_hp_from_attributes,bonus_stamina_from_attributes:this.bonus_stamina_from_attributes};
+      bonus_hp_from_attributes:this.bonus_hp_from_attributes,bonus_stamina_from_attributes:this.bonus_stamina_from_attributes,
+      weapon_skills:this.weapon_skills};
     if(Net.online) Net.saveCharacter(this.current_slot, data);
     else Storage_.setItem(SAVE_KEY(this.current_slot), JSON.stringify(data));
   },
@@ -1104,6 +1340,10 @@ const PS = {
     this.bonus_stamina_from_attributes=parsed.bonus_stamina_from_attributes||0;
     this.current_hp=parsed.current_hp!=null?parsed.current_hp:this.getMaxHp();
     this.current_stamina=parsed.current_stamina!=null?parsed.current_stamina:this.getMaxStamina();
+    // v0.12: weapon skill progression is permanent and per-character, never reset by
+    // anything -- a save with no weapon_skills yet (pre-v0.12) just starts everyone at 0.
+    this.weapon_skills=parsed.weapon_skills||{};
+    this.ensureWeaponSkills();
     return true;
   },
   loadGame(slot){
@@ -1131,7 +1371,7 @@ const GF = {
   trialJustFailed:false, trialFailedPlankIndex:null, trialFailedStepIndex:-1,
   ventureDepth:null, mazeOverlay:null, gambleReveal:null,
   admin_token:"", admin_leaderboard_cache:null, admin_leaderboard_error:"",
-  attributesCollapsed:false,
+  attributesCollapsed:false, leaderboardPage:null,
   goto(screen, extra={}){
     Object.assign(this, extra);
     if(PS.isRestingAtCampfire && !NO_REGEN_SCREENS_ON_LEAVE.includes(screen)) PS.isRestingAtCampfire=false;
@@ -1164,9 +1404,14 @@ function iconBadge(svg, size){ const d=h("div",{class:"icon-badge",style:size?{w
 /* ---------- App root + render ---------- */
 
 const app=document.getElementById("app");
+const modalRoot=document.getElementById("modalRoot");
 document.getElementById("versionTag").textContent=Balance.GAME_VERSION;
+document.getElementById("changelogLink").addEventListener("click",()=>{
+  GF._preChangelogScreen=GF.screen;
+  GF.goto("changelog");
+});
 
-const NO_TOPBAR_SCREENS=["authGate","login","register"];
+const NO_TOPBAR_SCREENS=["authGate","login","register","changelog"];
 
 function toggleChat(){ GF.chatOpen=!GF.chatOpen; if(GF.chatOpen) Net.ensureChat(); render(); }
 
@@ -1225,6 +1470,30 @@ function render(){
   const fn=SCREENS[GF.screen]||SCREENS.mainMenuSlots;
   app.appendChild(fn());
   const cp=chatPanel(); if(cp) app.appendChild(cp);
+}
+
+/* ---------- shared in-app confirm popup, replaces window.confirm()/window.prompt() ----------
+   Deliberately rendered into its own #modalRoot node OUTSIDE #app, instead of going through
+   the normal render()/GF.goto() full-teardown cycle. A lot of the callers (e.g. the hardcore
+   checkbox mid-form on the character creation screen) need to show this without wiping out
+   whatever the player has already typed into the current screen, which a full render() would
+   do since every screen function builds fresh DOM nodes from scratch. Call askConfirm(message,
+   onConfirm, opts) to open it; closeConfirmModal() (called automatically on either button, or
+   on backdrop click) tears down just the modal layer. */
+function closeConfirmModal(){ modalRoot.innerHTML=""; }
+function askConfirm(message,onConfirm,opts={}){
+  const confirmLabel=opts.confirmLabel||"Confirm", cancelLabel=opts.cancelLabel||"Cancel";
+  const danger=opts.danger!==false, onCancel=opts.onCancel||null;
+  modalRoot.innerHTML="";
+  modalRoot.appendChild(h("div",{class:"modal-backdrop",onClick:(e)=>{ if(e.target===e.currentTarget) closeConfirmModal(); }},[
+    h("div",{class:"modal-box"},[
+      h("div",{style:{lineHeight:"1.5"}},[message]),
+      h("div",{class:"row"},[
+        h("button",{onClick:()=>{ closeConfirmModal(); if(onCancel) onCancel(); }},[cancelLabel]),
+        h("button",{class:danger?"danger":"",onClick:()=>{ closeConfirmModal(); onConfirm(); }},[confirmLabel]),
+      ]),
+    ]),
+  ]));
 }
 
 
@@ -1323,6 +1592,17 @@ function inventoryPreview(){
   ]);
 }
 
+// v0.12: shown wherever statHeader() is (town/combat/inventory), so it's always visible
+// how much of current damage comes from level+stats vs. from equipped gear -- otherwise
+// there's no way to tell whether e.g. a +5 damage affix is actually worth chasing.
+function damageLine(){
+  const d=PS.getDamageBreakdown();
+  const gearPart=d.gearBonus>0?`, +${Math.round(d.gearBonus)} from gear`:"";
+  return h("div",{class:"muted tooltip",style:{fontSize:".85em"},"data-tip":`Base (level + attributes): ${Math.round(d.baseMin)}-${Math.round(d.baseMax)}\nFrom equipped gear: +${Math.round(d.gearBonus)}`},[
+    `Damage: ${Math.round(d.totalMin)}-${Math.round(d.totalMax)} (${Math.round(d.baseMin)}-${Math.round(d.baseMax)} base${gearPart})`
+  ]);
+}
+
 function statHeader(opts={}){
   const compact=!!opts.compact;
   const c=PS.getClassData();
@@ -1331,10 +1611,11 @@ function statHeader(opts={}){
       h("div",{},[
         h("div",{style:{fontWeight:"bold"}},[PS.character_name, PS.hardcore?h("span",{style:{color:"#e07a7a"}},[" [Hardcore]"]):null]),
         h("div",{class:"muted"},[`Lv ${PS.level} ${c.display_name||""}`]),
+        damageLine(),
         PS.kill_streak>0?h("div",{class:"muted"},[`Kill streak: ${PS.kill_streak}`]):null,
       ]),
       h("div",{class:"row gap",style:{alignItems:"center"}},[
-        h("div",{style:{fontWeight:"bold"}},["Inventory"]),
+        h("div",{style:{fontWeight:"bold"}},["Character Sheet"]),
         GF.screen==="inventory"?h("span",{class:"muted"},["(open)"]):h("span",{class:"linklike",style:{marginLeft:"2px"},onClick:()=>GF.goto("inventory",{inventory_return_to:GF.screen})},["Open →"]),
         PS.unspent_stat_points>0?h("span",{class:"stat-point-cta",title:`${PS.unspent_stat_points} unspent stat point${PS.unspent_stat_points===1?"":"s"} -- click to assign them`,onClick:()=>GF.goto("inventory",{inventory_return_to:GF.screen})},["+"]):null,
       ]),
@@ -1409,9 +1690,9 @@ function authForm(mode){
   root.appendChild(wandrianHeader());
   root.appendChild(h("h2",{},[isLogin?"Log In":"Create Account"]));
   const t=toastBox(); if(t) root.appendChild(t);
-  const userInput=h("input",{type:"text",placeholder:"username"});
-  const passInput=h("input",{type:"password",placeholder:"password"});
-  const emailInput=isLogin?null:h("input",{type:"email",placeholder:"email (optional)"});
+  const userInput=h("input",{type:"text",placeholder:"username",style:{width:"100%"}});
+  const passInput=h("input",{type:"password",placeholder:"password",style:{width:"100%"}});
+  const emailInput=isLogin?null:h("input",{type:"email",placeholder:"email (optional)",style:{width:"100%"}});
   const statusDiv=h("div",{class:"muted"},[""]);
   const submit=async ()=>{
     const username=userInput.value.trim(), passcode=passInput.value;
@@ -1472,9 +1753,9 @@ function screenMainMenuSlots(){
       h("div",{class:"row",style:{marginTop:"10px",gap:"6px"}},[
         h("button",{class:"play",style:{flex:"4"},onClick:()=>{ PS.loadGame(s.slot); PS.resetKillStreak(); GF.goto("town"); }},["Play"]),
         h("button",{class:"danger trash-btn",style:{flex:"1"},title:"Delete",onClick:()=>{
-          if(confirm(`Delete ${s.character_name} (Lv ${s.level} ${s.display_name})? This cannot be undone.`)){
+          askConfirm(`Delete ${s.character_name} (Lv ${s.level} ${s.display_name})? This cannot be undone.`,()=>{
             deleteSave(s.slot); render();
-          }
+          },{confirmLabel:"Delete",cancelLabel:"Cancel"});
         }},[inlineIcon(TRASH_SVG,16)]),
       ]),
     ]));
@@ -1515,6 +1796,14 @@ function screenMainMenuSlots(){
   return root;
 }
 
+// v0.12: short evocative subtitles for the 3 starter classes on the creation screen,
+// replacing the old single-word "damage"/"tank"/"damage" role labels.
+const CLASS_CREATION_SUBTEXT={
+  wizard:"The intelligent path of magic",
+  thornguard:"The sturdiness of strength",
+  windrider:"The agility of a vulture",
+};
+
 function screenClassPicker(){
   const root=h("div",{});
   root.appendChild(h("h2",{},["Create Your Hero"]));
@@ -1523,23 +1812,27 @@ function screenClassPicker(){
   const hardcoreBox=h("input",{type:"checkbox",id:"hcbox"});
   hardcoreBox.addEventListener("change",()=>{
     if(hardcoreBox.checked){
-      const ok=confirm("Hardcore characters only have 1 life. Upon death, they are moved to the graveyard as a memorial, but are no longer accessible for play.");
-      if(!ok) hardcoreBox.checked=false;
+      hardcoreBox.checked=false; // provisionally uncheck until the player actually confirms
+      askConfirm(
+        "Hardcore characters only have 1 life. Upon death, they are moved to the graveyard as a memorial, but are no longer accessible for play.",
+        ()=>{ hardcoreBox.checked=true; },
+        {confirmLabel:"I understand, go Hardcore",cancelLabel:"Never mind",danger:true}
+      );
     }
   });
   nameInput.addEventListener("input",()=>{ if(nameInput.value.trim()){ nameError.textContent=""; nameInput.style.borderColor=""; } });
   root.appendChild(h("div",{class:"panel",style:{marginBottom:"14px"}},[
     h("div",{class:"row gap"},[h("span",{},["Character name:"]), nameInput]),
     nameError,
-    h("div",{class:"row gap",style:{marginTop:"8px"}},[hardcoreBox, h("label",{for:"hcbox"},["Hardcore mode, permadeath, sent to the Graveyard on death."])]),
+    h("div",{class:"row gap",style:{marginTop:"8px"}},[hardcoreBox, h("label",{for:"hcbox"},["Hardcore mode"])]),
   ]));
   const grid=h("div",{class:"grid3"});
   for(const classId of DL.starterClassIds()){
     const c=DL.getClass(classId);
     grid.appendChild(h("div",{class:"tile col gap"},[
-      h("div",{class:"row",style:{alignItems:"center",gap:"10px"}},[iconBadge(PORTRAITS[classId],56), h("div",{style:{flex:"1",minWidth:"0"}},[h("div",{style:{fontWeight:"bold"}},[c.display_name]), h("div",{class:"muted"},[c.role])])]),
-      h("div",{class:"muted"},[c.description]),
-      h("button",{class:"wide",onClick:()=>{
+      h("div",{class:"row",style:{alignItems:"center",gap:"10px"}},[iconBadge(PORTRAITS[classId],56), h("div",{style:{flex:"1",minWidth:"0"}},[h("div",{style:{fontWeight:"bold"}},[c.display_name]), h("div",{class:"muted"},[CLASS_CREATION_SUBTEXT[classId]||c.role])])]),
+      h("div",{class:"muted",style:{flex:"1"}},[c.description]),
+      h("button",{class:"wide",style:{marginTop:"auto"},onClick:()=>{
         const name=nameInput.value.trim();
         if(!name){
           nameError.textContent="Please enter a character name before you begin.";
@@ -1549,6 +1842,7 @@ function screenClassPicker(){
         }
         PS.startNewCharacter(classId, name, GF.selected_slot, hardcoreBox.checked);
         PS.saveGame();
+        Net.announceCreated({character_name:name, class_name:c.display_name});
         GF.goto("town");
       }},["Begin as "+c.display_name]),
     ]));
@@ -1572,12 +1866,17 @@ function screenGraveyard(){
   if(entries.length===0){
     root.appendChild(h("div",{class:"muted"},["No one has fallen yet."]));
   } else {
+    const grid=h("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(230px,1fr))",gap:"14px",margin:"16px 0"}});
     for(const e of entries){
-      root.appendChild(h("div",{class:"tile",style:{marginBottom:"8px"}},[
-        h("div",{style:{fontWeight:"bold"}},[`${e.name}, Lv ${e.level} ${e.class_name}`]),
-        h("div",{class:"muted"},[`${e.cause||"Died in the wilds"}, ${new Date(e.date||e.died_at).toLocaleString()}`]),
+      grid.appendChild(h("div",{class:"tile",style:{textAlign:"center",padding:"16px 12px"}},[
+        h("div",{style:{fontSize:"2.2em",marginBottom:"6px"}},["🪦"]),
+        h("div",{style:{fontWeight:"bold"}},[`${e.name}`]),
+        h("div",{class:"muted",style:{fontSize:".9em"}},[`Lv ${e.level} ${e.class_name}`]),
+        h("div",{class:"muted",style:{fontSize:".8em",marginTop:"6px"}},[`${e.cause||"Died in the wilds"}`]),
+        h("div",{class:"muted",style:{fontSize:".75em"}},[new Date(e.date||e.died_at).toLocaleDateString()]),
       ]));
     }
+    root.appendChild(grid);
   }
   root.appendChild(h("button",{onClick:()=>GF.goto("mainMenuSlots")},["← Back"]));
   return root;
@@ -1587,6 +1886,32 @@ function screenGraveyard(){
 
 function classChainEntries(chainId){
   return Object.entries(CLASSES).filter(([id,c])=>c.chain===chainId).sort((a,b)=>a[1].tier-b[1].tier);
+}
+
+// Small square badge shown left of each path's title, marking that chain's primary
+// damage/attribute stat at a glance: a textured square (soft fill, darker border, a
+// corner dot in each corner) with a colored nature-themed glyph inside -- a rock for
+// Thornguard's Strength, and a leaf (in each chain's own hue) for the two Dexterity/
+// Intelligence-driven paths.
+function primaryAttrBadgeSvg(chainId){
+  const palette={
+    wizard:{bg:"#2a2450",border:"#6a53c9",fg:"#9d86f5"},      // blue/purple -- Intelligence
+    thornguard:{bg:"#3a2420",border:"#9c453a",fg:"#d1594a"},  // red -- Strength
+    windrider:{bg:"#1f3520",border:"#4a8a45",fg:"#6cc466"},   // green -- Dexterity
+  }[chainId]||{bg:"#2c2c2c",border:"#666",fg:"#999"};
+  const glyph=chainId==="thornguard"
+    ? `<path d="M20,8 L30,15 L27,30 L13,30 L10,15 Z" fill="${palette.fg}" stroke="${palette.border}" stroke-width="1.4" stroke-linejoin="round"/>
+       <path d="M20,8 L20,17 L27,30 M20,17 L13,30" fill="none" stroke="${palette.border}" stroke-width="1" opacity="0.55"/>`
+    : `<path d="M20,9 C29,10 31,20 25,27 C21,32 15,31 13,26 C8,18 11,10 20,9 Z" fill="${palette.fg}" stroke="${palette.border}" stroke-width="1.3" stroke-linejoin="round"/>
+       <path d="M20,10 C19,17 19,24 15,29" fill="none" stroke="${palette.border}" stroke-width="1" opacity="0.6"/>`;
+  return `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+    <rect x="2" y="2" width="36" height="36" rx="7" fill="${palette.bg}" stroke="${palette.border}" stroke-width="2"/>
+    <circle cx="7.5" cy="7.5" r="1.5" fill="${palette.border}"/>
+    <circle cx="32.5" cy="7.5" r="1.5" fill="${palette.border}"/>
+    <circle cx="7.5" cy="32.5" r="1.5" fill="${palette.border}"/>
+    <circle cx="32.5" cy="32.5" r="1.5" fill="${palette.border}"/>
+    ${glyph}
+  </svg>`;
 }
 
 // A real CSS grid (not 3 independent flex columns) so every path's Nth row -- title,
@@ -1606,13 +1931,16 @@ function screenClassProgression(){
     const col=String(i+1);
     const entries=classChainEntries(chainId);
     let r=1;
-    grid.appendChild(h("div",{style:{gridColumn:col,gridRow:String(r++),zIndex:"1",fontWeight:"bold",textAlign:"center",fontSize:"1.35em",padding:"14px 10px 2px"}},[DL.getClass(chainId).display_name+" Path"]));
-    grid.appendChild(h("div",{class:"muted",style:{gridColumn:col,gridRow:String(r++),zIndex:"1",fontSize:".82em",lineHeight:"1.4em",padding:"0 12px 8px"}},attributeSummaryLines(chainId).map(l=>h("div",{},[l]))));
+    grid.appendChild(h("div",{class:"row gap",style:{gridColumn:col,gridRow:String(r++),zIndex:"1",alignItems:"center",justifyContent:"center",padding:"16px 14px 4px"}},[
+      iconBadge(primaryAttrBadgeSvg(chainId),32),
+      h("div",{style:{fontWeight:"bold",fontSize:"1.35em"}},[DL.getClass(chainId).display_name+" Path"]),
+    ]));
+    grid.appendChild(h("ul",{class:"muted",style:{gridColumn:col,gridRow:String(r++),zIndex:"1",fontSize:".82em",lineHeight:"1.4em",margin:"0",padding:"0 22px 10px 26px"}},attributeSummaryLines(chainId).map(l=>h("li",{style:{marginBottom:"2px"}},[l]))));
     entries.forEach(([classId,c],idx)=>{
       const isFinal=!c.next_class;
-      grid.appendChild(h("div",{class:"tile row gap",style:{gridColumn:col,gridRow:String(r++),zIndex:"1",alignItems:"center",margin:"0 10px"+(isFinal?" 14px":"")}},[
-        iconBadge(PORTRAITS[classId]||"",40),
-        h("div",{style:{minWidth:"0"}},[
+      grid.appendChild(h("div",{class:"tile row",style:{gridColumn:col,gridRow:String(r++),zIndex:"1",alignItems:"center",gap:"0",margin:"0 14px"+(isFinal?" 16px":"")}},[
+        h("div",{style:{flex:"0 0 30%",display:"flex",justifyContent:"center"}},[iconBadge(PORTRAITS[classId]||"",42)]),
+        h("div",{style:{flex:"1 1 70%",minWidth:"0"}},[
           h("div",{style:{fontWeight:"bold"}},[`Tier ${c.tier}: ${c.display_name}`]),
           h("div",{class:"muted"},[c.description]),
           h("div",{class:"muted",style:{fontSize:".82em",marginTop:"2px"}},[`Starting attributes: STR ${c.base_str} · DEX ${c.base_dex} · VIT ${c.base_vit} · INT ${c.base_int}`]),
@@ -1621,6 +1949,7 @@ function screenClassProgression(){
       ]));
       if(idx<entries.length-1) grid.appendChild(h("div",{class:"muted",style:{gridColumn:col,gridRow:String(r++),zIndex:"1",textAlign:"center"}},["↓"]));
     });
+    grid.appendChild(h("div",{style:{gridColumn:col,gridRow:String(r++),zIndex:"1",padding:"0 0 14px"}},[]));
   });
   root.appendChild(grid);
   root.appendChild(h("button",{style:{marginTop:"14px"},onClick:()=>GF.goto("mainMenuSlots")},["← Back"]));
@@ -1628,6 +1957,8 @@ function screenClassProgression(){
 }
 
 /* ================= LEADERBOARD (online only) ================= */
+
+const LEADERBOARD_PAGE_SIZE=12;
 
 function screenLeaderboard(){
   const root=h("div",{});
@@ -1641,7 +1972,18 @@ function screenLeaderboard(){
   }
   const entries=Net.leaderboardCache;
   if(entries.length===0) root.appendChild(h("div",{class:"muted"},["No one has made a mark yet, be the first!"]));
-  entries.forEach((e,i)=>{
+
+  const totalPages=Math.max(1,Math.ceil(entries.length/LEADERBOARD_PAGE_SIZE));
+  if(GF.leaderboardPage==null) GF.leaderboardPage=0;
+  if(GF.leaderboardPage>=totalPages) GF.leaderboardPage=totalPages-1;
+  if(GF.leaderboardPage<0) GF.leaderboardPage=0;
+  const pageStart=GF.leaderboardPage*LEADERBOARD_PAGE_SIZE;
+  const pageEntries=entries.slice(pageStart,pageStart+LEADERBOARD_PAGE_SIZE);
+
+  if(entries.length>0) root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},[`${entries.length} player${entries.length===1?"":"s"} on the board.`]));
+
+  pageEntries.forEach((e,i)=>{
+    const idx=pageStart+i;
     const isMine=e.player===Net.username;
     const isDead=!!e.is_dead;
     const style={marginBottom:"6px",justifyContent:"space-between"};
@@ -1649,10 +1991,9 @@ function screenLeaderboard(){
     if(isMine){ style.background="#20304a"; }
     if(isDead){ style.opacity="0.6"; }
     const nameStyle={fontWeight:"bold"};
-    if(isDead){ nameStyle.textDecoration="line-through"; }
     root.appendChild(h("div",{class:"tile row",style},[
       h("div",{},[
-        h("span",{class:"muted"},[`#${i+1} `]),
+        h("span",{class:"muted"},[`#${idx+1} `]),
         isDead?h("span",{style:{marginRight:"4px"},title:"Fallen"},["🪦"]):null,
         h("span",{style:nameStyle},[`${e.character_name}`]),
         h("span",{class:"muted"},[` (${e.player})`]),
@@ -1661,6 +2002,15 @@ function screenLeaderboard(){
       h("div",{class:"muted"},[`Lv ${e.level} ${e.class_name} (Tier ${e.highest_tier_reached}), ${e.lifetime_xp||0} Experience, ${e.gold} Gold`]),
     ]));
   });
+
+  if(totalPages>1){
+    root.appendChild(h("div",{class:"row gap",style:{alignItems:"center",justifyContent:"center",marginTop:"10px"}},[
+      h("button",{disabled:GF.leaderboardPage<=0,onClick:()=>{ GF.leaderboardPage--; render(); }},["← Prev"]),
+      h("span",{class:"muted"},[`Page ${GF.leaderboardPage+1} of ${totalPages}`]),
+      h("button",{disabled:GF.leaderboardPage>=totalPages-1,onClick:()=>{ GF.leaderboardPage++; render(); }},["Next →"]),
+    ]));
+  }
+
   root.appendChild(h("button",{style:{marginTop:"10px"},onClick:()=>GF.goto("mainMenuSlots")},["← Back"]));
   return root;
 }
@@ -1706,7 +2056,7 @@ function screenTown(){
     // top-left: venture (with depth stepper merged in) + rest
     h("div",{class:"col gap"},[
       h("div",{class:"row venture-row"},[
-        h("div",{class:"panel venture-card venture-clickable",onClick:()=>{ PS.resetKillStreak(); GF.overworld_snapshot=null; GF.goto("maze",{maze_depth: ventureDepth}); }},[
+        h("div",{class:"panel venture-card venture-clickable",onClick:()=>{ PS.resetKillStreak(); GF.goto("maze",{maze_depth: ventureDepth}); }},[
           h("div",{class:"venture-title"},["🌳 Venture into the Woods"]),
           h("div",{class:"muted",style:{fontSize:".85em",marginTop:"2px"}},[`Area Level: ${ventureDepth}`]),
         ]),
@@ -1736,7 +2086,7 @@ function screenTown(){
       serviceButton("Merchant","💰",()=>GF.goto("merchant")),
       serviceButton("Auction House","📜",()=>{ Net.auctionCache=null; GF.goto("auctionHouse"); }),
       PS.gamblingUnlocked()?serviceButton("Gambling Den","🎲",()=>GF.goto("gamblingGoblin")):h("button",{disabled:true},["Gambling Den (pass a trial first)"]),
-      PS.canAttemptTrial()?serviceButton("Broken Bridge Challenge","⭐",()=>GF.goto("masterTrial")):h("button",{disabled:true},[`Broken Bridge Challenge (reach Lv ${Balance.MASTER_TRIAL_LEVEL_REQUIREMENT})`]),
+      PS.canAttemptTrial()?serviceButton("Broken Bridge Challenge","⭐",()=>GF.goto("masterTrial")):h("button",{disabled:true},[`Broken Bridge Challenge (reach Lv ${Balance.trialLevelRequirement(PS.getClassData().tier||1)})`]),
     ]),
   ]));
 
@@ -1807,6 +2157,13 @@ function generateMaze(depth){
   for(let i=0;i<cells.length;i++) if(dist[i]>best){ best=dist[i]; exitIdx=i; }
   cells[exitIdx].type="exit";
 
+  // Stronghold: one guaranteed 3x3 structure per maze (see placeStronghold), placed before
+  // the ordinary per-tile content rolls below so its 9 cells are already spoken for -- the
+  // chest/guardian cells get non-grass/dirt types so the `candidates` filter skips them
+  // naturally, and the fence corners get their own type too so they can't be re-rolled
+  // into a chest/shrine/trap on top of the stronghold.
+  const stronghold=placeStronghold({size,sizeH,cells,depth}, dist, exitIdx);
+
   // Content only ever lands on reachable, plain (grass/dirt) tiles. Trapdoors and traps
   // stay visually indistinguishable from ordinary terrain (see TILE_GLYPH/TILE_COLOR),
   // so their placement doesn't need to avoid "obvious" spots the way it once did.
@@ -1824,9 +2181,73 @@ function generateMaze(depth){
     if(roll<Balance.MAZE_CHEST_CHANCE_PER_TILE+Balance.MAZE_SHRINE_CHANCE_PER_TILE+Balance.MAZE_HERB_CHANCE_PER_TILE+Balance.MAZE_TRAPDOOR_CHANCE_PER_TILE+Balance.TRAP_CHANCE_PER_TILE){ c.type="trap"; c.wasHidden=true; }
   }
 
-  const maze={size, sizeH, cells, depth, playerIdx:0};
+  const maze={size, sizeH, cells, depth, playerIdx:0, stronghold};
   revealAround(maze,0,PS.getEyesightRadius()); // see your own starting neighborhood immediately
   return maze;
+}
+
+// Picks a 3x3 anchor point whose all 9 cells are reachable, not the start tile, and not
+// the exit tile, then carves in: center = locked chest, N/S/W/E = tough guardian monsters,
+// the 4 diagonal corners = purely decorative "broken fencing" (never a real obstacle --
+// per Gwen's explicit requirement, a boulder ever landing on a corner here could wall off
+// the only route around the chest, which would be a soft-lock bug, not a puzzle). Returns
+// null on the astronomically rare chance no valid anchor is found in 80 tries, in which
+// case this one maze simply generates without a stronghold rather than risk corrupting
+// the start/exit tiles.
+function placeStronghold(maze, dist, exitIdx){
+  const {size, sizeH, cells}=maze;
+  const idx=(x,y)=>y*size+x;
+  const dirs4=[[1,0],[-1,0],[0,1],[0,-1]];
+  let chosen=null;
+  for(let attempt=0;attempt<200;attempt++){
+    const cx=1+randi(size-2), cy=1+randi(sizeH-2);
+    const coords=[[cx,cy],[cx,cy-1],[cx,cy+1],[cx-1,cy],[cx+1,cy],[cx-1,cy-1],[cx+1,cy-1],[cx-1,cy+1],[cx+1,cy+1]];
+    const idxs=coords.map(([x,y])=>idx(x,y));
+    if(idxs.includes(0) || idxs.includes(exitIdx)) continue;
+    // Virtual reachability check: treat the whole 3x3 candidate block as walkable (it
+    // will be once carved -- chest/guardian/fence tiles are never boulders), and ask
+    // whether the start can reach ANY of its 9 cells through the existing layout. This
+    // lets the stronghold carve straight through boulders instead of requiring a lucky
+    // boulder-free 3x3 patch, which was leaving a meaningful fraction of mazes with no
+    // stronghold at all under the old all-9-cells-must-already-be-open approach.
+    const inBlock=new Set(idxs);
+    const vDist=new Array(cells.length).fill(-1);
+    vDist[0]=0; const q=[0];
+    while(q.length){
+      const cur=q.shift();
+      const curx=cur%size, cury=Math.floor(cur/size);
+      for(const [dx,dy] of dirs4){
+        const nx=curx+dx, ny=cury+dy;
+        if(nx<0||nx>=size||ny<0||ny>=sizeH) continue;
+        const ni=ny*size+nx;
+        if(vDist[ni]!==-1) continue;
+        if(cells[ni].type==="boulder" && !inBlock.has(ni)) continue;
+        vDist[ni]=vDist[cur]+1; q.push(ni);
+      }
+    }
+    if(idxs.some(i=>vDist[i]>=0)){ chosen={cx,cy}; break; }
+  }
+  if(!chosen) return null;
+  const {cx,cy}=chosen;
+  const chestIdx=idx(cx,cy);
+  const guardianCoords=[[cx,cy-1],[cx,cy+1],[cx-1,cy],[cx+1,cy]]; // N, S, W, E
+  const cornerCoords=[[cx-1,cy-1],[cx+1,cy-1],[cx-1,cy+1],[cx+1,cy+1]];
+
+  cells[chestIdx].type="stronghold_chest"; cells[chestIdx].cleared=false;
+  const guardianIdxs=[];
+  guardianCoords.forEach(([gx,gy],slot)=>{
+    const gi=idx(gx,gy);
+    const base=DL.pickRandomMonsterForArea(maze.depth||1);
+    cells[gi].type="stronghold_guardian"; cells[gi].cleared=false;
+    cells[gi].guardianMonsterId=base.id; cells[gi].guardianSlot=slot;
+    guardianIdxs.push(gi);
+  });
+  cornerCoords.forEach(([fx,fy])=>{ cells[idx(fx,fy)].type="stronghold_fence"; });
+
+  return {chestIdx, guardianIdxs, guardianDefeated:[false,false,false,false], opened:false};
+}
+function strongholdChestUnlocked(maze){
+  return !!(maze.stronghold && maze.stronghold.guardianDefeated.some(Boolean));
 }
 
 function ensureMaze(depth){
@@ -1836,8 +2257,10 @@ function ensureMaze(depth){
 
 // Trap and trapdoor tiles are deliberately absent here, they render using the cell's
 // baseTerrain instead (see screenMaze), so they're indistinguishable from ordinary ground.
-const TILE_GLYPH={start:"🏕",exit:"⬇",chest:"🎁",shrine:"✨",herb:"🌿",boulder:"🪨",grass:"",dirt:""};
-const TILE_COLOR={start:"#2a4a2a",exit:"#3a3a6a",chest:"#5a4a1a",shrine:"#3a5a5a",herb:"#2a4a2a",boulder:"#3a3a34",grass:"#274a1e",dirt:"#4a3a26"};
+const TILE_GLYPH={start:"🏕",exit:"⬇",chest:"🎁",shrine:"✨",herb:"🌿",boulder:"🪨",grass:"",dirt:"",
+  stronghold_chest:"🔒",stronghold_guardian:"💀",stronghold_fence:"🪵"};
+const TILE_COLOR={start:"#2a4a2a",exit:"#3a3a6a",chest:"#5a4a1a",shrine:"#3a5a5a",herb:"#2a4a2a",boulder:"#3a3a34",grass:"#274a1e",dirt:"#4a3a26",
+  stronghold_chest:"#5a4a1a",stronghold_guardian:"#6a1e1e",stronghold_fence:"#4a3a26"};
 const HIDDEN_TILE_TYPES=["trap","trapdoor"];
 
 function isAdjacent4(x1,y1,x2,y2){
@@ -1885,7 +2308,8 @@ function screenMaze(){
       for(let x=0;x<maze.size;x++){
         const i=y*maze.size+x; const cell=maze.cells[i];
         const isPlayer=maze.playerIdx===i;
-        const isWalkable=!isPlayer && cell.type!=="boulder" && isAdjacent4(x,y,px,py);
+        const chestLocked=cell.type==="stronghold_chest" && !strongholdChestUnlocked(maze);
+        const isWalkable=!isPlayer && cell.type!=="boulder" && !chestLocked && isAdjacent4(x,y,px,py);
         const isKnown=cell.discovered || cell.type==="exit" || cell.type==="start";
         const hidden=!!cell.wasHidden || HIDDEN_TILE_TYPES.includes(cell.type);
         const displayType=HIDDEN_TILE_TYPES.includes(cell.type)?cell.baseTerrain:cell.type;
@@ -1908,7 +2332,7 @@ function screenMaze(){
   root.appendChild(h("div",{class:"maze-wrap"},[gridArea,
     h("div",{class:"side-panel"},[
       h("div",{class:"col",style:{gap:"2px"}},[
-        h("div",{class:"muted",style:{lineHeight:"1.5em"}},["Use the arrow keys to explore the wilderness. Wild creatures lure at you from the tall grass, reach the exit (⬇) before your stamina runs out."]),
+        h("div",{class:"muted",style:{lineHeight:"1.5em"}},["Use the arrow keys to explore the wilderness. Wild creatures lure at you from the tall grass, reach the exit (⬇) before your stamina runs out. Every area hides a Stronghold too: a locked chest (🔒) guarded on 4 sides by tough guardians (💀), beat one to reach the chest, but you'll need a Stronghold Key to actually open it."]),
       ]),
       h("div",{class:"row gap"},[
         h("button",{disabled:!PS.canUseConsumable(PS.bestAvailableConsumable("health")),onClick:()=>{ PS.useConsumable(PS.bestAvailableConsumable("health")); autosave(); render(); }},["Use Health Potion"]),
@@ -2001,6 +2425,16 @@ function onStepMaze(maze,targetIdx){
     GF.goto("chestEncounter",{maze_depth:maze.depth, chest_cell_idx:targetIdx});
     return;
   }
+  if(cell.type==="stronghold_guardian" && !cell.cleared){
+    GF.goto("combat",{maze_depth:maze.depth, pending_monster_id:cell.guardianMonsterId, pending_guardian_cell_idx:targetIdx});
+    return;
+  }
+  if(cell.type==="stronghold_chest" && !cell.cleared){
+    // Only reachable at all once isWalkable's chestLocked check has cleared (see
+    // screenMaze/keydown handler), i.e. at least one guardian is already down.
+    GF.goto("strongholdChest",{maze_depth:maze.depth, stronghold_chest_cell_idx:targetIdx});
+    return;
+  }
 
   // Monsters only lurk in tall grass, dirt paths and other special tiles are always safe.
   if(cell.type==="grass" && Math.random()<Balance.ENCOUNTER_CHANCE_PER_STEP){
@@ -2023,6 +2457,7 @@ window.addEventListener("keydown",(e)=>{
   if(nx<0||nx>=maze.size||ny<0||ny>=maze.sizeH) return;
   const ni=ny*maze.size+nx;
   if(maze.cells[ni].type==="boulder") return;
+  if(maze.cells[ni].type==="stronghold_chest" && !strongholdChestUnlocked(maze)) return;
   onStepMaze(maze,ni);
 });
 
@@ -2030,11 +2465,17 @@ window.addEventListener("keydown",(e)=>{
 /* ================= COMBAT ================= */
 
 function ensureCombat(){
-  if(!GF.combat || GF.combat.monster_id!==GF.pending_monster_id){
+  const guardianCellIdx=GF.pending_guardian_cell_idx!=null?GF.pending_guardian_cell_idx:null;
+  if(!GF.combat || GF.combat.monster_id!==GF.pending_monster_id || GF.combat.guardianCellIdx!==guardianCellIdx){
     const base=DL.getMonster(GF.pending_monster_id);
     const streakMult=Balance.killStreakStatMult(PS.kill_streak);
-    const maxHp=Balance.monsterHp(base.base_hp,GF.maze_depth)*streakMult;
-    GF.combat={monster_id:base.id, name:base.name, hp:maxHp, maxHp, dmgMin:Balance.monsterDamage(base.base_damage_min,GF.maze_depth)*streakMult, dmgMax:Balance.monsterDamage(base.base_damage_max,GF.maze_depth)*streakMult, xp:Balance.monsterXpReward(base.base_xp,GF.maze_depth), goldMin:base.gold_min, goldMax:base.gold_max, loot_table:base.loot_table, log:[]};
+    // Stronghold guardians (v0.12): same per-area-level damage as an ordinary monster,
+    // but Balance.STRONGHOLD_GUARDIAN_HP_MULT (3x) more HP, per Gwen's spec: "extra
+    // strong mobs... damage quite equal to regular mobs".
+    const isGuardian=guardianCellIdx!=null;
+    const hpMult=(isGuardian?Balance.STRONGHOLD_GUARDIAN_HP_MULT:1)*streakMult;
+    const maxHp=Balance.monsterHp(base.base_hp,GF.maze_depth)*hpMult;
+    GF.combat={monster_id:base.id, name:isGuardian?`Guardian ${base.name}`:base.name, hp:maxHp, maxHp, dmgMin:Balance.monsterDamage(base.base_damage_min,GF.maze_depth)*streakMult, dmgMax:Balance.monsterDamage(base.base_damage_max,GF.maze_depth)*streakMult, xp:Balance.monsterXpReward(base.base_xp,GF.maze_depth), goldMin:base.gold_min, goldMax:base.gold_max, loot_table:base.loot_table, log:[], isGuardian, guardianCellIdx};
   }
   return GF.combat;
 }
@@ -2059,14 +2500,23 @@ function endCombatDeath(){
   const monsterName=GF.combat.name;
   const cd=PS.getClassData();
   const announcePayload={character_name:PS.character_name, level:PS.level, class_name:cd.display_name||PS.class_id, cause:`been slain by a ${monsterName}`};
-  const dead=PS.handleDeath(`Slain by a ${monsterName}`);
+  const result=PS.handleDeath(`Slain by a ${monsterName}`);
   GF.combat=null;
-  if(dead){
+  if(result.dead){
     setToast("Your journey ends here. A new entry has been added to the Graveyard.");
     Net.announceDeath(announcePayload);
     GF.goto("mainMenuSlots");
   }
-  else { setToast("You were defeated. You wake up back at camp, having lost some gold."); PS.saveGame(); GF.goto("town"); }
+  else {
+    // v0.12: spell out exactly what the death penalty took, so losing gear on death
+    // doesn't read as a bug -- see PS.applyDeathPenalty/_rollDeathItemLosses.
+    const p=result.penalty;
+    let msg=`You were defeated and wake up back at camp, having lost ${p.goldLost} gold.`;
+    if(p.itemsLost.length>0) msg+=` You also lost: ${p.itemsLost.join(", ")}.`;
+    setToast(msg);
+    PS.saveGame();
+    GF.goto("town");
+  }
 }
 
 function screenCombat(){
@@ -2101,6 +2551,13 @@ function screenCombat(){
     if(crit) dmg*=Balance.CRIT_MULTIPLIER;
     cb.hp-=dmg;
     combatLog(cb,`You hit the ${cb.name} for ${Math.round(dmg)} damage${crit?" (Critical!)":""}.`);
+    // v0.12: every attack with a recognized weapon type equipped counts toward that
+    // type's permanent proficiency (see PS.registerWeaponHit/getEquippedWeaponType).
+    const weaponType=PS.getEquippedWeaponType();
+    if(weaponType){
+      const skillResult=PS.registerWeaponHit(weaponType);
+      if(skillResult.leveledUp) combatLog(cb,`Your ${IF.WEAPON_TYPE_LABELS[weaponType]} proficiency reaches level ${skillResult.newLevel}!`);
+    }
     if(cb.hp<=0){
       cb.hp=0;
       const streakMult=Balance.killStreakLootMult(PS.kill_streak);
@@ -2111,6 +2568,23 @@ function screenCombat(){
       const lootMsg=grantLoot(cb.loot_table, streakMult);
       cb.defeated=true;
       cb.result_text=`${cb.name} defeated! +${Math.round(cb.xp*streakMult)} XP, +${Math.round(gold)} gold. ${lootMsg}`;
+      if(cb.isGuardian){
+        // v0.12: beating a Stronghold guardian opens the direct path to that Stronghold's
+        // chest (any 1 of the 4 is enough), and has its own independent 5% chance to drop
+        // a Stronghold Key -- the only way to actually unlock the chest once you reach it.
+        const maze=GF.overworld_snapshot;
+        if(maze){
+          const cell=maze.cells[cb.guardianCellIdx];
+          if(cell){ cell.cleared=true; }
+          if(maze.stronghold && cell && cell.guardianSlot!=null) maze.stronghold.guardianDefeated[cell.guardianSlot]=true;
+        }
+        if(Math.random()<Balance.STRONGHOLD_KEY_DROP_CHANCE){
+          PS.addConsumable("stronghold_key",1);
+          cb.result_text+=" It drops a Stronghold Key!";
+        } else {
+          cb.result_text+=" The path to the Stronghold's chest is open, if you can find a key.";
+        }
+      }
       autosave();
       render();
       return;
@@ -2136,7 +2610,7 @@ function screenCombat(){
     h("button",{class:"play",onClick:playerTurn},["Attack"]),
     h("button",{disabled:!PS.canUseConsumable(PS.bestAvailableConsumable("health")),onClick:()=>{ PS.useConsumable(PS.bestAvailableConsumable("health")); autosave(); render(); }},["Use Health Potion"]),
     h("button",{disabled:!PS.canUseConsumable(PS.bestAvailableConsumable("stamina")),onClick:()=>{ PS.useConsumable(PS.bestAvailableConsumable("stamina")); autosave(); render(); }},["Use Stamina Potion"]),
-    h("button",{class:"danger",onClick:()=>{ GF.combat=null; setToast("You flee back toward camp."); GF.goto("maze",{maze_depth:GF.maze_depth}); }},["Flee"]),
+    h("button",{class:"danger",onClick:()=>{ GF.combat=null; PS.saveGame(); setToast("You flee back to camp, but remember your way through these woods."); GF.goto("town"); }},["Flee"]),
   ]));
   return root;
 }
@@ -2186,6 +2660,84 @@ function screenChest(){
   return root;
 }
 
+/* ================= STRONGHOLD CHEST ================= */
+// The reward for clearing a Stronghold: reachable only once >=1 of the 4 guardians is
+// down (see strongholdChestUnlocked/onStepMaze), and only actually openable with a
+// Stronghold Key (see the guardian kill-reward roll in screenCombat's playerTurn).
+
+function screenStrongholdChest(){
+  const root=h("div",{});
+  const maze=GF.overworld_snapshot;
+  const cellIdx=GF.stronghold_chest_cell_idx;
+  root.appendChild(h("h2",{},["A locked Stronghold chest"]));
+  root.appendChild(h("div",{class:"lore"},["Iron-bound and half-buried in roots. Whatever the guardians were protecting, it's still in here."]));
+  const t=toastBox(); if(t) root.appendChild(t);
+  root.appendChild(statHeader());
+
+  const keyCount=PS.consumables["stronghold_key"]||0;
+  if(keyCount<=0){
+    root.appendChild(h("div",{class:"panel"},["This chest is sealed tight, you'll need a Stronghold Key to open it. Guardians have a small chance to drop one when defeated."]));
+    root.appendChild(h("div",{class:"row"},[
+      h("button",{onClick:()=>{ GF.goto("maze",{maze_depth:GF.maze_depth}); }},["Leave it"]),
+    ]));
+    return root;
+  }
+
+  root.appendChild(h("div",{class:"panel"},[`You have ${keyCount} Stronghold Key${keyCount===1?"":"s"}. Use one to open this chest?`]));
+  root.appendChild(h("div",{class:"row"},[
+    h("button",{class:"play",onClick:()=>{
+      PS._removeConsumableOne("stronghold_key");
+      const tier=Balance.itemTierForAreaLevel(GF.maze_depth);
+      const msgs=[];
+
+      const gearCount=randIntRange(Balance.STRONGHOLD_CHEST_GEAR_COUNT_MIN,Balance.STRONGHOLD_CHEST_GEAR_COUNT_MAX);
+      let gearFound=0, gearLeftBehind=0;
+      for(let i=0;i<gearCount;i++){
+        const inst=IF.generate(tier,"",pick(["Rare","Epic"]));
+        if(PS.addGear(inst)) gearFound++; else gearLeftBehind++;
+      }
+      msgs.push(`${gearFound} rare/epic item${gearFound===1?"":"s"} of gear`+(gearLeftBehind>0?` (${gearLeftBehind} left behind, bags full)`:""));
+
+      const goldFound=randIntRange(Balance.STRONGHOLD_CHEST_GOLD_MIN,Balance.STRONGHOLD_CHEST_GOLD_MAX);
+      PS.addGold(goldFound); msgs.push(`${goldFound} gold`);
+
+      const herbTotal=randIntRange(Balance.STRONGHOLD_CHEST_HERBS_MIN,Balance.STRONGHOLD_CHEST_HERBS_MAX);
+      for(let i=0;i<herbTotal;i++) PS.addHerb(DL.pickHerbForNode(),1);
+      msgs.push(`${herbTotal} herbs`);
+
+      const potionTotal=randIntRange(Balance.STRONGHOLD_CHEST_POTIONS_MIN,Balance.STRONGHOLD_CHEST_POTIONS_MAX);
+      let healthGiven=0, staminaGiven=0;
+      for(let i=0;i<potionTotal;i++){ if(Math.random()<0.5){ PS.addConsumable("health_potion",1); healthGiven++; } else { PS.addConsumable("stamina_potion",1); staminaGiven++; } }
+      msgs.push(`${healthGiven} health & ${staminaGiven} stamina potions`);
+
+      if(Math.random()<Balance.STRONGHOLD_CHEST_SCROLL_CHANCE){
+        const scroll=pick(["scroll_of_challenge_1","scroll_of_challenge_2","scroll_of_challenge_3"]);
+        PS.addConsumable(scroll,1); msgs.push(DL.getItem(scroll).name);
+      }
+      if(Math.random()<Balance.STRONGHOLD_CHEST_EYESIGHT_CHANCE){
+        PS.addConsumable("elixir_of_eyesight",1); msgs.push("an Elixir of Eyesight");
+      }
+      if(Math.random()<Balance.STRONGHOLD_CHEST_BAG_CHANCE){
+        const bagIds=Object.keys(ITEMS).filter(id=>ITEMS[id].type==="bag");
+        const bagId=pick(bagIds);
+        const result=PS.equipBag(bagId);
+        msgs.push(result.success?ITEMS[bagId].name:`${ITEMS[bagId].name} (couldn't fit, bag rack full)`);
+      }
+
+      if(maze){
+        const cell=maze.cells[cellIdx];
+        if(cell) cell.cleared=true;
+        if(maze.stronghold) maze.stronghold.opened=true;
+      }
+      PS.saveGame();
+      setToast("The chest creaks open! You find: "+msgs.join(", ")+".");
+      GF.goto("maze",{maze_depth:GF.maze_depth});
+    }},["Unlock with Key"]),
+    h("button",{onClick:()=>{ GF.goto("maze",{maze_depth:GF.maze_depth}); }},["Leave it"]),
+  ]));
+  return root;
+}
+
 /* ================= HERB GATHERING ================= */
 
 function ensureHerbNode(){
@@ -2210,10 +2762,14 @@ function screenHerbEncounter(){
     h("button",{onClick:()=>{
       node.ticks_done++;
       if(node.ticks_done>=node.ticks_required){
-        PS.addHerb(node.herb_id,1);
+        // v0.12: herb nodes are rarer than they used to be and cost a few clicks to work,
+        // so the payout was bumped from a flat 1 up to a healthy 1-12 per node to make the
+        // detour worth it.
+        const qty=randIntRange(1,12);
+        PS.addHerb(node.herb_id,qty);
         if(GF.overworld_snapshot) GF.overworld_snapshot.cells[node.cell_idx].cleared=true;
         GF.herbNode=null; autosave();
-        setToast(`You gather ${herb.name}.`);
+        setToast(`You gather ${qty}x ${herb.name}.`);
         GF.goto("maze",{maze_depth:GF.maze_depth});
         return;
       }
@@ -2253,7 +2809,7 @@ function attributeSummaryLines(chain){
   if(chain==="windrider"){
     return [
       "Strength: no effect for this path.",
-      "Dexterity: +1 damage per point.",
+      "Dexterity: +1 damage per point, and +1% Block Chance per point, a chance to take 0 damage from a hit.",
       "Vitality: on every level-up, permanently adds that much HP and Stamina.",
       "Intelligence: no effect for this path.",
     ];
@@ -2297,6 +2853,29 @@ function attributesPanel(){
   ]);
 }
 
+// v0.12: weapon-type proficiency card, sits between the top stat header and the
+// Attributes/Gear Bonuses row on the Character Sheet. Shows every weapon type's
+// permanent progress (0/100 and level 0 if you've never swung one), regardless of
+// what's currently equipped -- see PS.getWeaponSkillProgress/getEquippedWeaponType.
+function skillsBonusPanel(){
+  const equippedType=PS.getEquippedWeaponType();
+  const rows=IF.WEAPON_TYPE_LIST.map(t=>{
+    const p=PS.getWeaponSkillProgress(t);
+    const isEquipped=equippedType===t;
+    const pct=p.hitsForNextLevel>0?(p.hitsIntoLevel/p.hitsForNextLevel*100):100;
+    return h("div",{class:"row",style:{justifyContent:"space-between",alignItems:"center",marginBottom:"6px",gap:"10px"}},[
+      h("div",{style:{minWidth:"70px",fontWeight:isEquipped?"bold":"normal"}},[IF.WEAPON_TYPE_LABELS[t]+(isEquipped?" ★":"")]),
+      h("div",{style:{flex:"1"}},[bar(pct,"bar-xp",true)]),
+      h("div",{class:"muted",style:{minWidth:"130px",textAlign:"right"}},[`Lv ${p.level} (${p.hitsIntoLevel}/${p.hitsForNextLevel})`]),
+    ]);
+  });
+  return h("div",{class:"panel",style:{marginTop:"12px",marginBottom:"12px"}},[
+    h("div",{style:{fontWeight:"bold",marginBottom:"8px"}},["Skill Bonuses"]),
+    ...rows,
+    h("div",{class:"muted",style:{marginTop:"8px",fontStyle:"italic"}},["Permanent. You can only get better -- weapon skill progress survives Broken Bridge promotions and season resets."]),
+  ]);
+}
+
 function gearBonusPanel(){
   const lines=PS.getGearBonusLines();
   return h("div",{class:"panel",style:{marginTop:"12px",marginBottom:"12px",height:"100%"}},[
@@ -2321,9 +2900,10 @@ function equipSlotTile(slot){
 
 function screenInventory(){
   const root=h("div",{});
-  root.appendChild(h("h2",{},["Inventory"]));
+  root.appendChild(h("h2",{},["Character Sheet"]));
   const t=toastBox(); if(t) root.appendChild(t);
   root.appendChild(statHeader());
+  root.appendChild(skillsBonusPanel());
   root.appendChild(h("div",{class:"row",style:{alignItems:"stretch",gap:"14px"}},[
     h("div",{style:{flex:"0 0 50%",maxWidth:"50%",minWidth:"0"}},[attributesPanel()]),
     h("div",{style:{flex:"1",minWidth:"0"}},[gearBonusPanel()]),
@@ -2545,7 +3125,7 @@ function screenVault(){
       class:"tile"+(entry?" tooltip":""),
       style:{width:"32px",height:"32px",padding:"0",display:"flex",alignItems:"center",justifyContent:"center",cursor:entry?"pointer":"default"},
       "data-tip":label||undefined,
-      onClick:entry?()=>{ if(confirm(`Withdraw ${label} back to your backpack?`)) vaultWithdraw(i); }:null,
+      onClick:entry?()=>{ askConfirm(`Withdraw ${label} back to your backpack?`,()=>vaultWithdraw(i),{confirmLabel:"Withdraw",danger:false}); }:null,
     },[icon]));
   }
   root.appendChild(grid);
@@ -2592,7 +3172,7 @@ function screenMerchant(){
   const grid=h("div",{class:"grid3"});
   for(const itemId in ITEMS){
     const item=ITEMS[itemId]; if(item.type==="bag") continue;
-    const price=Math.round((item.sell_value||1)*Balance.VENDOR_MARKUP);
+    const price=Balance.itemBuyPrice(item);
     grid.appendChild(h("div",{class:"tile"},[
       h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId), h("div",{style:{fontWeight:"bold"}},[item.name])]),
       h("div",{class:"muted"},[`${price} gold`]),
@@ -2865,7 +3445,7 @@ function screenMasterTrial(){
         autosave();
         Net.announceTrialResult({character_name:PS.character_name, level:levelBefore, class_name:nameBefore, result:"passed", new_class_name:DL.getClass(PS.class_id).display_name});
         setToast(result.final_tier?`You have mastered the ${c.chain} path completely!`:`You are promoted to ${DL.getClass(PS.class_id).display_name}!`);
-        GF.goto("town"); return;
+        GF.ventureDepth=1; GF.goto("town"); return;
       }
       render();
     } else {
@@ -2898,7 +3478,7 @@ function screenMasterTrial(){
   root.appendChild(plankCols);
 
   root.appendChild(h("div",{class:"row",style:{marginTop:"10px"}},[
-    h("button",{onClick:()=>{ GF.trialJustFailed=false; GF.trialFailedPlankIndex=null; GF.goto("town"); }},[failed?"Return to Town":"← Retreat to Town"]),
+    h("button",{onClick:()=>{ GF.trialJustFailed=false; GF.trialFailedPlankIndex=null; if(failed) GF.ventureDepth=1; GF.goto("town"); }},[failed?"Return to Town":"← Retreat to Town"]),
   ]));
   return root;
 }
@@ -2933,7 +3513,7 @@ function screenAdminPanel(){
     h("button",{onClick:()=>{for(let i=0;i<10;i++)PS.addXp(PS.xp_to_next);PS.saveGame();render();}},["+10 levels"]),
     h("button",{onClick:()=>{PS.level=Balance.LEVEL_CAP;PS.xp=0;PS.xp_to_next=Balance.xpRequiredForLevel(PS.level);PS.current_hp=PS.getMaxHp();PS.saveGame();render();}},["Set level to cap"]),
     h("button",{onClick:()=>{PS.addGear(IF.generate(Balance.itemTierForAreaLevel(PS.level)));PS.saveGame();render();}},["Spawn random gear"]),
-    h("button",{class:"danger",onClick:()=>{ if(confirm("Wipe this save?")){ if(PS.current_slot>=0) deleteSave(PS.current_slot); GF.goto("mainMenuSlots"); } }},["Wipe this save"]),
+    h("button",{class:"danger",onClick:()=>{ askConfirm("Wipe this save?",()=>{ if(PS.current_slot>=0) deleteSave(PS.current_slot); GF.goto("mainMenuSlots"); },{confirmLabel:"Wipe it"}); }},["Wipe this save"]),
   ]));
 
   root.appendChild(h("h3",{style:{marginTop:"18px"}},["Leaderboard Moderation"]));
@@ -2968,15 +3548,16 @@ function screenAdminPanel(){
             ]),
             h("div",{class:"muted"},[`Lv ${entry.level} ${entry.class_name} (Tier ${entry.highest_tier_reached}), ${entry.lifetime_xp} Experience, ${entry.gold} Gold, updated ${new Date(entry.updated_at).toLocaleString()}`]),
           ]),
-          h("button",{class:"danger",onClick:async ()=>{
-            if(!confirm(`Remove "${entry.character_name}" (${entry.player}) from the leaderboard? This cannot be undone.`)) return;
-            try{
-              await Net.adminDeleteLeaderboardEntry(entry.account_id,entry.character_name,GF.admin_token||"");
-              GF.admin_leaderboard_cache=GF.admin_leaderboard_cache.filter(x=>!(x.account_id===entry.account_id && x.character_name===entry.character_name));
-            }catch(err){
-              GF.admin_leaderboard_error=err.message||"Could not delete that entry.";
-            }
-            render();
+          h("button",{class:"danger",onClick:()=>{
+            askConfirm(`Remove "${entry.character_name}" (${entry.player}) from the leaderboard? This cannot be undone.`,async ()=>{
+              try{
+                await Net.adminDeleteLeaderboardEntry(entry.account_id,entry.character_name,GF.admin_token||"");
+                GF.admin_leaderboard_cache=GF.admin_leaderboard_cache.filter(x=>!(x.account_id===entry.account_id && x.character_name===entry.character_name));
+              }catch(err){
+                GF.admin_leaderboard_error=err.message||"Could not delete that entry.";
+              }
+              render();
+            },{confirmLabel:"Delete"});
           }},["Delete"]),
         ]));
       }
@@ -2984,6 +3565,65 @@ function screenAdminPanel(){
   }
 
   root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
+  return root;
+}
+
+/* ================= CHANGELOG ================= */
+
+// Kept brief on purpose -- players don't need the internal blow-by-blow, just the
+// highlights per version, most recent first.
+const CHANGELOG=[
+  { version:"v0.12", notes:[
+    "Maze Strongholds: every venture now hides a guarded 3x3 vault with a locked chest worth fighting for.",
+    "Necromancer renamed to Summoner.",
+    "Reworked softcore death penalty: lose some gold and possibly a few items, but you're always told exactly what happened.",
+    "Herb gathering now rewards a lot more per node.",
+    "New damage breakdown (base vs. gear bonus) shown on your character everywhere.",
+    "Leaderboard pagination, and the Graveyard now actually looks like one.",
+    "Global chat announces logins and new characters.",
+    "Windrider gains Block Chance from Dexterity too, matching the other paths.",
+    "Custom in-app confirmation popups replace browser prompts throughout.",
+    "Lots of visual polish: styled inputs/checkboxes, Player Classes redesign, fixed bugs.",
+  ]},
+  { version:"v0.11", notes:[
+    "Broken Bridge Challenge reworked with plank choices and clearer odds.",
+    "New Storage Vault for stashing gear and items safely.",
+    "Attributes rebalanced evenly across all three class chains.",
+    "Diablo-style equipment layout and a collapsible Attributes panel.",
+  ]},
+  { version:"v0.10", notes:[
+    "Account system reworked: username/password login, no more Play Offline.",
+    "New Stat Points / Attributes system (Strength, Dexterity, Vitality, Intelligence).",
+    "Two new tier-5 classes added to the Wizard and Windrider paths.",
+  ]},
+  { version:"v0.9", notes:[
+    "Real Auction House with player-to-player trading.",
+    "Gambling Goblin returns as a pay-for-a-random-item vendor.",
+    "Monsters now only lurk in tall grass; traps and trapdoors stay hidden.",
+  ]},
+  { version:"v0.8", notes:[
+    "Wandrian goes online: accounts, server-side saves, global chat, and a real leaderboard.",
+    "Hardcore mode and the Graveyard for fallen characters.",
+    "Bigger 20x20 mazes with fog-of-war and keyboard navigation.",
+  ]},
+  { version:"v0.7", notes:[
+    "Multi-character system and a proper class-progression path.",
+    "Interactive herb gathering, chests become their own mini-encounter.",
+    "First pass of town/service artwork and the Wandrian logo.",
+  ]},
+];
+
+function screenChangelog(){
+  const root=h("div",{});
+  root.appendChild(h("h2",{},["Changelog"]));
+  root.appendChild(h("div",{class:"lore"},["A brief history of Wandrian's woods, season by season."]));
+  for(const entry of CHANGELOG){
+    root.appendChild(h("div",{class:"panel",style:{marginBottom:"10px"}},[
+      h("div",{style:{fontWeight:"bold",marginBottom:"6px"}},[entry.version]),
+      h("ul",{style:{margin:"0",paddingLeft:"18px"}},entry.notes.map(n=>h("li",{},[n]))),
+    ]));
+  }
+  root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>{ GF.goto(GF._preChangelogScreen||"town"); }},["← Back"]));
   return root;
 }
 
@@ -3002,6 +3642,7 @@ const SCREENS={
   maze: screenMaze,
   combat: screenCombat,
   chestEncounter: screenChest,
+  strongholdChest: screenStrongholdChest,
   herbEncounter: screenHerbEncounter,
   inventory: screenInventory,
   blacksmith: screenBlacksmith,
@@ -3012,6 +3653,7 @@ const SCREENS={
   gamblingGoblin: screenGamblingGoblin,
   masterTrial: screenMasterTrial,
   adminPanel: screenAdminPanel,
+  changelog: screenChangelog,
 };
 
 /* ---------- Campfire regen tick: gradual HP/Stamina recovery while resting in camp ---------- */

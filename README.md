@@ -27,6 +27,13 @@ the vault's contents are a client-trusted full-replace payload (see the section 
 a player editing their own vault client-side to fabricate items is the same pre-existing
 class of issue as editing their own character save, not a new cross-account hole.
 
+As of v0.12, logging in and creating a new character each post a short system message to
+global chat ("X has entered the woods." / "Nature has given birth to a new Y named Z."),
+via the same `broadcastSystemMessage()` helper already used for trial-result and death
+announcements. The new-character one is its own endpoint, `POST /api/announce/created`
+(`requireAuth`, takes `character_name`/`class_name` in the body), called by the client
+right after a character is created.
+
 What this phase does **not** do yet: stop a player from opening devtools on their own
 browser and editing the character JSON before it's sent to `PUT /api/characters/:slot`
 (gold, level, items, all still client-computed and just handed to the server as-is).

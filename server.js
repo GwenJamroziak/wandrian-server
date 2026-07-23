@@ -272,6 +272,10 @@ app.post("/api/login", (req, res) => {
   }
   const token = createSession(account.id);
   res.json({ token, username: account.username });
+  // v0.12: a real (server-verified, not self-reported) global chat ping so the rest of
+  // the woods knows someone just signed in. broadcastSystemMessage is defined further
+  // down the file but hoisted as a function declaration, so it's callable here.
+  broadcastSystemMessage(`${account.username} has entered the woods.`);
 });
 
 app.get("/api/characters", requireAuth, (req, res) => {
@@ -503,6 +507,15 @@ app.post("/api/announce/death", requireAuth, (req, res) => {
     return res.status(400).json({ error: "Invalid announcement." });
   }
   broadcastSystemMessage(`${character_name} (Lv ${level || 1} ${class_name}) has ${cause}.`);
+  res.json({ ok: true });
+});
+
+app.post("/api/announce/created", requireAuth, (req, res) => {
+  const { character_name, class_name } = req.body || {};
+  if (!character_name || !class_name) {
+    return res.status(400).json({ error: "Invalid announcement." });
+  }
+  broadcastSystemMessage(`Nature has given birth to a new ${class_name} named ${character_name}.`);
   res.json({ ok: true });
 });
 
