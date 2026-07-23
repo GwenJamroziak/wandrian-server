@@ -155,7 +155,7 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 /* ---------- DATA ---------- */
 
 // base_str/base_dex/base_vit/base_int: level-1 attribute values for a fresh character
-// (or a character freshly promoted into this class, since a Broken Bridge Challenge
+// (or a character freshly promoted into this class, since a Broken Bridge Trial
 // promotion resets level and attributes to the new class's own level-1 baseline). Each
 // chain has one specialization stat that's clearly highest for that chain: Thornguard
 // leans Strength+Vitality, Windrider leans Dexterity, Wizard leans Intelligence, see
@@ -360,7 +360,7 @@ const PLUS_CIRCLE_SVG = `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/
 const CHAT_BUBBLE_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>`;
 const BOULDER_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M4 16c-1.2-1.6-1-4 .8-5.4 .3-2.4 2.3-4.2 4.7-4.2 .9 0 1.7.3 2.4.7 .9-1.1 2.3-1.8 3.8-1.8 2.7 0 4.9 2.2 4.9 4.9 0 .3 0 .6-.1.9 1.4.8 2.4 2.3 2.4 4.1 0 2.6-2.1 4.6-4.6 4.6H6.9C5.3 19.8 4 18.5 4 16z" fill="#6b6b64" stroke="#3a3a34" stroke-width="1"/></svg>`;
 const BONFIRE_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2c1 3-2 4-2 7a2 2 0 0 0 4 0c1 1 1.5 2.5 1.5 4a5.5 5.5 0 0 1-11 0C4.5 8 8 7 12 2z" fill="#ff9d3d"/><path d="M12 8c.4 1.4-1 2-1 3.5a1 1 0 0 0 2 0c.4.5.6 1.2.6 2a1.6 1.6 0 0 1-3.2 0c0-2.3 1-3.5 1.6-5.5z" fill="#ffdd9a"/><ellipse cx="12" cy="20.5" rx="6" ry="1.3" fill="#4a3018" opacity="0.6"/></svg>`;
-// A single generic footstep glyph used on every Broken Bridge Challenge plank button --
+// A single generic footstep glyph used on every Broken Bridge Trial plank button --
 // with 2 to 5 planks per step now (see Balance.bridgePlankCount), "Top"/"Bottom" text
 // labels stopped making sense, so every plank just shows this icon instead.
 const FOOTSTEP_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><ellipse cx="10" cy="6" rx="2.6" ry="3.4" transform="rotate(-18 10 6)"/><ellipse cx="14" cy="17" rx="2.6" ry="3.4" transform="rotate(12 14 17)"/></svg>`;
@@ -499,7 +499,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.14.1-web",
+  GAME_VERSION:"v0.15-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   NPC_BLACKSMITH_NAME:"Grondar Emberhand", NPC_ALCHEMIST_NAME:"Maren Thistlebrew", NPC_MERCHANT_NAME:"Cassius Wraithcoin",
@@ -558,7 +558,7 @@ const Balance = {
   BASE_INVENTORY_SLOTS:16, MAX_BAG_SLOTS:3, BAG_BUY_GOLD_PER_CAPACITY:40, BAG_CRAFT_MATERIALS_PER_CAPACITY:3,
   VENDOR_MARKUP:3,
   SALVAGE_MATERIALS_PER_SLOT:3, REROLL_MATERIAL_COST_MULT:2, SELL_GOLD_PER_TIER:8, SELL_GOLD_PER_SLOT:4,
-  // Broken Bridge Challenge (v0.11 rework): one continuous 10-step crossing per
+  // Broken Bridge Trial (v0.11 rework): one continuous 10-step crossing per
   // promotion attempt (no more sub-"stages"). The number of planks hidden at each step
   // -- and so the per-step pass chance -- scales with the tier being climbed FROM:
   // tier1->2 is a 2-plank row (50%/step), tier2->3 a 3-plank row (33.33%/step), tier3->4
@@ -904,7 +904,7 @@ const Net = {
   graveyardCache:null,
   leaderboardCache:null, leaderboardCacheHardcore:null,
   auctionCache:null,
-  vaultCache:null, vaultCapacity:200,
+  vaultCache:null, vaultCapacity:200, vaultVersion:0,
   chatMessages:[], privateMessages:[], chatSocket:null,
   apiBase(){
     const params=new URLSearchParams(location.search);
@@ -952,7 +952,7 @@ const Net = {
   logout(){
     this.online=false; this.token=null; this.username=null; this.cache=null;
     this.graveyardCache=null; this.leaderboardCache=null; this.leaderboardCacheHardcore=null;
-    this.auctionCache=null; this.vaultCache=null; this.chatMessages=[]; this.privateMessages=[];
+    this.auctionCache=null; this.vaultCache=null; this.vaultVersion=0; this.chatMessages=[]; this.privateMessages=[];
     if(this.chatSocket){ try{this.chatSocket.close();}catch(e){} this.chatSocket=null; }
     this.clearPersistedSession();
   },
@@ -1011,16 +1011,30 @@ const Net = {
   },
   // Storage Vault (v0.11): one shared 200-slot chest per account, so every character
   // slot on the account can deposit into and withdraw from the same stash server-side.
+  // v0.15 BUG FIX: saveVault() now sends the `version` this client last saw, and the
+  // server rejects the write with a 409 if some OTHER session (another of your own
+  // characters, another tab/device) already changed the vault since then -- see the
+  // server's /api/vault comment for the full dupe exploit this closes.
   async fetchVault(){
     const res=await fetch(this.apiBase()+"/api/vault",{headers:this.authHeaders()});
-    const json=await res.json().catch(()=>({items:[],capacity:200}));
+    const json=await res.json().catch(()=>({items:[],capacity:200,version:0}));
     this.vaultCache=json.items||[];
     this.vaultCapacity=json.capacity||200;
+    this.vaultVersion=json.version||0;
   },
   async saveVault(items){
-    const res=await fetch(this.apiBase()+"/api/vault",{method:"PUT",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({items})});
+    const res=await fetch(this.apiBase()+"/api/vault",{method:"PUT",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({items, version:this.vaultVersion})});
     const json=await res.json().catch(()=>({}));
+    if(res.status===409){
+      // Someone else's vault change landed first -- the server hands back its real
+      // current items/capacity/version here so the caller can resync instead of retrying
+      // blind (which would just race again).
+      const err=new Error(json.error||"The vault changed elsewhere, refresh and try again.");
+      err.conflict=true; err.items=json.items||[]; err.capacity=json.capacity||this.vaultCapacity; err.version=json.version!=null?json.version:this.vaultVersion;
+      throw err;
+    }
     if(!res.ok) throw new Error(json.error||"Could not save the vault.");
+    if(json.version!=null) this.vaultVersion=json.version;
     return json;
   },
   async fetchAuction(){
@@ -1501,7 +1515,20 @@ const PS = {
     if(this.equipped_bags.length>=Balance.MAX_BAG_SLOTS) return {success:false,reason:`Your bag rack is full (${this.equipped_bags.length}/${Balance.MAX_BAG_SLOTS}), unequip a bag first.`};
     this.equipped_bags.push(itemId); return {success:true};
   },
-  unequipBag(itemId){ const idx=this.equipped_bags.indexOf(itemId); if(idx!==-1) this.equipped_bags.splice(idx,1); },
+  // v0.15: unequipping a bag can no longer silently overflow the backpack -- if removing
+  // it would drop capacity below how many gear items are currently carried, the bag stays
+  // on (returns false) so the UI can explain why instead of quietly discarding items or
+  // leaving gear_instances over-capacity in save data.
+  wouldOverflowWithoutBag(itemId){
+    if(!this.equipped_bags.includes(itemId)) return false;
+    const capacityWithout=this.getInventoryCapacity()-(DL.getItem(itemId).capacity||0);
+    return this.getInventoryUsed()>capacityWithout;
+  },
+  unequipBag(itemId){
+    if(this.wouldOverflowWithoutBag(itemId)) return false;
+    const idx=this.equipped_bags.indexOf(itemId); if(idx!==-1) this.equipped_bags.splice(idx,1);
+    return true;
+  },
   buyBag(itemId){
     const item=DL.getItem(itemId); if(!item.name||item.type!=="bag") return {success:false,reason:"Unknown bag."};
     const price=Balance.bagBuyPrice(item.capacity||0);
@@ -1522,6 +1549,30 @@ const PS = {
   // (see Balance.tierLevelRequirement) -- you can always still wear a tier below what
   // your level allows, you just can't equip AHEAD of your level anymore.
   canEquipGear(inst){ return this.level>=Balance.tierLevelRequirement(inst.tier); },
+  // v0.15: which equip slot key a not-yet-owned gear instance WOULD go into if auto-
+  // equipped right now, or null if there's nowhere open for it (matches the ring1/ring2
+  // fallback logic equipGear() uses for an item already in the backpack). Kept separate
+  // from equipGear() since this has to work on an item that isn't in gear_instances yet.
+  _autoEquipTargetSlot(inst){
+    const genSlot=inst.slot;
+    if(genSlot==="ring") return !this.equipped["ring1"] ? "ring1" : (!this.equipped["ring2"] ? "ring2" : null);
+    if(!IF.EQUIPPED_SLOT_KEYS.includes(genSlot)) return null;
+    return this.equipped[genSlot] ? null : genSlot;
+  },
+  canAutoEquip(inst){ return this.canEquipGear(inst) && !!this._autoEquipTargetSlot(inst); },
+  // v0.15: used by loot drops and purchases (Auction House buys, the Gambling Goblin) --
+  // if the matching equip slot is empty (and the character's level allows this tier), the
+  // item goes straight onto the character instead of taking up a backpack slot. Falls back
+  // to the normal addGear() bag-add otherwise (slot occupied, tier too high, or backpack
+  // full). Same true/false "did it fit somewhere" return as addGear().
+  addGearAutoEquip(inst){
+    if(this.canAutoEquip(inst)){
+      this.equipped[this._autoEquipTargetSlot(inst)]=inst;
+      this.current_hp=Math.min(this.current_hp,this.getMaxHp());
+      return true;
+    }
+    return this.addGear(inst);
+  },
   equipGear(instanceId){
     const idx=this.findGearIndex(instanceId); if(idx===-1) return;
     const inst=this.gear_instances[idx];
@@ -1620,7 +1671,7 @@ const PS = {
       attributes:this.attributes,unspent_stat_points:this.unspent_stat_points,
       bonus_hp_from_attributes:this.bonus_hp_from_attributes,bonus_stamina_from_attributes:this.bonus_stamina_from_attributes,
       weapon_skills:this.weapon_skills,
-      // v0.13: Broken Bridge Challenge progress (which planks are already known-safe per
+      // v0.13: Broken Bridge Trial progress (which planks are already known-safe per
       // step, and which have already been tried-and-failed at the current step) must
       // survive a save/reload, otherwise the "remembers the faulty plank" guarantee only
       // held within a single browser session -- see getTrialProgress()/screenMasterTrial().
@@ -1657,7 +1708,7 @@ const PS = {
     // anything -- a save with no weapon_skills yet (pre-v0.12) just starts everyone at 0.
     this.weapon_skills=parsed.weapon_skills||{};
     this.ensureWeaponSkills();
-    // v0.13: Broken Bridge Challenge memory and bonfire kindling state, both must survive
+    // v0.13: Broken Bridge Trial memory and bonfire kindling state, both must survive
     // a save/reload -- see getTrialProgress()/screenMasterTrial() and the Kindle the
     // Bonfire button in screenTown().
     this.trial_progress=parsed.trial_progress||{};
@@ -1751,8 +1802,12 @@ function topBar(){
 
 function chatLogEntries(){
   const entries=[];
-  for(const m of Net.chatMessages) entries.push({t:new Date(m.created_at).getTime(), node:h("div",{},[h("span",{class:"muted"},[`[${new Date(m.created_at).toLocaleTimeString()}] `]), h("span",{style:{fontWeight:"bold"}},[m.username+": "]), m.message])});
-  for(const m of Net.privateMessages) entries.push({t:new Date(m.created_at).getTime(), node:h("div",{class:"chat-private-msg"},[h("span",{class:"muted"},[`[${new Date(m.created_at).toLocaleTimeString()}] `]), h("span",{style:{fontWeight:"bold"}},["System: "]), m.message])});
+  // v0.15: server-generated announcements (logins, trial results, deaths, new characters
+  // -- anything broadcastSystemMessage() sends, tagged username==="System" server-side)
+  // no longer get a "System: " prefix. They read fine standing on their own, and the
+  // prefix was just noise on every single one of them.
+  for(const m of Net.chatMessages) entries.push({t:new Date(m.created_at).getTime(), node:h("div",{},[h("span",{class:"muted"},[`[${new Date(m.created_at).toLocaleTimeString()}] `]), m.username!=="System"?h("span",{style:{fontWeight:"bold"}},[m.username+": "]):null, m.message])});
+  for(const m of Net.privateMessages) entries.push({t:new Date(m.created_at).getTime(), node:h("div",{class:"chat-private-msg"},[h("span",{class:"muted"},[`[${new Date(m.created_at).toLocaleTimeString()}] `]), m.message])});
   entries.sort((a,b)=>a.t-b.t);
   return entries.map(e=>e.node);
 }
@@ -1780,6 +1835,22 @@ function chatBody(closeBtn){
 function chatPanel(){
   if(!GF.chatOpen || !Net.online) return null;
   return h("div",{class:"chat-panel"},[chatBody(()=>{ GF.chatOpen=false; render(); })]);
+}
+
+// v0.15: swaps ONLY the #stat-header-panel node (see statHeader()) in place, without
+// touching anything else on the page. Used by the once-a-second regen tick so that a
+// player mid-click/mid-scroll on some OTHER button (like the Character Sheet's "<- Back")
+// never has that button yanked out from under them by a periodic full re-render. Returns
+// false if the panel isn't found (e.g. current screen doesn't render one), so the caller
+// can fall back to a full render() instead of silently doing nothing.
+function refreshStatHeaderInPlace(){
+  const el=document.getElementById("stat-header-panel");
+  if(!el || !el.parentNode) return false;
+  // Every REGEN_ACTIVE_SCREENS screen renders statHeader() with no args (only the maze
+  // view uses the {compact:true} variant, and maze is never a regen-active screen), so
+  // regenerating the plain, non-compact panel here always matches what's already on screen.
+  el.parentNode.replaceChild(statHeader(), el);
+  return true;
 }
 
 function render(){
@@ -1846,6 +1917,26 @@ function pushSystemChatMessage(message){
    ticks) instead of on a fixed timer, so idle sessions don't spam the server with no-op saves. ---------- */
 function autosave(){ if(PS.current_slot>=0) PS.saveGame(); }
 window.addEventListener("beforeunload",()=>{ if(PS.current_slot>=0) PS.saveGame(); });
+
+// v0.15 SEVERE BUG FIX: a player hit an unrecoverable progression setback after using the
+// BROWSER's own Back button, and re-logging in didn't fix it. Root cause: this whole app
+// is one script execution that never touches browser history (GF.goto() only ever
+// mutates in-memory state and re-renders, it never calls history.pushState), so hitting
+// Back/Forward doesn't navigate within the game at all -- it makes the BROWSER restore an
+// entirely different, EARLIER page instance from its bfcache (back/forward cache): a
+// frozen snapshot of this exact script's memory (PS, GF, and any still-running
+// setInterval timers included) from some earlier point in the session, exactly as it
+// looked back then. Timers frozen mid-flight (like the once-a-second regen tick above)
+// resume ticking the moment that stale snapshot comes back, and its very next
+// `if(changed){ PS.saveGame(); ... }` silently overwrites the server's current, further-
+// progressed save with that OLD, frozen character state -- a real, silent rollback that
+// looks exactly like "progress just vanished" and explains why logging back in didn't
+// help (the corrupted save had already been written to the server by that point).
+// The fix: force a full, fresh reload any time the browser hands back a bfcache-restored
+// page (the standard `pageshow` + `event.persisted` signal for this), so the game only
+// ever runs from a script execution that just freshly fetched the account's latest save,
+// never a stale frozen one left over from before a Back/Forward navigation.
+window.addEventListener("pageshow",(e)=>{ if(e.persisted) location.reload(); });
 
 const BREW_CRAFT_MS=2000;
 function startBrew(recipe){
@@ -1975,7 +2066,15 @@ function statHeader(opts={}){
   const compact=!!opts.compact;
   const c=PS.getClassData();
   const buffIcons=activePotionBuffIcons();
-  return h("div",{class:"panel",style:{marginBottom:compact?"0":"14px"}},[
+  // v0.15 BUG FIX: this panel gets a stable id so the once-a-second regen tick (see the
+  // setInterval near the bottom of the file) can swap JUST this node in place instead of
+  // calling the full render() (app.innerHTML="" + rebuild of the ENTIRE screen). That full
+  // teardown-and-rebuild, happening every second on any screen where HP/Stamina wasn't
+  // full, was silently swallowing clicks anywhere on the page -- most noticeably the
+  // Character Sheet's "<- Back" button at the bottom, which took a beat to reach by
+  // scrolling, tester report: "the back button... is not responding". See
+  // refreshStatHeaderInPlace() below.
+  return h("div",{id:"stat-header-panel",class:"panel",style:{marginBottom:compact?"0":"14px"}},[
     h("div",{class:"row",style:{justifyContent:"space-between",alignItems:"flex-start"}},[
       h("div",{},[
         h("div",{style:{fontWeight:"bold"}},[PS.character_name, PS.hardcore?h("span",{style:{color:"#e07a7a"}},[" [Hardcore]"]):null]),
@@ -2031,7 +2130,7 @@ function screenAuthGate(){
   root.appendChild(h("div",{class:"panel",style:{maxWidth:"460px"}},[
     h("div",{style:{fontWeight:"bold",marginBottom:"6px",fontSize:"1.1em"}},["Play Online"]),
     h("div",{class:"muted",style:{marginBottom:"10px",lineHeight:"1.5em"}},[
-      "Wandrian requires an account so your progress lives on the server, not just in this browser. Log in (or create a free account in seconds) to: pick one of three class paths and climb through 5 tiers each via the Broken Bridge Challenge, explore a fresh maze every descent with boulders, hidden traps, chests, shrines and herb gathering, gear up through the Blacksmith, Alchemist, Merchant and Auction House, chat with everyone else online, and race for the top of the leaderboard, hardcore deaths and all.",
+      "Wandrian requires an account so your progress lives on the server, not just in this browser. Log in (or create a free account in seconds) to: pick one of three class paths and climb through 5 tiers each via the Broken Bridge Trial, explore a fresh maze every descent with boulders, hidden traps, chests, shrines and herb gathering, gear up through the Blacksmith, Alchemist, Merchant and Auction House, chat with everyone else online, and race for the top of the leaderboard, hardcore deaths and all.",
     ]),
     h("div",{class:"row"},[
       h("button",{style:{flex:"1"},onClick:()=>GF.goto("login")},["Log In"]),
@@ -2292,7 +2391,7 @@ function primaryAttrBadgeSvg(chainId){
 function screenClassProgression(){
   const root=h("div",{});
   root.appendChild(h("h2",{},["Player Classes"]));
-  root.appendChild(h("div",{class:"lore"},["Every hero begins along one of three paths below. Passing that class's Broken Bridge Challenge promotes you to the next tier down the same column. Whoever is first to pass the final trial of the final tier wins the season, at that moment, every player's level and class progress resets for a fresh season, but gear, gold, and other (future) skill progress carry over."]));
+  root.appendChild(h("div",{class:"lore"},["Every hero begins along one of three paths below. Passing that class's Broken Bridge Trial promotes you to the next tier down the same column. Whoever is first to pass the final trial of the final tier wins the season, at that moment, every player's level and class progress resets for a fresh season, but gear, gold, and other (future) skill progress carry over."]));
   const chainIds=["wizard","thornguard","windrider"];
   const grid=h("div",{class:"class-grid"});
   chainIds.forEach((chainId,i)=>{
@@ -2334,7 +2433,7 @@ const LEADERBOARD_PAGE_SIZE=12;
 function screenLeaderboard(){
   const root=h("div",{});
   root.appendChild(h("h2",{},["Leaderboard"]));
-  root.appendChild(h("div",{class:"lore"},["The road is long, and in the end, it's only with yourself. But still, here is a list of players outperforming you."]));
+  root.appendChild(h("div",{class:"lore"},["The race is long, and in the end, it's only with yourself.", h("br",{}), "But still, here's a list of players outperforming you."]));
   if(Net.leaderboardCache===null||Net.leaderboardCache===undefined){
     root.appendChild(h("div",{class:"muted"},["Loading..."]));
     Net.fetchLeaderboard().then(render).catch(()=>{ setToast("Could not load the leaderboard."); render(); });
@@ -2358,7 +2457,8 @@ function screenLeaderboard(){
     const isMine=e.player===Net.username;
     const isDead=!!e.is_dead;
     const style={marginBottom:"6px",justifyContent:"space-between"};
-    if(e.hardcore){ style.borderColor="#e0b23d"; style.borderWidth="2px"; }
+    // v0.15: dropped the gold border box around hardcore rows -- the gold [Hardcore] text
+    // itself is enough of a signal, the border was extra visual noise.
     if(isMine){ style.background="#20304a"; }
     if(isDead){ style.opacity="0.6"; }
     const nameStyle={fontWeight:"bold"};
@@ -2369,7 +2469,9 @@ function screenLeaderboard(){
         h("span",{style:nameStyle},[`${e.character_name}`]),
         h("span",{class:"muted"},[` (${e.player})`]),
         e.hardcore?h("span",{style:{color:"#e0b23d",fontWeight:"bold"}},[" [Hardcore]"]):null,
-        isDead?h("span",{class:"muted"},[" [Dead]"]):null,
+        // v0.15: [Dead] now matches [Hardcore]'s exact color/weight/size instead of the
+        // smaller muted style, so the two tags read as a matched pair.
+        isDead?h("span",{style:{color:"#e0b23d",fontWeight:"bold"}},[" [Dead]"]):null,
       ]),
       h("div",{class:"muted"},[`Lv ${e.level} ${e.class_name} (Tier ${e.highest_tier_reached}), ${e.lifetime_xp||0} Experience, ${e.gold} Gold`]),
     ]));
@@ -2501,7 +2603,7 @@ function screenTown(){
       serviceButton("Merchant","💰",()=>GF.goto("merchant")),
       serviceButton("Auction House","📜",()=>{ Net.auctionCache=null; GF.goto("auctionHouse"); }),
       PS.gamblingUnlocked()?serviceButton("Gambling Den","🎲",()=>GF.goto("gamblingGoblin")):h("button",{disabled:true},["Gambling Den (pass a trial first)"]),
-      PS.canAttemptTrial()?serviceButton("Broken Bridge Challenge","⭐",()=>GF.goto("masterTrial")):h("button",{disabled:true},[`Broken Bridge Challenge (reach Lv ${Balance.trialLevelRequirement(PS.getClassData().tier||1)})`]),
+      PS.canAttemptTrial()?serviceButton("Broken Bridge Trial","⭐",()=>GF.goto("masterTrial")):h("button",{disabled:true},[`Broken Bridge Trial (reach Lv ${Balance.trialLevelRequirement(PS.getClassData().tier||1)})`]),
     ]),
   ]));
 
@@ -2805,7 +2907,13 @@ function onStepMaze(maze,targetIdx){
   const cell=maze.cells[targetIdx];
   maze.playerIdx=targetIdx; cell.discovered=true; cell.visited=true;
   PS.spendStamina(Balance.STAMINA_COST_PER_STEP);
-  PS.tickXpBuff();
+  // v0.15 BUG FIX: tickXpBuff() used to fire here, on every single STEP taken -- meaning
+  // a 20-charge XP shrine buff got burned down by ordinary walking, often draining to 0
+  // (or close to it) before the player had even fought 20 real battles, sometimes before
+  // fighting anything at all. The buff is supposed to last 20 BATTLES (see the "Experience
+  // shrine active: bonus XP for N more battles" tooltip and Balance.SHRINE_XP_BUFF_
+  // ENCOUNTERS), so it must only tick where a fight is actually kicked off (below, and at
+  // the Stronghold guardian encounter), not on every footstep.
   tickEyesightPotion();
   revealAround(maze,targetIdx,PS.getEyesightRadius());
   if(PS.current_stamina<=0){
@@ -2864,6 +2972,7 @@ function onStepMaze(maze,targetIdx){
     return;
   }
   if(cell.type==="stronghold_guardian" && !cell.cleared){
+    PS.tickXpBuff();
     GF.goto("combat",{maze_depth:maze.depth, pending_monster_id:cell.guardianMonsterId, pending_guardian_cell_idx:targetIdx});
     return;
   }
@@ -2876,6 +2985,7 @@ function onStepMaze(maze,targetIdx){
 
   // Monsters only lurk in tall grass, dirt paths and other special tiles are always safe.
   if(cell.type==="grass" && Math.random()<Balance.ENCOUNTER_CHANCE_PER_STEP){
+    PS.tickXpBuff();
     const monster=DL.pickRandomMonsterForArea(maze.depth);
     // Bug fix (v0.12): pending_guardian_cell_idx MUST be explicitly cleared here. GF.goto
     // only Object.assign()s the keys it's given, so a leftover guardian-cell index from a
@@ -2932,7 +3042,10 @@ function grantLoot(lootTable, mult){
   if(loot.type==="gear"){
     const tier=Balance.rollItemTier(GF.maze_depth);
     const inst=IF.generate(tier);
-    if(PS.addGear(inst)) return `Found ${IF.displayName(inst)}!`;
+    // v0.15: auto-equip straight onto the character if the matching slot is empty
+    // (and the level requirement allows it), instead of always taking a backpack slot.
+    const willAutoEquip=PS.canAutoEquip(inst);
+    if(PS.addGearAutoEquip(inst)) return willAutoEquip?`Found and equipped ${IF.displayName(inst)}!`:`Found ${IF.displayName(inst)}!`;
     return `Found gear but your bags are full, it was left behind.`;
   }
   if(loot.type==="consumable"){ PS.addConsumable(loot.item_id,1); return `Found a ${DL.getItem(loot.item_id).name}.`; }
@@ -3187,7 +3300,7 @@ function screenStrongholdChest(){
       let gearFound=0, gearLeftBehind=0;
       for(let i=0;i<gearCount;i++){
         const inst=IF.generate(tier,"",pick(["Rare","Epic"]));
-        if(PS.addGear(inst)) gearFound++; else gearLeftBehind++;
+        if(PS.addGearAutoEquip(inst)) gearFound++; else gearLeftBehind++;
       }
       msgs.push(`${gearFound} rare/epic item${gearFound===1?"":"s"} of gear`+(gearLeftBehind>0?` (${gearLeftBehind} left behind, bags full)`:""));
 
@@ -3402,6 +3515,42 @@ function equipSlotTile(slot){
   ]);
 }
 
+// v0.15: rarity-to-border-color lookup for the backpack's grid tiles below -- reuses the
+// exact hex values the rarity-* CSS classes already use for text color (see the
+// .rarity-Common/.rarity-Uncommon/etc rules), just applied as a border instead so a
+// glance at the grid tells you an item's rarity the way Vault's plain grid never could.
+const RARITY_BORDER_COLORS={Common:"#9a9686",Uncommon:"#e8e4d8",Rare:"#5a9ae0",Epic:"#e0c94a",Legendary:"#d9902f"};
+
+// v0.15: the Character Sheet's backpack, redesigned into the same numbered-slot grid
+// style as the Storage Vault (see screenVault()) instead of a scrolling row-per-item
+// list. Capacity varies with equipped bags (PS.getInventoryCapacity()), so the grid
+// simply grows/shrinks slot count to match -- gaining a bag adds empty slots at the end,
+// unequipping one removes them (see PS.unequipBag's new capacity guard below).
+function backpackGearGrid(){
+  const capacity=PS.getInventoryCapacity();
+  const grid=h("div",{style:{display:"grid",gridTemplateColumns:"repeat(8,1fr)",gap:"4px",marginBottom:"10px",maxWidth:"360px"}});
+  for(let i=0;i<capacity;i++){
+    const inst=PS.gear_instances[i];
+    if(!inst){
+      grid.appendChild(h("div",{class:"tile",style:{width:"38px",height:"38px",padding:"0"}}));
+      continue;
+    }
+    const canEquip=PS.canEquipGear(inst);
+    const borderColor=RARITY_BORDER_COLORS[inst.rarity]||"var(--border)";
+    grid.appendChild(h("div",{
+      class:"tile tooltip",
+      style:{width:"38px",height:"38px",padding:"0",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",border:`2px solid ${borderColor}`},
+      "data-tip":`${IF.tooltipText(inst)}\n${IF.categoryLabel(inst)}`,
+      onClick:()=>{
+        if(!canEquip){ setToast(`Requires Level ${Balance.tierLevelRequirement(inst.tier)} to equip this (you are Lv ${PS.level}).`); render(); return; }
+        const label=PS.wouldSwap(inst)?"Swap":"Equip";
+        askConfirm(`${label} ${IF.displayName(inst)}?`,()=>{ PS.equipGear(inst.instance_id); autosave(); render(); },{confirmLabel:label,danger:false});
+      },
+    },[gearIcon(inst,26)]));
+  }
+  return grid;
+}
+
 function screenInventory(){
   const root=h("div",{});
   root.appendChild(h("div",{class:"row",style:{justifyContent:"space-between",alignItems:"center"}},[
@@ -3426,19 +3575,24 @@ function screenInventory(){
   root.appendChild(eqDoll);
 
   root.appendChild(h("h3",{},[`Backpack (${PS.getInventoryUsed()}/${PS.getInventoryCapacity()})`]));
-  root.appendChild(h("div",{class:"muted",style:{marginBottom:"6px"}},["Visit the Blacksmith to salvage gear, or the Merchant to sell it."]));
-  if(PS.gear_instances.length===0) root.appendChild(h("div",{class:"muted"},["Empty. Go find some loot in the woods."]));
-  for(const inst of [...PS.gear_instances]){
-    const canEquip=PS.canEquipGear(inst);
-    root.appendChild(gearRow(inst,[
-      h("button",{disabled:!canEquip,title:canEquip?"":`Requires Level ${Balance.tierLevelRequirement(inst.tier)} to equip (you are Lv ${PS.level})`,onClick:()=>{PS.equipGear(inst.instance_id);autosave();render();}},[PS.wouldSwap(inst)?"Swap":"Equip"]),
-    ]));
-  }
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"6px"}},["Click a slot to equip or swap. Visit the Blacksmith to salvage gear, or the Merchant to sell it."]));
+  root.appendChild(backpackGearGrid());
 
   root.appendChild(h("h3",{},["Bags"]));
   root.appendChild(h("div",{class:"muted"},[`Equipped bags: ${PS.equipped_bags.length}/${Balance.MAX_BAG_SLOTS}`]));
   for(const bagId of [...PS.equipped_bags]){
-    root.appendChild(h("div",{class:"row",style:{marginBottom:"4px"}},[DL.getItem(bagId).name, h("button",{onClick:()=>{PS.unequipBag(bagId);PS.saveGame();render();}},["Unequip"])]));
+    const wouldOverflow=PS.wouldOverflowWithoutBag(bagId);
+    root.appendChild(h("div",{class:"row",style:{marginBottom:"4px"}},[
+      DL.getItem(bagId).name,
+      h("button",{
+        disabled:wouldOverflow,
+        title:wouldOverflow?`Unequipping this would leave you carrying more gear than your remaining capacity allows -- salvage, sell, or store some gear first.`:"",
+        onClick:()=>{
+          if(!PS.unequipBag(bagId)){ setToast("Can't unequip that bag -- you're carrying more gear than the remaining capacity would allow."); render(); return; }
+          PS.saveGame(); render();
+        },
+      },["Unequip"]),
+    ]));
   }
 
   root.appendChild(h("h3",{},["Consumables"]));
@@ -3583,8 +3737,28 @@ function vaultFindEmptySlot(){
   for(let i=0;i<capacity;i++) if(!used.has(i)) return i;
   return -1;
 }
-function vaultSync(){
-  Net.saveVault(Net.vaultCache||[]).catch(e=>setToast("Could not sync the vault with the server: "+e.message));
+// v0.15 BUG FIX (item duplication): every vault mutation here still updates Net.vaultCache
+// and the player's own PS inventory OPTIMISTICALLY (immediately, before the server
+// confirms), same as before -- that part of the UX is unchanged. What's new is `restoreFn`:
+// if the server's version check rejects this write (another of your characters/sessions
+// changed the vault first), Net.vaultCache/vaultCapacity/vaultVersion get resynced to the
+// server's real current state, AND restoreFn undoes whatever this action optimistically
+// took out of (or added to) the player's own gear/consumables/herbs, since it never
+// actually landed. Without this, the old code would just silently keep the optimistic
+// local mutation forever even after the server rejected it -- that mismatch between "what
+// the client thinks happened" and "what the server actually has" is exactly how the
+// reported dupe (and its mirror-image, item loss) happened.
+function vaultSync(restoreFn){
+  Net.saveVault(Net.vaultCache||[]).catch(e=>{
+    if(e && e.conflict){
+      Net.vaultCache=e.items; Net.vaultCapacity=e.capacity; Net.vaultVersion=e.version;
+      if(restoreFn) restoreFn();
+      setToast("The vault changed elsewhere (maybe another of your characters) since you last looked here -- refreshed to its current contents. Please try again.");
+    } else {
+      setToast("Could not sync the vault with the server: "+e.message);
+    }
+    PS.saveGame(); render();
+  });
 }
 function vaultDepositGear(instanceId){
   const slot=vaultFindEmptySlot();
@@ -3594,7 +3768,7 @@ function vaultDepositGear(instanceId){
   const inst=PS.gear_instances[idx];
   PS.gear_instances.splice(idx,1);
   Net.vaultCache.push({slot,kind:"gear",inst});
-  PS.saveGame(); vaultSync(); render();
+  PS.saveGame(); vaultSync(()=>{ PS.addGear(inst); }); render();
 }
 function vaultDepositConsumable(itemId){
   const qty=PS.consumables[itemId]||0; if(qty<=0) return;
@@ -3606,7 +3780,7 @@ function vaultDepositConsumable(itemId){
     Net.vaultCache.push({slot,kind:"consumable",item_id:itemId,qty});
   }
   delete PS.consumables[itemId];
-  PS.saveGame(); vaultSync(); render();
+  PS.saveGame(); vaultSync(()=>{ PS.addConsumable(itemId,qty); }); render();
 }
 function vaultDepositHerb(herbId){
   const qty=PS.herbs[herbId]||0; if(qty<=0) return;
@@ -3618,21 +3792,27 @@ function vaultDepositHerb(herbId){
     Net.vaultCache.push({slot,kind:"herb",herb_id:herbId,qty});
   }
   delete PS.herbs[herbId];
-  PS.saveGame(); vaultSync(); render();
+  PS.saveGame(); vaultSync(()=>{ PS.addHerb(herbId,qty); }); render();
 }
 function vaultWithdraw(slotIndex){
   const idx=(Net.vaultCache||[]).findIndex(e=>e.slot===slotIndex);
   if(idx===-1) return;
   const entry=Net.vaultCache[idx];
+  let restoreFn=null;
   if(entry.kind==="gear"){
     if(!PS.addGear(entry.inst)){ setToast("Your backpack is full."); return; }
+    // Undo just this one instance if the withdraw turns out not to have landed --
+    // NOT a blind pop(), in case something else got added to the backpack in between.
+    restoreFn=()=>{ const i=PS.findGearIndex(entry.inst.instance_id); if(i!==-1) PS.gear_instances.splice(i,1); };
   } else if(entry.kind==="consumable"){
     PS.addConsumable(entry.item_id,entry.qty);
+    restoreFn=()=>{ PS.consumables[entry.item_id]=Math.max(0,(PS.consumables[entry.item_id]||0)-entry.qty); if(PS.consumables[entry.item_id]<=0) delete PS.consumables[entry.item_id]; };
   } else if(entry.kind==="herb"){
     PS.addHerb(entry.herb_id,entry.qty);
+    restoreFn=()=>{ PS.herbs[entry.herb_id]=Math.max(0,(PS.herbs[entry.herb_id]||0)-entry.qty); if(PS.herbs[entry.herb_id]<=0) delete PS.herbs[entry.herb_id]; };
   }
   Net.vaultCache.splice(idx,1);
-  PS.saveGame(); vaultSync(); render();
+  PS.saveGame(); vaultSync(restoreFn); render();
 }
 
 function screenVault(){
@@ -3856,7 +4036,8 @@ function screenAuctionHouse(){
             try{
               await Net.buyAuctionListing(listing.id,{character_name:PS.character_name, buyer_slot:PS.current_slot});
               PS.gold-=listing.price;
-              if(listing.type==="gear") PS.addGear(listing.item);
+              // v0.15: auto-equip an Auction House purchase if the matching slot is empty.
+              if(listing.type==="gear") PS.addGearAutoEquip(listing.item);
               else if(listing.type==="consumable") PS.addConsumable(listing.item_key,listing.quantity);
               else if(listing.type==="herb") PS.addHerb(listing.item_key,listing.quantity);
               PS.saveGame();
@@ -3884,7 +4065,7 @@ function screenGamblingGoblin(){
   root.appendChild(statHeader());
 
   if(!PS.gamblingUnlocked()){
-    root.appendChild(h("div",{class:"lore"},["The goblin only deals with travelers who've proven themselves at the Broken Bridge Challenge. Come back once you've passed your first trial."]));
+    root.appendChild(h("div",{class:"lore"},["The goblin only deals with travelers who've proven themselves at the Broken Bridge Trial. Come back once you've passed your first trial."]));
     root.appendChild(h("button",{onClick:()=>GF.goto("town")},["← Back to Town"]));
     return root;
   }
@@ -3905,7 +4086,7 @@ function screenGamblingGoblin(){
     } else {
       if(!GF.gambleReveal.granted){
         GF.gambleReveal.granted=true;
-        if(!PS.addGear(GF.gambleReveal.item)) setToast("Your backpack is full, the item slips from your hands and is lost!");
+        if(!PS.addGearAutoEquip(GF.gambleReveal.item)) setToast("Your backpack is full, the item slips from your hands and is lost!");
         autosave();
       }
       const inst=GF.gambleReveal.item;
@@ -3963,7 +4144,7 @@ function screenMasterTrial(){
   const c=PS.getClassData();
   const nextId=DL.getNextClassId(PS.class_id);
   const currentTier=c.tier||1;
-  root.appendChild(h("h2",{},["Broken Bridge Challenge"]));
+  root.appendChild(h("h2",{},["Broken Bridge Trial"]));
   if(!nextId){
     root.appendChild(h("div",{class:"lore"},[`${c.display_name} is the final form of your path. The elders have no further plank bridge to offer, whatever comes next for a champion of the season is still being prepared. Not yet implemented, check back in a future update.`]));
     root.appendChild(h("button",{onClick:()=>GF.goto("town")},["← Back to Town"]));
@@ -4003,7 +4184,15 @@ function screenMasterTrial(){
     const passed=remaining<=1 ? true : Math.random()<(1/remaining);
     if(passed){
       progress.discoveredSides.push(plankIndex);
-      delete progress.stepFailedPlanks[stepIdx];
+      // v0.15 BUG FIX: this used to `delete progress.stepFailedPlanks[stepIdx]` right here,
+      // wiping out the record of every plank that broke at this step the moment you passed
+      // it -- so the bridge view only ever showed the single green (safe) plank for a
+      // completed step, never the red ones you'd already learned were bad. Gwen's report:
+      // "would it be possible to also keep the red plank in view". Keeping this entry
+      // around (instead of deleting it) means the render loop below, which reads
+      // progress.stepFailedPlanks[i] for every step including completed ones, keeps
+      // showing the full red-and-green history of that step permanently -- exactly the
+      // "overview of where and how many times they failed" Gwen asked for.
       autosave();
       if(progress.discoveredSides.length>=rows){
         const nameBefore=c.display_name, levelBefore=PS.level;
@@ -4117,7 +4306,7 @@ function screenAdminPanel(){
               h("span",{style:{fontWeight:"bold"}},[entry.character_name]),
               h("span",{class:"muted"},[` (${entry.player}, acct #${entry.account_id})`]),
               entry.hardcore?h("span",{style:{color:"#e0b23d",fontWeight:"bold"}},[" [Hardcore]"]):null,
-              entry.is_dead?h("span",{class:"muted"},[" [Dead]"]):null,
+              entry.is_dead?h("span",{style:{color:"#e0b23d",fontWeight:"bold"}},[" [Dead]"]):null,
             ]),
             h("div",{class:"muted"},[`Lv ${entry.level} ${entry.class_name} (Tier ${entry.highest_tier_reached}), ${entry.lifetime_xp} Experience, ${entry.gold} Gold, updated ${new Date(entry.updated_at).toLocaleString()}`]),
           ]),
@@ -4146,6 +4335,17 @@ function screenAdminPanel(){
 // Kept brief on purpose -- players don't need the internal blow-by-blow, just the
 // highlights per version, most recent first.
 const CHANGELOG=[
+  { version:"v0.15", notes:[
+    "SEVERE fix: navigating with the browser's Back button could resurrect a stale, cached copy of the page (including its old save data) and silently overwrite your progress. The page now reloads itself fresh whenever it's restored this way.",
+    "Fixed the Character Sheet's Back button becoming unresponsive after a while -- a once-a-second background timer was quietly rebuilding the entire screen and swallowing clicks.",
+    "Fixed the Storage Vault: two characters on the same account could duplicate an item by both withdrawing or depositing it at the same time. The server now rejects any save that's out of date instead of silently overwriting the real state.",
+    "Fixed the Experience shrine buff draining away on ordinary footsteps instead of lasting the full 20 battles it's meant to.",
+    "The Broken Bridge Trial (renamed from its old \"Challenge\" name) now keeps every plank you've already learned is faulty in view permanently, even after you've passed that step -- a full picture of your run, good and bad.",
+    "Gear now auto-equips straight onto an empty matching slot when looted, bought, or gambled for, instead of always taking up a backpack slot first.",
+    "The backpack is now a numbered grid, just like the Storage Vault, and its size grows or shrinks with whatever bags you have equipped. A bag can no longer be unequipped if doing so would leave you over capacity.",
+    "Leaderboard: dropped the gold border box around Hardcore rows (the gold text alone reads fine), and [Dead] now matches [Hardcore]'s exact styling. Added a line break to the subtext for readability.",
+    "Global chat's system announcements no longer say \"System:\" in front of every message -- they read fine on their own.",
+  ]},
   { version:"v0.14.1", notes:[
     "Item Tier overhaul: Tier now also gates which character level can equip it (T1 Lv1+, T2 Lv5+, T3 Lv10+, T4 Lv15+, T5 Lv20+) -- you can always still wear a lower tier than your level allows.",
     "Loot no longer drops a guaranteed fixed tier for its area -- an area's own tier is the likeliest drop, but lower tiers can still turn up (rarely at high level), so low-tier legendaries stay worth finding and trading.",
@@ -4163,7 +4363,7 @@ const CHANGELOG=[
   ]},
   { version:"v0.13", notes:[
     "Steeper XP curve for high-level characters, so overleveled farming in a low area yields real diminishing returns instead of an easy grind. (Contribution by ImpulseBE)",
-    "Broken Bridge Challenge remembers every plank that's already broken under you, not just the ones you've safely crossed, so a step can never truly stall you forever. (Contribution by ImpulseBE)",
+    "Broken Bridge Trial remembers every plank that's already broken under you, not just the ones you've safely crossed, so a step can never truly stall you forever. (Contribution by ImpulseBE)",
     "New Dagger weapon class, including a certain oddly-named Flemish surprise for the Dutch speakers in the room. (Contribution by ImpulseBE)",
     "Auction House listings now show the same full item tooltip on hover as your Character Sheet. (Shared Discord contribution)",
     "HP and Stamina regeneration now kicks in the moment you set foot in town, no more clicking Rest first. (Contributions by Evsie & Fragbunny)",
@@ -4187,7 +4387,7 @@ const CHANGELOG=[
     "Lots of visual polish: styled inputs/checkboxes, Player Classes redesign, fixed bugs.",
   ]},
   { version:"v0.11", notes:[
-    "Broken Bridge Challenge reworked with plank choices and clearer odds.",
+    "Broken Bridge Trial reworked with plank choices and clearer odds.",
     "New Storage Vault for stashing gear and items safely.",
     "Attributes rebalanced evenly across all three class chains.",
     "Diablo-style equipment layout and a collapsible Attributes panel.",
@@ -4329,7 +4529,15 @@ setInterval(()=>{
   let changed=false;
   if(PS.current_hp<PS.getMaxHp()){ PS.current_hp=Math.min(PS.getMaxHp(),PS.current_hp+Balance.CAMPFIRE_REGEN_PER_SECOND+bonus); changed=true; }
   if(PS.current_stamina<PS.getMaxStamina()){ PS.current_stamina=Math.min(PS.getMaxStamina(),PS.current_stamina+Balance.CAMPFIRE_STAMINA_REGEN_PER_SECOND+bonus); changed=true; }
-  if(changed){ PS.saveGame(); render(); }
+  if(changed){
+    PS.saveGame();
+    // v0.15 BUG FIX: used to call render() here -- a full app.innerHTML="" + rebuild of
+    // the entire screen, every second, on every regen-active screen. That was silently
+    // swallowing clicks on buttons elsewhere on the page (reported: the Character Sheet's
+    // "<- Back" button "not responding"). Only the live HP/Stamina numbers actually need
+    // to change here, so just swap the stat header panel in place instead.
+    if(!refreshStatHeaderInPlace()) render();
+  }
 },1000);
 
 (async function boot(){

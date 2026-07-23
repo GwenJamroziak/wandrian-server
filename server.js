@@ -122,7 +122,8 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS vaults (
     account_id INTEGER PRIMARY KEY,
     data TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 0
   );
 `);
 
@@ -134,6 +135,7 @@ for (const stmt of [
   "ALTER TABLE leaderboard_bests ADD COLUMN lifetime_xp INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE leaderboard_bests ADD COLUMN is_dead INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE accounts ADD COLUMN email TEXT",
+  "ALTER TABLE vaults ADD COLUMN version INTEGER NOT NULL DEFAULT 0",
 ]) {
   try { db.exec(stmt); } catch (e) { /* column already exists, fine */ }
 }
@@ -301,7 +303,7 @@ app.put("/api/characters/:slot", requireAuth, (req, res) => {
   ).run(req.account.id, slot, json, nowIso());
 
   // Track this character on the leaderboard. `level` and `gold` reflect the character's
-  // CURRENT state (a Broken Bridge Challenge failure resets level to 1, and that must be
+  // CURRENT state (a Broken Bridge Trial failure resets level to 1, and that must be
   // visible on the leaderboard, not masked by a frozen historic peak -- see Gwen's v0.13
   // bug report: a demoted-and-reground level 2 character was still showing as level 12 /
   // rank 1). `highest_tier_reached` and `lifetime_xp` are genuinely monotonic lifetime
@@ -366,33 +368,71 @@ app.delete("/api/characters/:slot", requireAuth, (req, res) => {
    stash. Scoped strictly by req.account.id (set by requireAuth from the caller's own
    session token) -- there is no accountId taken from the request body or URL anywhere
    here, so there is no way to address another account's vault, logged-in or not.
-   Like character saves, this is a client-trusted full-replace blob for now (same caveat
-   as the rest of the game: combat/loot/inventory aren't server-verified yet). */
+
+   v0.15 BUG FIX (item duplication): this used to be a plain client-trusted full-replace
+   blob with no concurrency control at all -- if two of your own characters had the vault
+   open in two browser tabs, both would read the SAME snapshot, and whichever one's PUT
+   landed LAST would win, silently discarding whatever the other tab did in between. Gwen's
+   reported dupe (deposit from A, both withdraw, both re-deposit) is exactly this: two
+   stale reads racing to write back their own full copy of "the vault as I last saw it."
+
+   The fix is optimistic concurrency (compare-and-swap) on a `version` counter: GET now
+   returns the version alongside the items, and PUT must include the version it read.
+   The write only succeeds if that still matches the CURRENT version in the database --
+   otherwise someone else's vault mutation landed first, and this PUT is rejected with 409
+   so the client is forced to refetch the real current state and retry, instead of blindly
+   clobbering it. This can't fully replace real server-side item ownership tracking (see
+   the anti-cheat roadmap discussion), but it closes this specific race/dupe path. */
 app.get("/api/vault", requireAuth, (req, res) => {
-  const row = db.prepare("SELECT data FROM vaults WHERE account_id = ?").get(req.account.id);
+  const row = db.prepare("SELECT data, version FROM vaults WHERE account_id = ?").get(req.account.id);
   let items = [];
+  let version = 0;
   if (row) {
     try {
       items = JSON.parse(row.data);
     } catch (e) {
       items = [];
     }
+    version = row.version || 0;
   }
-  res.json({ items, capacity: VAULT_CAPACITY });
+  res.json({ items, capacity: VAULT_CAPACITY, version });
 });
 
 app.put("/api/vault", requireAuth, (req, res) => {
   const items = req.body && req.body.items;
+  const clientVersion = req.body && Number.isInteger(req.body.version) ? req.body.version : -1;
   if (!Array.isArray(items)) return res.status(400).json({ error: "items must be an array." });
   if (items.length > VAULT_CAPACITY) {
     return res.status(400).json({ error: `The vault only holds ${VAULT_CAPACITY} items.` });
   }
+
+  const existing = db.prepare("SELECT version FROM vaults WHERE account_id = ?").get(req.account.id);
+  const currentVersion = existing ? existing.version || 0 : 0;
+  if (clientVersion !== currentVersion) {
+    // Someone else's change (another of your characters, in another tab/device) already
+    // landed since this client last fetched the vault -- reject instead of overwriting it,
+    // and hand back the real current state so the client can refresh and retry.
+    let currentItems = [];
+    if (existing) {
+      const fresh = db.prepare("SELECT data FROM vaults WHERE account_id = ?").get(req.account.id);
+      try { currentItems = JSON.parse(fresh.data); } catch (e) { currentItems = []; }
+    }
+    return res.status(409).json({
+      error: "The vault changed elsewhere since you last looked -- refresh and try again.",
+      items: currentItems,
+      capacity: VAULT_CAPACITY,
+      version: currentVersion,
+    });
+  }
+
+  const newVersion = currentVersion + 1;
   const json = JSON.stringify(items);
   db.prepare(
-    `INSERT INTO vaults (account_id, data, updated_at) VALUES (?, ?, ?)
-     ON CONFLICT(account_id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at`
-  ).run(req.account.id, json, nowIso());
-  res.json({ ok: true });
+    `INSERT INTO vaults (account_id, data, updated_at, version) VALUES (?, ?, ?, ?)
+     ON CONFLICT(account_id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at, version=excluded.version
+     WHERE vaults.version = ?`
+  ).run(req.account.id, json, nowIso(), newVersion, currentVersion);
+  res.json({ ok: true, version: newVersion });
 });
 
 // v0.13: the Graveyard is a public memorial, not a per-account death log -- every
