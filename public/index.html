@@ -201,10 +201,21 @@ const MONSTERS = [
 ];
 
 const ITEMS = {
-  health_potion:{name:"Health Potion",type:"consumable",heal_amount:30,sell_value:3},
-  greater_health_potion:{name:"Greater Health Potion",type:"consumable",heal_amount:60,sell_value:7},
-  stamina_potion:{name:"Stamina Potion",type:"consumable",stamina_amount:50,sell_value:4},
-  greater_stamina_potion:{name:"Greater Stamina Potion",type:"consumable",stamina_amount:100,sell_value:9},
+  // v0.12.1: expanded from 2 volumes to 5 per stat (Minor / plain / Medium / Greater /
+  // Supreme), a longer, gentler curve so there's a potion worth using at every level
+  // range instead of "Health Potion" being either overkill or useless. bestAvailableConsumable()
+  // already picks the strongest one you can still benefit from, so this needed no logic
+  // changes elsewhere, only more entries. Values are a first-pass baseline for balancing later.
+  minor_health_potion:{name:"Minor Health Potion",type:"consumable",heal_amount:20,sell_value:2},
+  health_potion:{name:"Health Potion",type:"consumable",heal_amount:40,sell_value:4},
+  medium_health_potion:{name:"Medium Health Potion",type:"consumable",heal_amount:75,sell_value:8},
+  greater_health_potion:{name:"Greater Health Potion",type:"consumable",heal_amount:120,sell_value:13},
+  supreme_health_potion:{name:"Supreme Health Potion",type:"consumable",heal_amount:180,sell_value:20},
+  minor_stamina_potion:{name:"Minor Stamina Potion",type:"consumable",stamina_amount:35,sell_value:3},
+  stamina_potion:{name:"Stamina Potion",type:"consumable",stamina_amount:60,sell_value:5},
+  medium_stamina_potion:{name:"Medium Stamina Potion",type:"consumable",stamina_amount:100,sell_value:9},
+  greater_stamina_potion:{name:"Greater Stamina Potion",type:"consumable",stamina_amount:150,sell_value:14},
+  supreme_stamina_potion:{name:"Supreme Stamina Potion",type:"consumable",stamina_amount:220,sell_value:20},
   // v0.12: sell_value tripled on all 3 scrolls (was 6/14/30), so their Merchant buy price
   // (sell_value * VENDOR_MARKUP) triples too, alongside the Stronghold loot buff below --
   // makes the loot chest's 25% chance at one of these feel like a real prize.
@@ -236,17 +247,27 @@ const HERBS = {
 };
 
 const RECIPES = [
+  {id:"brew_minor_health_potion",result_item:"minor_health_potion",herbs:{sunpetal:1}},
   {id:"brew_health_potion",result_item:"health_potion",herbs:{sunpetal:2,moonleaf:1}},
-  {id:"brew_greater_health_potion",result_item:"greater_health_potion",herbs:{sunpetal:2,emberroot:1}},
+  {id:"brew_medium_health_potion",result_item:"medium_health_potion",herbs:{sunpetal:2,emberroot:2}},
+  {id:"brew_greater_health_potion",result_item:"greater_health_potion",herbs:{sunpetal:2,emberroot:1,frostvine:1}},
+  {id:"brew_supreme_health_potion",result_item:"supreme_health_potion",herbs:{frostvine:2,starveil:1}},
+  {id:"brew_minor_stamina_potion",result_item:"minor_stamina_potion",herbs:{moonleaf:1}},
   {id:"brew_stamina_potion",result_item:"stamina_potion",herbs:{moonleaf:2}},
-  {id:"brew_stamina_potion_deluxe",result_item:"greater_stamina_potion",herbs:{moonleaf:1,frostvine:1}},
+  {id:"brew_medium_stamina_potion",result_item:"medium_stamina_potion",herbs:{moonleaf:2,emberroot:1}},
+  {id:"brew_greater_stamina_potion",result_item:"greater_stamina_potion",herbs:{moonleaf:1,frostvine:1}},
+  {id:"brew_supreme_stamina_potion",result_item:"supreme_stamina_potion",herbs:{frostvine:2,starveil:1}},
   {id:"brew_elixir_of_eyesight",result_item:"elixir_of_eyesight",herbs:{sunpetal:1,starveil:2}},
 ];
 
+// v0.12.1: potion drops now scale with the same monster tier the loot table is named
+// for, one rung of the new 5-tier potion ladder per monster tier (minor->regular->
+// medium->greater), leaving Supreme reserved for the Stronghold chest so it stays a
+// step above anything ordinary combat can hand out.
 const LOOT_TABLES = {
-  common:[{type:"nothing",weight:55},{type:"gear",weight:15},{type:"consumable",weight:20,item_id:"health_potion"},{type:"herb",weight:10,herb_id:"sunpetal"}],
+  common:[{type:"nothing",weight:55},{type:"gear",weight:15},{type:"consumable",weight:20,item_id:"minor_health_potion"},{type:"herb",weight:10,herb_id:"sunpetal"}],
   uncommon:[{type:"nothing",weight:50},{type:"gear",weight:20},{type:"consumable",weight:15,item_id:"health_potion"},{type:"herb",weight:15,herb_id:"emberroot"}],
-  rare:[{type:"nothing",weight:40},{type:"gear",weight:30},{type:"consumable",weight:15,item_id:"greater_health_potion"},{type:"herb",weight:15,herb_id:"frostvine"}],
+  rare:[{type:"nothing",weight:40},{type:"gear",weight:30},{type:"consumable",weight:15,item_id:"medium_health_potion"},{type:"herb",weight:15,herb_id:"frostvine"}],
   epic:[{type:"nothing",weight:30},{type:"gear",weight:45},{type:"consumable",weight:15,item_id:"greater_health_potion"},{type:"herb",weight:10,herb_id:"frostvine"}],
 };
 
@@ -393,6 +414,11 @@ const Balance = {
   // soft-locked). STRONGHOLD_GUARDIAN_HP_MULT applies on top of the normal per-area-level
   // monster HP curve; guardian damage is left at the normal per-area rate on purpose.
   STRONGHOLD_GUARDIAN_HP_MULT:3.0, STRONGHOLD_KEY_DROP_CHANCE:0.05,
+  // v0.12.1: items the Merchant will never stock, no matter their type -- currently just
+  // the Stronghold Key, which is meant to be an achievement drop (kill a guardian, get
+  // lucky) rather than something gold can shortcut. Still fully tradable on the Auction
+  // House between players, that path is untouched.
+  MERCHANT_EXCLUDED_ITEMS:["stronghold_key"],
   STRONGHOLD_CHEST_GOLD_MIN:500, STRONGHOLD_CHEST_GOLD_MAX:1500,
   STRONGHOLD_CHEST_HERBS_MIN:5, STRONGHOLD_CHEST_HERBS_MAX:15,
   STRONGHOLD_CHEST_GEAR_COUNT_MIN:2, STRONGHOLD_CHEST_GEAR_COUNT_MAX:4,
@@ -411,6 +437,16 @@ const Balance = {
   NPC_GOBLIN_NAME:"Grimsnick the Sackrattler",
   ITEM_TIER_MAX:5, ITEM_STAT_PER_TIER:5, ITEM_TIER_ADJECTIVES:["Withered","Budding","Blooming","Ancient","Eternal"],
   RARITY_TABLE:[{name:"Common",slots:1,weight:60},{name:"Uncommon",slots:2,weight:25},{name:"Rare",slots:3,weight:10},{name:"Epic",slots:5,weight:4},{name:"Legendary",slots:8,weight:1}],
+  // v0.12.1: player-facing rarity wording only -- RARITY_TABLE's own `name` values stay
+  // Common/Uncommon/Rare/Epic/Legendary everywhere internally (CSS classes like
+  // "rarity-Epic", forcedRarityName lookups such as the Stronghold chest's pick(["Rare",
+  // "Epic"]), save data, etc. all keep working unchanged), only the WORD shown to the
+  // player changes: the tier colored yellow/gold is now called "Rare" (used to say
+  // "Epic"), the one colored blue is now "Magical" (used to say "Rare"), Uncommon drops
+  // its prefix entirely since it's meant to read as unremarkable, and Common becomes a
+  // plainly low-quality adjective. Legendary is untouched, Gwen didn't ask for it to change.
+  RARITY_DISPLAY_NAMES:{Common:"Crude", Uncommon:"", Rare:"Magical", Epic:"Rare", Legendary:"Legendary"},
+  rarityDisplayName(name){ return this.RARITY_DISPLAY_NAMES[name]!=null ? this.RARITY_DISPLAY_NAMES[name] : name; },
   AFFIX_POOL:["damage","hp","crit","armor","regen","gold_find","xp_find","stamina_max","strength","dexterity","vitality","intelligence"],
   // v0.12: weapons should feel like the slot that defines your damage output. 70% of the
   // time a weapon's affix pool gets "damage" pinned first (guaranteeing it rolls, instead
@@ -616,7 +652,8 @@ const IF = {
     return {instance_id:`${Date.now()}_${randi(999999)}`, slot:chosenSlot, base_name:baseName, tier, rarity:rarity.name, affixes, element};
   },
   displayName(inst){
-    let name=`${inst.rarity} ${Balance.itemTierAdjective(inst.tier)} ${inst.base_name}`;
+    const rarityLabel=Balance.rarityDisplayName(inst.rarity);
+    let name=`${rarityLabel?rarityLabel+" ":""}${Balance.itemTierAdjective(inst.tier)} ${inst.base_name}`;
     if(inst.element) name+=` of ${Balance.ELEMENT_DISPLAY_NAMES[inst.element]||inst.element}`;
     return name;
   },
@@ -1208,6 +1245,10 @@ const PS = {
   },
   buyConsumable(itemId){
     const item=DL.getItem(itemId); if(!item.name) return false;
+    // v0.12.1: Stronghold Keys are an achievement drop, not a shop item -- guarded here
+    // too (not just hidden from the Merchant's Buy grid) so there's no back door to
+    // buying one directly. They still trade freely on the Auction House.
+    if(Balance.MERCHANT_EXCLUDED_ITEMS.includes(itemId)) return false;
     const price=Balance.itemBuyPrice(item);
     if(this.gold<price) return false;
     this.gold-=price; this.addConsumable(itemId); return true;
@@ -1585,16 +1626,31 @@ function aggregatedConsumableParts(){
   return parts;
 }
 
+// Reuses the same herb SVG icons as the Character Sheet's Herbs list, instead of the
+// plain "12x Sunpetal Bloom, 5x Ember Root" text this compact preview used to show --
+// the icons are already there and recognizable, the herb name only needs to show up
+// as a hover tooltip, not spelled out inline every time.
+function herbPreviewRow(){
+  const herbEntries=Object.keys(PS.herbs).filter(k=>PS.herbs[k]>0);
+  if(herbEntries.length===0) return h("div",{class:"muted"},["Herbs: none"]);
+  return h("div",{class:"row gap",style:{alignItems:"center",flexWrap:"wrap"}},[
+    h("span",{class:"muted"},["Herbs:"]),
+    ...herbEntries.map(k=>h("span",{class:"row",title:DL.getHerb(k).name,style:{alignItems:"center",gap:"2px",cursor:"help"}},[
+      herbIcon(k,18),
+      h("span",{class:"muted"},[`${PS.herbs[k]}x`]),
+    ])),
+  ]);
+}
+
 function inventoryPreview(){
   const equippedCount=IF.EQUIPPED_SLOT_KEYS.filter(s=>PS.equipped[s]).length;
   const consumableParts=aggregatedConsumableParts();
-  const herbParts=Object.keys(PS.herbs).filter(k=>PS.herbs[k]>0).map(k=>`${PS.herbs[k]}x ${DL.getHerb(k).name}`);
   return h("div",{class:"col gap",style:{flex:"1",minWidth:"0"}},[
     h("div",{class:"muted"},[`Equipped: ${equippedCount}/${IF.EQUIPPED_SLOT_KEYS.length}`]),
     h("div",{class:"muted"},[`Backpack: ${PS.getInventoryUsed()}/${PS.getInventoryCapacity()}`]),
     h("div",{class:"muted"},[`Bags: ${PS.equipped_bags.length}/${Balance.MAX_BAG_SLOTS}`]),
     h("div",{class:"muted",style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},[consumableParts.length?`Consumables: ${consumableParts.join(", ")}`:"Consumables: none"]),
-    h("div",{class:"muted",style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},[herbParts.length?`Herbs: ${herbParts.join(", ")}`:"Herbs: none"]),
+    herbPreviewRow(),
   ]);
 }
 
@@ -2261,6 +2317,20 @@ function ensureMaze(depth){
   return GF.overworld_snapshot;
 }
 
+// v0.12.1: whenever the player leaves the maze back to town WITHOUT changing area level
+// (fleeing a monster, a voluntary stamina retreat, or surviving a softcore death), the
+// maze itself -- fog-of-war/discovered cells, cleared chests/shrines/guardians, the
+// Stronghold's state -- must still be sitting there next time they Venture at the same
+// area level (ensureMaze() already does this correctly, it only regenerates on a depth
+// mismatch). The one thing that SHOULD reset is the player's own position: they always
+// walk back in from the entrance, not from wherever they left off. Only changing area
+// level (reaching the exit, a trapdoor, or a Broken Bridge outcome) should generate a
+// brand new, undiscovered maze -- those paths already null GF.overworld_snapshot outright
+// and are untouched by this helper.
+function resetMazePositionToStart(){
+  if(GF.overworld_snapshot) GF.overworld_snapshot.playerIdx=0;
+}
+
 // Trap and trapdoor tiles are deliberately absent here, they render using the cell's
 // baseTerrain instead (see screenMaze), so they're indistinguishable from ordinary ground.
 const TILE_GLYPH={start:"🏕",exit:"⬇",chest:"🎁",shrine:"✨",herb:"🌿",boulder:"🪨",grass:"",dirt:"",
@@ -2344,7 +2414,7 @@ function screenMaze(){
         h("button",{disabled:!PS.canUseConsumable(PS.bestAvailableConsumable("health")),onClick:()=>{ PS.useConsumable(PS.bestAvailableConsumable("health")); autosave(); render(); }},["Use Health Potion"]),
         h("button",{disabled:!PS.canUseConsumable(PS.bestAvailableConsumable("stamina")),onClick:()=>{ PS.useConsumable(PS.bestAvailableConsumable("stamina")); autosave(); render(); }},["Use Stamina Potion"]),
       ]),
-      h("button",{onClick:()=>GF.goto("town")},["← Retreat to Town"]),
+      h("button",{onClick:()=>{ resetMazePositionToStart(); GF.goto("town"); }},["← Retreat to Town"]),
     ]),
   ]));
   return root;
@@ -2527,6 +2597,7 @@ function endCombatDeath(){
     let msg=`You were defeated and wake up back at camp, having lost ${p.goldLost} gold.`;
     if(p.itemsLost.length>0) msg+=` You also lost: ${p.itemsLost.join(", ")}.`;
     setToast(msg);
+    resetMazePositionToStart();
     PS.saveGame();
     GF.goto("town");
   }
@@ -2629,7 +2700,7 @@ function screenCombat(){
     h("button",{class:"play",onClick:playerTurn},["Attack"]),
     h("button",{disabled:!PS.canUseConsumable(PS.bestAvailableConsumable("health")),onClick:()=>{ PS.useConsumable(PS.bestAvailableConsumable("health")); autosave(); render(); }},["Use Health Potion"]),
     h("button",{disabled:!PS.canUseConsumable(PS.bestAvailableConsumable("stamina")),onClick:()=>{ PS.useConsumable(PS.bestAvailableConsumable("stamina")); autosave(); render(); }},["Use Stamina Potion"]),
-    h("button",{class:"danger",onClick:()=>{ GF.combat=null; PS.saveGame(); setToast("You flee back to camp, but remember your way through these woods."); GF.goto("town"); }},["Flee"]),
+    h("button",{class:"danger",onClick:()=>{ GF.combat=null; resetMazePositionToStart(); PS.saveGame(); setToast("You flee back to camp, but remember your way through these woods."); GF.goto("town"); }},["Flee"]),
   ]));
   return root;
 }
@@ -2724,9 +2795,16 @@ function screenStrongholdChest(){
       for(let i=0;i<herbTotal;i++) PS.addHerb(DL.pickHerbForNode(),1);
       msgs.push(`${herbTotal} herbs`);
 
+      // v0.12.1: Stronghold loot hands out the top of the potion ladder (Greater/Supreme),
+      // not the base tier -- this chest is supposed to be "pretty good loot", so its
+      // potions shouldn't be the same ones a common Sprout can drop.
       const potionTotal=randIntRange(Balance.STRONGHOLD_CHEST_POTIONS_MIN,Balance.STRONGHOLD_CHEST_POTIONS_MAX);
       let healthGiven=0, staminaGiven=0;
-      for(let i=0;i<potionTotal;i++){ if(Math.random()<0.5){ PS.addConsumable("health_potion",1); healthGiven++; } else { PS.addConsumable("stamina_potion",1); staminaGiven++; } }
+      for(let i=0;i<potionTotal;i++){
+        const healthTier=pick(["greater_health_potion","supreme_health_potion"]);
+        const staminaTier=pick(["greater_stamina_potion","supreme_stamina_potion"]);
+        if(Math.random()<0.5){ PS.addConsumable(healthTier,1); healthGiven++; } else { PS.addConsumable(staminaTier,1); staminaGiven++; }
+      }
       msgs.push(`${healthGiven} health & ${staminaGiven} stamina potions`);
 
       if(Math.random()<Balance.STRONGHOLD_CHEST_SCROLL_CHANCE){
@@ -3190,7 +3268,8 @@ function screenMerchant(){
   root.appendChild(h("h3",{},["Buy"]));
   const grid=h("div",{class:"grid3"});
   for(const itemId in ITEMS){
-    const item=ITEMS[itemId]; if(item.type==="bag") continue;
+    const item=ITEMS[itemId];
+    if(item.type==="bag" || Balance.MERCHANT_EXCLUDED_ITEMS.includes(itemId)) continue;
     const price=Balance.itemBuyPrice(item);
     grid.appendChild(h("div",{class:"tile"},[
       h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId), h("div",{style:{fontWeight:"bold"}},[item.name])]),
