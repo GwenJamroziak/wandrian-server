@@ -239,6 +239,18 @@ const ITEMS = {
   // since it's meant to be found in the woods or traded on the Auction House, not bought
   // outright.
   dry_branch:{name:"Dry Branch",type:"consumable",sell_value:5},
+  // v0.14: 5 new Alchemist-brewed temporary stat-buff potions (see RECIPES for their
+  // gold+herb cost, and PS.applyTempBuff/getActiveTempBuff/useConsumable for the buff
+  // mechanic itself). All last Balance.POTION_BUFF_DURATION_MS (10 real-time minutes) and
+  // are excluded from the Merchant's Buy grid (Balance.MERCHANT_EXCLUDED_ITEMS) since
+  // they're meant to be brewed or traded, not bought outright. buff_type matches the name
+  // getTotalAttr()/getBlockChance() key off of; block_chance's amount is percentage points
+  // (e.g. 15 -> +15%), the other 4 are flat amounts (attribute points, or HP&Stamina/sec).
+  potion_of_might:{name:"Potion of Might",type:"consumable",buff_type:"strength",buff_amount:15,buff_duration_ms:10*60*1000,sell_value:35},
+  potion_of_swiftness:{name:"Potion of Swiftness",type:"consumable",buff_type:"dexterity",buff_amount:15,buff_duration_ms:10*60*1000,sell_value:35},
+  potion_of_intellect:{name:"Potion of Intellect",type:"consumable",buff_type:"intelligence",buff_amount:15,buff_duration_ms:10*60*1000,sell_value:35},
+  potion_of_wardveil:{name:"Potion of Wardveil",type:"consumable",buff_type:"block_chance",buff_amount:15,buff_duration_ms:10*60*1000,sell_value:50},
+  potion_of_renewal:{name:"Potion of Renewal",type:"consumable",buff_type:"regen",buff_amount:12,buff_duration_ms:10*60*1000,sell_value:50},
   traveler_pouch:{name:"Traveler's Pouch",type:"bag",capacity:8,sell_value:10},
   woven_bag:{name:"Woven Bramble Bag",type:"bag",capacity:16,sell_value:20},
   bramble_sack:{name:"Bramble Sack",type:"bag",capacity:24,sell_value:32},
@@ -251,6 +263,18 @@ const HERBS = {
   emberroot:{name:"Ember Root",found_in:"Herb nodes in any maze; also drops from uncommon-tier kills."},
   frostvine:{name:"Frostvine",found_in:"Herb nodes in any maze; also drops from rare/epic-tier kills."},
   starveil:{name:"Starveil Petal",found_in:"A rare find in herb nodes, most travelers never spot one.",rare:true},
+  // v0.14: 5 new "rare" herbs (same drop mechanism as Starveil Petal, see
+  // DL.pickHerbForNode/Balance.RARE_HERB_CHANCE -- when the rare roll succeeds, one of
+  // these 6 rare herbs is picked at random, so each individual one is now scarcer than
+  // Starveil was on its own). Each is the sole ingredient for one of the 5 new temporary
+  // stat-buff potions -- see RECIPES and ITEMS' buff_type fields below. The intent (per
+  // Gwen) is that players will often find the "wrong" attribute herb for their own class
+  // and trade it away on the Auction House for the one they actually want.
+  ironbark_sap:{name:"Ironbark Sap",found_in:"A rare find in herb nodes -- brews into a Potion of Might (temporary Strength).",rare:true},
+  swiftfern:{name:"Swiftfern Frond",found_in:"A rare find in herb nodes -- brews into a Potion of Swiftness (temporary Dexterity).",rare:true},
+  mindroot:{name:"Mindroot Tuber",found_in:"A rare find in herb nodes -- brews into a Potion of Intellect (temporary Intelligence).",rare:true},
+  stoneshell_moss:{name:"Stoneshell Moss",found_in:"A rare find in herb nodes -- brews into a Potion of Wardveil (temporary Block Chance).",rare:true},
+  vitalbloom:{name:"Vitalbloom Petal",found_in:"A rare find in herb nodes -- brews into a Potion of Renewal (temporary HP/Stamina regen).",rare:true},
 };
 
 const RECIPES = [
@@ -265,6 +289,14 @@ const RECIPES = [
   {id:"brew_greater_stamina_potion",result_item:"greater_stamina_potion",herbs:{moonleaf:1,frostvine:1}},
   {id:"brew_supreme_stamina_potion",result_item:"supreme_stamina_potion",herbs:{frostvine:2,starveil:1}},
   {id:"brew_elixir_of_eyesight",result_item:"elixir_of_eyesight",herbs:{sunpetal:1,starveil:2}},
+  // v0.14: the 5 new temporary stat-buff potions. Each needs a few (3) of its own rare
+  // herb plus a gold payment on top -- 130g for the 3 attribute potions, 190g for the
+  // stronger Block Chance/Regen ones, per Gwen's exact pricing.
+  {id:"brew_potion_of_might",result_item:"potion_of_might",herbs:{ironbark_sap:3},gold_cost:130},
+  {id:"brew_potion_of_swiftness",result_item:"potion_of_swiftness",herbs:{swiftfern:3},gold_cost:130},
+  {id:"brew_potion_of_intellect",result_item:"potion_of_intellect",herbs:{mindroot:3},gold_cost:130},
+  {id:"brew_potion_of_wardveil",result_item:"potion_of_wardveil",herbs:{stoneshell_moss:3},gold_cost:190},
+  {id:"brew_potion_of_renewal",result_item:"potion_of_renewal",herbs:{vitalbloom:3},gold_cost:190},
 ];
 
 // v0.12.1: potion drops now scale with the same monster tier the loot table is named
@@ -409,6 +441,15 @@ const Balance = {
   // This is a first pass, expect further tuning as real playtesting comes in.
   MONSTER_HP_MULT:2.0, MONSTER_DAMAGE_MULT:2.0,
   CRIT_MULTIPLIER:1.75,
+  // v0.14: fleeing combat isn't a guaranteed clean exit anymore -- a 20% chance the
+  // monster gets one more hit in (same block-chance/armor math as a normal monster turn)
+  // before you can try to flee again. Bad luck can fail several times in a row; nothing
+  // caps the number of attempts.
+  FLEE_FAIL_CHANCE:0.20,
+  // v0.14: the 5 new Alchemist stat-buff potions (Might/Swiftness/Intellect/Wardveil/
+  // Renewal) all last the same 10 minutes, real time -- same wall-clock pattern as the
+  // Bonfire's kindled bonus (see PS.applyTempBuff/getActiveTempBuff).
+  POTION_BUFF_DURATION_MS:10*60*1000,
   // v0.12: softcore death used to cost a flat, gentle 10% of gold and nothing else. Now
   // it's a real setback: 30-60% of gold, plus a decent chance of losing gear too (see
   // PS.applyDeathPenalty/_rollDeathItemLosses below for the exact odds).
@@ -441,7 +482,7 @@ const Balance = {
   // the Stronghold Key, which is meant to be an achievement drop (kill a guardian, get
   // lucky) rather than something gold can shortcut. Still fully tradable on the Auction
   // House between players, that path is untouched.
-  MERCHANT_EXCLUDED_ITEMS:["stronghold_key","dry_branch"],
+  MERCHANT_EXCLUDED_ITEMS:["stronghold_key","dry_branch","potion_of_might","potion_of_swiftness","potion_of_intellect","potion_of_wardveil","potion_of_renewal"],
   STRONGHOLD_CHEST_GOLD_MIN:500, STRONGHOLD_CHEST_GOLD_MAX:1500,
   STRONGHOLD_CHEST_HERBS_MIN:5, STRONGHOLD_CHEST_HERBS_MAX:15,
   STRONGHOLD_CHEST_GEAR_COUNT_MIN:2, STRONGHOLD_CHEST_GEAR_COUNT_MAX:4,
@@ -458,12 +499,36 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.13-web",
+  GAME_VERSION:"v0.14.1-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   NPC_BLACKSMITH_NAME:"Grondar Emberhand", NPC_ALCHEMIST_NAME:"Maren Thistlebrew", NPC_MERCHANT_NAME:"Cassius Wraithcoin",
   NPC_GOBLIN_NAME:"Grimsnick the Sackrattler",
   ITEM_TIER_MAX:5, ITEM_STAT_PER_TIER:5, ITEM_TIER_ADJECTIVES:["Withered","Budding","Blooming","Ancient","Eternal"],
+  // v0.14 Item Tier overhaul: tiers are now 5-level-wide brackets (T1 areas 1-4, T2 5-9,
+  // T3 10-14, T4 15-19, T5 20+), and each bracket's low end doubles as the CHARACTER level
+  // requirement to equip that tier (need Lv5 to wear T2 gear, Lv20 for T5, etc -- you can
+  // always still wear a lower tier than your level allows). See itemTierForAreaLevel()
+  // (the "natural"/most-likely tier for a given area level) and tierLevelRequirement().
+  ITEM_TIER_BRACKET_WIDTH:5,
+  // v0.14: gear no longer drops deterministically at exactly the area's natural tier --
+  // rollItemTier() below rolls a WEIGHTED spread across the natural tier and every tier
+  // below it, so a level-35 area (natural tier 5) hands out roughly T5 40% / T4 30% /
+  // T3 20% / T2 6% / T1 4% of the time (matches Gwen's spec example), while a level-3 area
+  // (natural tier 1, nothing lower to roll) always drops T1. Index 0 = the natural tier
+  // itself, index 1 = one tier below, etc.
+  TIER_DROP_WEIGHTS_BY_OFFSET:[40,30,20,6,4],
+  // v0.14: replacing the old itemTierStatRange() (one flat range shared by every affix
+  // stat) with per-stat Tier-1 base maximums that scale UP LINEARLY per tier: max(tier) =
+  // tier * max(T1). Calibrated from Gwen's 3 examples (weapon damage T1 max 5, Armor% T1
+  // max 20, Ring/Amulet HP T1 max 15 -- all scale identically, e.g. Armor 20/40/60/80/100%
+  // across T1-T5); the rest of AFFIX_POOL's base values are my own balance judgment call,
+  // following the same "meaningful single-affix bonus" sizing logic. Mana/spell-power
+  // affixes are intentionally NOT here yet -- Gwen said those come later.
+  AFFIX_TIER1_MAX:{
+    damage:5, hp:15, crit:5, armor:20, regen:5, gold_find:10, xp_find:10,
+    stamina_max:15, strength:5, dexterity:5, vitality:5, intelligence:5,
+  },
   RARITY_TABLE:[{name:"Common",slots:1,weight:60},{name:"Uncommon",slots:2,weight:25},{name:"Rare",slots:3,weight:10},{name:"Epic",slots:5,weight:4},{name:"Legendary",slots:8,weight:1}],
   // v0.12.1: player-facing rarity wording only -- RARITY_TABLE's own `name` values stay
   // Common/Uncommon/Rare/Epic/Legendary everywhere internally (CSS classes like
@@ -527,8 +592,37 @@ const Balance = {
   // this scaling is what makes meaningful in the first place.
   trapDamage(areaLevel){ return randRange(this.TRAP_DAMAGE_MIN,this.TRAP_DAMAGE_MAX)*(areaLevel||1); },
   lootMultiplier(areaLevel){return Math.pow(1.0+this.AREA_LOOT_GROWTH,areaLevel);},
-  itemTierForAreaLevel(areaLevel){return clampi(1+Math.floor(areaLevel/15.0),1,this.ITEM_TIER_MAX);},
-  itemTierStatRange(tier){const t=clampi(tier,1,this.ITEM_TIER_MAX);return [(t-1)*this.ITEM_STAT_PER_TIER+1,t*this.ITEM_STAT_PER_TIER];},
+  // v0.14: replaced the old /15 formula with 5-level-wide brackets (see
+  // ITEM_TIER_BRACKET_WIDTH above): area level 1-4 -> T1, 5-9 -> T2, 10-14 -> T3,
+  // 15-19 -> T4, 20+ -> T5 (clamped at ITEM_TIER_MAX).
+  itemTierForAreaLevel(areaLevel){return clampi(1+Math.floor((areaLevel||1)/this.ITEM_TIER_BRACKET_WIDTH),1,this.ITEM_TIER_MAX);},
+  // v0.14: the character level required to EQUIP a given tier -- mirrors the same 5-wide
+  // brackets (T1 needs Lv1, T2 needs Lv5, T3 Lv10, T4 Lv15, T5 Lv20). You can always still
+  // wear a tier below what your level allows.
+  tierLevelRequirement(tier){const t=clampi(tier,1,this.ITEM_TIER_MAX);return Math.max(1,(t-1)*this.ITEM_TIER_BRACKET_WIDTH);},
+  // v0.14: weighted tier-drop roll for loot (see TIER_DROP_WEIGHTS_BY_OFFSET) -- the
+  // area's natural tier is the likeliest drop, with lower tiers still possible at
+  // decreasing weight, so high-level areas occasionally hand out low-tier gear too (kept
+  // relevant only because low-tier legendaries are still worth chasing/trading).
+  rollItemTier(areaLevel){
+    const nat=this.itemTierForAreaLevel(areaLevel);
+    let total=0;
+    for(let offset=0; offset<nat; offset++) total+=(this.TIER_DROP_WEIGHTS_BY_OFFSET[offset]||1);
+    let roll=Math.random()*total, cum=0;
+    for(let offset=0; offset<nat; offset++){
+      cum+=(this.TIER_DROP_WEIGHTS_BY_OFFSET[offset]||1);
+      if(roll<cum) return nat-offset;
+    }
+    return nat;
+  },
+  // v0.14: per-stat, per-tier affix max roll -- max(tier) = tier * max(T1). Replaces the
+  // old flat itemTierStatRange() shared across every stat.
+  affixMaxForTier(stat, tier){
+    const t=clampi(tier,1,this.ITEM_TIER_MAX);
+    const base=this.AFFIX_TIER1_MAX[stat]!=null?this.AFFIX_TIER1_MAX[stat]:this.ITEM_STAT_PER_TIER;
+    return base*t;
+  },
+  affixRangeForTier(stat, tier){ return [1, this.affixMaxForTier(stat,tier)]; },
   itemTierAdjective(tier){return this.ITEM_TIER_ADJECTIVES[clampi(tier-1,0,this.ITEM_TIER_ADJECTIVES.length-1)];},
   rollRarity(){
     let total=0; for(const r of this.RARITY_TABLE) total+=r.weight;
@@ -581,12 +675,50 @@ const DL = {
   starterClassIds(){return Object.keys(CLASSES).filter(id=>CLASSES[id].tier===1);},
   getNextClassId(id){const c=this.getClass(id); return c.next_class||"";},
   getItem(id){return ITEMS[id]||{};},
+  // v0.14: a short, plain-language category subtext shown under any consumable/scroll/
+  // bag name across Character Sheet, Merchant, Alchemist, Blacksmith and the Auction House
+  // (e.g. "Potion", "Scroll", "Key") so new players don't have to guess what an item does
+  // just from its flavorful name. Gear uses IF.categoryLabel() instead (Ring/Head/etc.),
+  // and herbs are always just labeled "Herb" at their render site.
+  itemCategoryLabel(id){
+    const item=this.getItem(id); if(!item||!item.name) return "";
+    if(item.type==="bag") return "Bag";
+    if(item.type==="scroll") return "Scroll";
+    if(id==="stronghold_key") return "Key";
+    if(id==="dry_branch") return "Kindling";
+    if(item.heal_amount!=null || item.stamina_amount!=null || item.eyesight_steps!=null || item.buff_type) return "Potion";
+    return "Item";
+  },
+  // v0.14 tooltip overhaul: an exact-numbers, plain-English "what does this actually do"
+  // line for any consumable/scroll, generated straight from its ITEMS fields so it can
+  // never drift out of sync with the real mechanic. Used as hover text on the Alchemist's
+  // recipe tiles (the accessibility finding was specifically that mechanics like this took
+  // testers real time to learn instead of being instant via the UI).
+  itemEffectDescription(id){
+    const item=this.getItem(id); if(!item||!item.name) return "";
+    if(item.heal_amount!=null) return `Instantly restores ${item.heal_amount} HP.`;
+    if(item.stamina_amount!=null) return `Instantly restores ${item.stamina_amount} Stamina.`;
+    if(item.eyesight_steps!=null) return `Doubles your maze reveal radius (3x3 -> 5x5 tiles around you) for your next ${item.eyesight_steps} steps.`;
+    if(item.buff_type){
+      const suffixByType={strength:" Strength",dexterity:" Dexterity",intelligence:" Intelligence",block_chance:"% Block Chance",regen:" HP/sec and Stamina/sec regen"};
+      const minutes=Math.round((item.buff_duration_ms||0)/60000);
+      return `Temporarily grants +${item.buff_amount}${suffixByType[item.buff_type]||""} for ${minutes} minutes.`;
+    }
+    if(item.level_bonus!=null) return `Your next venture starts ${item.level_bonus} area level${item.level_bonus===1?"":"s"} higher than your current one.`;
+    if(item.type==="bag") return `+${item.capacity} inventory capacity while equipped.`;
+    return "";
+  },
   getMonster(id){return MONSTERS.find(m=>m.id===id)||{};},
   getHerb(id){return HERBS[id]||{};},
   allHerbIds(){return Object.keys(HERBS);},
   commonHerbIds(){return Object.keys(HERBS).filter(id=>!HERBS[id].rare);},
+  // v0.14: now that there are 6 rare herbs (Starveil Petal + the 5 new stat-buff
+  // ingredients), a successful RARE_HERB_CHANCE roll picks among all of them at random
+  // rather than always handing out Starveil -- each individual rare herb is correspondingly
+  // scarcer than before, matching Gwen's "a bit less common" request for the new ones.
+  rareHerbIds(){return Object.keys(HERBS).filter(id=>HERBS[id].rare);},
   pickHerbForNode(){
-    if(Math.random()<Balance.RARE_HERB_CHANCE) return "starveil";
+    if(Math.random()<Balance.RARE_HERB_CHANCE) return pick(DL.rareHerbIds());
     return pick(DL.commonHerbIds());
   },
   allRecipes(){return RECIPES;},
@@ -616,10 +748,8 @@ const DL = {
 
 const IF = {
   BASE_NAMES:{
-    // v0.13: added the Dagger weapon type. "Goedendag" is a deliberate easter egg -- a
-    // real 13th/14th-century Flemish spiked club/short-polearm whose name literally
-    // translates from Dutch as "good day"/"hello", requested as an inside joke for
-    // Gwen's Dutch-speaking early testers. See IF.SPECIAL_ITEM_FLAVOR for its flavor text.
+    // v0.13: added the Dagger weapon type, including "Goedendag" as a plain dagger base
+    // name (no special in-game description -- just another weapon in the pool).
     weapon:["Twig Wand","Bramblestaff","Rootcarver","Thornbow","Charwood Axe","Emberbrand","Thornfang","Bramblespike","Quickthorn","Goedendag"],
     head:["Bramble Circlet","Mosscap","Antlercrown","Leafwood Hood"],
     shoulders:["Bark Mantle","Rootguard Pauldrons","Thistle Shoulderguard"],
@@ -642,13 +772,15 @@ const IF = {
   WEAPON_TYPE_BY_BASE_NAME:{"Twig Wand":"wand","Bramblestaff":"staff","Rootcarver":"sword","Thornbow":"bow","Charwood Axe":"axe","Emberbrand":"sword","Thornfang":"dagger","Bramblespike":"dagger","Quickthorn":"dagger","Goedendag":"dagger"},
   WEAPON_TYPE_LIST:["wand","staff","sword","axe","bow","dagger"],
   WEAPON_TYPE_LABELS:{wand:"Wand",staff:"Staff",sword:"Sword",axe:"Axe",bow:"Bow",dagger:"Dagger"},
-  // v0.13 easter egg: a per-base-name flavor line shown in the item tooltip, currently
-  // only used for the Goedendag joke item (a real medieval weapon whose name is Dutch for
-  // "good day"/"hello" -- see IF.BASE_NAMES.weapon).
-  SPECIAL_ITEM_FLAVOR:{"Goedendag":"A spiked club the size of a person, favored by Flemish militia. Its name literally means \"good day\" in Dutch, and yes, that's the joke."},
   weaponTypeForInstance(inst){ return (inst&&inst.base_name) ? (this.WEAPON_TYPE_BY_BASE_NAME[inst.base_name]||null) : null; },
 
   slotLabel(slot){return this.SLOT_LABELS[slot]||slot;},
+  // v0.14: a collapsed version of SLOT_LABELS for the item-category subtext shown under
+  // gear names everywhere (Character Sheet, Blacksmith, Auction House, etc.) -- unlike
+  // slotLabel() (used to label an EMPTY equip-doll slot, where "Ring 1" vs "Ring 2"
+  // matters), an actual Ring item's category subtext should just read "Ring".
+  GEAR_CATEGORY_LABELS:{weapon:"Weapon",head:"Head",shoulders:"Shoulders",armor:"Armor",pants:"Pants",gloves:"Gloves",boots:"Boots",ring1:"Ring",ring2:"Ring",amulet:"Amulet",belt:"Belt"},
+  categoryLabel(inst){ return (inst&&inst.slot) ? (this.GEAR_CATEGORY_LABELS[inst.slot]||this.slotLabel(inst.slot)) : ""; },
 
   // forcedRarityName (v0.12, used by the Stronghold chest): when given, skips the normal
   // rarity roll and guarantees that exact rarity, e.g. so Stronghold loot can promise
@@ -659,7 +791,6 @@ const IF = {
     const baseName=pick(this.BASE_NAMES[chosenSlot]||["Item"]);
     const rarity=forcedRarityName ? (Balance.RARITY_TABLE.find(r=>r.name===forcedRarityName)||Balance.rollRarity()) : Balance.rollRarity();
     const slotCount=rarity.slots;
-    const [lo,hi]=Balance.itemTierStatRange(tier);
     let pool=[...Balance.AFFIX_POOL];
     shuffle(pool);
     // v0.12: weapons lean hard into damage now, instead of rolling it as just one of 12
@@ -684,6 +815,7 @@ const IF = {
     const affixes=[];
     for(let i=0;i<affixCount;i++){
       const stat=pool[i];
+      const [lo,hi]=Balance.affixRangeForTier(stat,tier);
       let value=randIntRange(lo,hi);
       if(chosenSlot==="weapon" && stat==="damage") value=Math.round(value*Balance.WEAPON_DAMAGE_AFFIX_MULT);
       affixes.push({stat, value});
@@ -723,8 +855,9 @@ const IF = {
   },
   tooltipText(inst){
     const lines=[`${this.displayName(inst)} (Tier ${inst.tier})`];
-    const flavor=this.SPECIAL_ITEM_FLAVOR[inst.base_name];
-    if(flavor) lines.push(flavor);
+    // v0.14: spell out the level requirement to equip this tier right in the hover
+    // tooltip, so players understand why an Equip button might be greyed out.
+    lines.push(`Requires Level ${Balance.tierLevelRequirement(inst.tier)}`);
     for(const a of inst.affixes) lines.push(this.formatAffix(a));
     return lines.join("\n");
   },
@@ -733,8 +866,10 @@ const IF = {
     return inst.affixes.map(a=>this.formatAffix(a)).join(", ");
   },
   reroll(inst){
-    const [lo,hi]=Balance.itemTierStatRange(inst.tier);
-    const newAffixes=inst.affixes.map(a=>({stat:a.stat,value:randIntRange(lo,hi)}));
+    const newAffixes=inst.affixes.map(a=>{
+      const [lo,hi]=Balance.affixRangeForTier(a.stat,inst.tier);
+      return {stat:a.stat, value:randIntRange(lo,hi)};
+    });
     return {...inst, affixes:newAffixes};
   },
 };
@@ -989,6 +1124,13 @@ const PS = {
   xp_buff_multiplier:1.0, xp_buff_encounters_left:0, stamina_shrine_buff:0.0,
   highest_tier_reached:1, season_won:false, kill_streak:0, hardcore:false, current_slot:-1,
   lifetime_xp:0, isRestingAtCampfire:false, eyesight_potion_steps_left:0, max_maze_depth_reached:1,
+  // v0.14: temporary stat-buff potions (Intellect/Might/Swiftness/Wardveil/Renewal), each a
+  // wall-clock timed buff keyed by type ("intelligence"/"strength"/"dexterity"/
+  // "block_chance"/"regen") -> {amount, expires_at}. Same Date.now()-expiry pattern as the
+  // Bonfire's kindled bonus (see getActiveBonfireBonus), so it keeps ticking down even if
+  // you leave town, and re-using a potion before the old buff expires simply replaces it
+  // (not additive/stacking) rather than refusing the drink.
+  temp_buffs:{},
 
   // Stat Points / Attributes (v0.10). `attributes` is base class value + spent points
   // only, it deliberately excludes gear, see getTotalAttr(). `bonus_hp_from_attributes`/
@@ -1034,7 +1176,10 @@ const PS = {
   },
   getTotalAttr(key){
     const gearStat={str:"strength",dex:"dexterity",vit:"vitality",int:"intelligence"}[key];
-    return (this.attributes[key]||0)+this.gearBonus(gearStat);
+    // v0.14: Potion of Might/Swiftness/Intellect apply a temporary buff under the same
+    // name as the gear stat (strength/dexterity/intelligence), so it folds in here
+    // automatically -- damage scaling, block chance, etc. all read through getTotalAttr().
+    return (this.attributes[key]||0)+this.gearBonus(gearStat)+this.getActiveTempBuff(gearStat);
   },
   spendStatPoint(key){
     if(this.unspent_stat_points<=0 || !this.attributes.hasOwnProperty(key)) return false;
@@ -1043,7 +1188,9 @@ const PS = {
   getBlockChance(){
     // v0.12: Dexterity grants Block Chance on all 3 chains now, including Windrider,
     // where it doubles up as both the damage stat AND the block stat for that path.
-    return clampf(this.getTotalAttr("dex")*Balance.BLOCK_CHANCE_PER_DEX,0,Balance.BLOCK_CHANCE_MAX);
+    // v0.14: Potion of Wardveil adds a flat temporary block_chance buff (stored as
+    // percentage points, e.g. 15 -> +15%) on top of the Dexterity-derived amount.
+    return clampf(this.getTotalAttr("dex")*Balance.BLOCK_CHANCE_PER_DEX+this.getActiveTempBuff("block_chance")/100.0,0,Balance.BLOCK_CHANCE_MAX);
   },
   _resetAttributesToClassBase(){
     const c=this.getClassData();
@@ -1183,15 +1330,31 @@ const PS = {
   // Re-kindling before the old bonus expires simply replaces it (not additive) -- see
   // getActiveBonfireBonus() for how the regen tick reads this back out.
   kindleBonfire(count){
-    const have=this.dry_branches||0;
+    const have=this.consumables["dry_branch"]||0;
     if(!count || count<=0 || count>have) return false;
-    this.dry_branches=have-count;
+    const rem=have-count;
+    if(rem>0) this.consumables["dry_branch"]=rem; else delete this.consumables["dry_branch"];
     this.bonfire_bonus_regen=count*Balance.DRY_BRANCH_REGEN_PER_UNIT;
     this.bonfire_bonus_expires_at=Date.now()+Balance.BONFIRE_KINDLE_DURATION_MS;
     return true;
   },
   getActiveBonfireBonus(){
     if(this.bonfire_bonus_expires_at && Date.now()<this.bonfire_bonus_expires_at) return this.bonfire_bonus_regen||0;
+    return 0;
+  },
+  // v0.14: apply/read a temporary stat-buff potion's effect. `type` is one of
+  // "intelligence"/"strength"/"dexterity"/"block_chance"/"regen" (see ITEMS' buff_type
+  // fields on the 5 new potions). Drinking a potion while its buff is already active just
+  // resets the timer to a fresh full duration at that potion's amount, it doesn't stack.
+  applyTempBuff(type,amount,durationMs){ this.temp_buffs[type]={amount, expires_at:Date.now()+durationMs}; },
+  getActiveTempBuff(type){
+    const b=this.temp_buffs && this.temp_buffs[type];
+    if(b && Date.now()<b.expires_at) return b.amount;
+    return 0;
+  },
+  getTempBuffMsLeft(type){
+    const b=this.temp_buffs && this.temp_buffs[type];
+    if(b && Date.now()<b.expires_at) return b.expires_at-Date.now();
     return 0;
   },
   // v0.12: softcore ("non-hardcore") death penalty. Returns {goldLost, itemsLost, xpLost}
@@ -1288,6 +1451,10 @@ const PS = {
     if((item.heal_amount||0)>0 && this.current_hp<this.getMaxHp()){ this.current_hp=Math.min(this.getMaxHp(),this.current_hp+item.heal_amount); used=true; }
     if((item.stamina_amount||0)>0 && this.current_stamina<this.getMaxStamina()){ this.current_stamina=Math.min(this.getMaxStamina(),this.current_stamina+item.stamina_amount); used=true; }
     if((item.eyesight_steps||0)>0){ this.eyesight_potion_steps_left=item.eyesight_steps; used=true; }
+    // v0.14: the 5 new stat-buff potions (buff_type/buff_amount/buff_duration_ms on ITEMS)
+    // -- always usable (unlike heal/stamina potions there's no "already full" cap), and
+    // drinking one refreshes the timer rather than stacking.
+    if(item.buff_type){ this.applyTempBuff(item.buff_type,item.buff_amount,item.buff_duration_ms||Balance.POTION_BUFF_DURATION_MS); used=true; }
     if(used) this._removeConsumableOne(itemId);
     return used;
   },
@@ -1297,6 +1464,7 @@ const PS = {
     if((item.heal_amount||0)>0 && this.current_hp<this.getMaxHp()) return true;
     if((item.stamina_amount||0)>0 && this.current_stamina<this.getMaxStamina()) return true;
     if((item.eyesight_steps||0)>0) return true;
+    if(item.buff_type) return true;
     return false;
   },
   bestAvailableConsumable(kind){
@@ -1350,9 +1518,15 @@ const PS = {
   },
   addGear(inst){ if(!this.hasInventorySpace()) return false; this.gear_instances.push(inst); return true; },
   findGearIndex(instanceId){ return this.gear_instances.findIndex(g=>g.instance_id===instanceId); },
+  // v0.14: a gear item's Tier now doubles as a character-level requirement to equip it
+  // (see Balance.tierLevelRequirement) -- you can always still wear a tier below what
+  // your level allows, you just can't equip AHEAD of your level anymore.
+  canEquipGear(inst){ return this.level>=Balance.tierLevelRequirement(inst.tier); },
   equipGear(instanceId){
     const idx=this.findGearIndex(instanceId); if(idx===-1) return;
-    const inst=this.gear_instances[idx]; const genSlot=inst.slot; let target=genSlot;
+    const inst=this.gear_instances[idx];
+    if(!this.canEquipGear(inst)) return;
+    const genSlot=inst.slot; let target=genSlot;
     if(genSlot==="ring"){
       if(!this.equipped["ring1"]) target="ring1"; else if(!this.equipped["ring2"]) target="ring2"; else target="ring1";
     } else if(!IF.EQUIPPED_SLOT_KEYS.includes(genSlot)) return;
@@ -1386,10 +1560,18 @@ const PS = {
     this.materials-=cost; const rerolled=IF.reroll(inst); this.gear_instances[idx]=rerolled; return rerolled;
   },
   addHerb(herbId,count=1){ this.herbs[herbId]=(this.herbs[herbId]||0)+count; },
-  canAffordRecipe(recipe){ for(const h in recipe.herbs) if((this.herbs[h]||0)<recipe.herbs[h]) return false; return true; },
+  // v0.14: recipes can now also carry a gold_cost (the 5 new stat-buff potions charge
+  // 130g/190g on top of their herbs -- see RECIPES), older recipes simply have no
+  // gold_cost field and this is a no-op for them.
+  canAffordRecipe(recipe){
+    for(const h in recipe.herbs) if((this.herbs[h]||0)<recipe.herbs[h]) return false;
+    if((recipe.gold_cost||0)>this.gold) return false;
+    return true;
+  },
   brewRecipe(recipe){
     if(!this.canAffordRecipe(recipe)) return false;
     for(const h in recipe.herbs) this.herbs[h]-=recipe.herbs[h];
+    if(recipe.gold_cost) this.gold-=recipe.gold_cost;
     this.addConsumable(recipe.result_item); return true;
   },
 
@@ -1411,7 +1593,10 @@ const PS = {
     this.weapon_skills={}; this.ensureWeaponSkills();
     // v0.13: same reused-singleton leak class as weapon_skills above -- a fresh character
     // must not inherit the previous character's Broken Bridge memory or bonfire kindling.
-    this.trial_progress={}; this.dry_branches=0; this.bonfire_bonus_regen=0; this.bonfire_bonus_expires_at=0;
+    this.trial_progress={}; this.bonfire_bonus_regen=0; this.bonfire_bonus_expires_at=0;
+    // v0.14: same reused-singleton leak class as above -- a fresh character must not
+    // inherit the previous character's active potion buffs.
+    this.temp_buffs={};
     // Bug fix (v0.12): this MUST run before getMaxHp()/getMaxStamina() below. PS is a
     // reused singleton across character creations in the same session, so bonus_hp_from_
     // attributes/bonus_stamina_from_attributes/attributes still held whatever the last-
@@ -1440,8 +1625,10 @@ const PS = {
       // survive a save/reload, otherwise the "remembers the faulty plank" guarantee only
       // held within a single browser session -- see getTrialProgress()/screenMasterTrial().
       trial_progress:this.trial_progress||{},
-      dry_branches:this.dry_branches||0,
-      bonfire_bonus_regen:this.bonfire_bonus_regen||0, bonfire_bonus_expires_at:this.bonfire_bonus_expires_at||0};
+      bonfire_bonus_regen:this.bonfire_bonus_regen||0, bonfire_bonus_expires_at:this.bonfire_bonus_expires_at||0,
+      // v0.14: active stat-buff potion timers must survive a save/reload too, same
+      // wall-clock-expiry reasoning as the Bonfire bonus above.
+      temp_buffs:this.temp_buffs||{}};
     if(Net.online) Net.saveCharacter(this.current_slot, data);
     else Storage_.setItem(SAVE_KEY(this.current_slot), JSON.stringify(data));
   },
@@ -1474,9 +1661,10 @@ const PS = {
     // a save/reload -- see getTrialProgress()/screenMasterTrial() and the Kindle the
     // Bonfire button in screenTown().
     this.trial_progress=parsed.trial_progress||{};
-    this.dry_branches=parsed.dry_branches||0;
     this.bonfire_bonus_regen=parsed.bonfire_bonus_regen||0;
     this.bonfire_bonus_expires_at=parsed.bonfire_bonus_expires_at||0;
+    // v0.14: active stat-buff potion timers (see saveGame()).
+    this.temp_buffs=parsed.temp_buffs||{};
     return true;
   },
   loadGame(slot){
@@ -1753,9 +1941,40 @@ function damageLine(){
   ]);
 }
 
+// v0.14: mm:ss countdown text for a temporary buff's hover tooltip (Potion of X, the
+// Bonfire, etc.) -- ceil()'d so the tooltip never shows "0:00" while the buff is still
+// technically active for a fraction of a second.
+function formatMsAsMinSec(ms){
+  const totalSec=Math.max(0,Math.ceil(ms/1000));
+  const m=Math.floor(totalSec/60), s=totalSec%60;
+  return `${m}:${s<10?"0":""}${s}`;
+}
+// v0.14: the 5 new Alchemist stat-buff potions, each shown as a small icon in the player
+// status area (statHeader) while active -- hovering shows exactly what's buffed, by how
+// much, and the time remaining, per Gwen's explicit request ("mouse over the effect's
+// icon should indicate the time remaining").
+const POTION_BUFF_DEFS=[
+  {type:"strength",emoji:"💪",label:"Potion of Might",suffix:" Strength"},
+  {type:"dexterity",emoji:"🏹",label:"Potion of Swiftness",suffix:" Dexterity"},
+  {type:"intelligence",emoji:"🧠",label:"Potion of Intellect",suffix:" Intelligence"},
+  {type:"block_chance",emoji:"🛡️",label:"Potion of Wardveil",suffix:"% Block Chance"},
+  {type:"regen",emoji:"♻️",label:"Potion of Renewal",suffix:" HP/sec and Stamina/sec regen"},
+];
+function activePotionBuffIcons(){
+  const icons=[];
+  for(const def of POTION_BUFF_DEFS){
+    const amt=PS.getActiveTempBuff(def.type);
+    if(amt<=0) continue;
+    const msLeft=PS.getTempBuffMsLeft(def.type);
+    icons.push(h("span",{title:`${def.label} active: +${amt}${def.suffix}. ${formatMsAsMinSec(msLeft)} remaining.`,style:{marginLeft:"4px",cursor:"help"}},[def.emoji]));
+  }
+  return icons;
+}
+
 function statHeader(opts={}){
   const compact=!!opts.compact;
   const c=PS.getClassData();
+  const buffIcons=activePotionBuffIcons();
   return h("div",{class:"panel",style:{marginBottom:compact?"0":"14px"}},[
     h("div",{class:"row",style:{justifyContent:"space-between",alignItems:"flex-start"}},[
       h("div",{},[
@@ -1763,6 +1982,7 @@ function statHeader(opts={}){
         h("div",{class:"muted"},[`Lv ${PS.level} ${c.display_name||""}`]),
         damageLine(),
         PS.kill_streak>0?h("div",{class:"muted"},[`Kill streak: ${PS.kill_streak}`]):null,
+        buffIcons.length?h("div",{style:{marginTop:"2px"}},buffIcons):null,
       ]),
       h("div",{class:"row gap",style:{alignItems:"center"}},[
         h("div",{style:{fontWeight:"bold"}},["Character Sheet"]),
@@ -2201,7 +2421,7 @@ function getVentureDepth(){
 // this panel is purely about spending Dry Branches for a temporary +7/branch bonus to
 // both HP and Stamina regen, previewed via a chevron stepper before you commit.
 function kindleBonfirePanel(){
-  const have=PS.dry_branches||0;
+  const have=PS.consumables["dry_branch"]||0;
   if(GF.bonfireBranchesToKindle==null || GF.bonfireBranchesToKindle>have) GF.bonfireBranchesToKindle=Math.min(GF.bonfireBranchesToKindle||0,have);
   const picked=GF.bonfireBranchesToKindle||0;
   const previewBonus=picked*Balance.DRY_BRANCH_REGEN_PER_UNIT;
@@ -2710,7 +2930,7 @@ function combatLog(cb,msg){ cb.log.push(msg); if(cb.log.length>5) cb.log.shift()
 function grantLoot(lootTable, mult){
   const loot=DL.rollLoot(lootTable);
   if(loot.type==="gear"){
-    const tier=Balance.itemTierForAreaLevel(GF.maze_depth);
+    const tier=Balance.rollItemTier(GF.maze_depth);
     const inst=IF.generate(tier);
     if(PS.addGear(inst)) return `Found ${IF.displayName(inst)}!`;
     return `Found gear but your bags are full, it was left behind.`;
@@ -2855,11 +3075,35 @@ function screenCombat(){
     render();
   }
 
+  // v0.14: fleeing now has a Balance.FLEE_FAIL_CHANCE (20%) chance to fail outright --
+  // the monster gets one more attack (same block-chance/armor math as its normal turn)
+  // and you're still in combat, free to try fleeing again (which can fail again on bad
+  // luck, no cap on attempts). A death on a failed flee attempt ends combat via the
+  // normal endCombatDeath() path, same as any other monster hit.
+  function attemptFlee(){
+    if(Math.random()<Balance.FLEE_FAIL_CHANCE){
+      combatLog(cb,"You fail to flee!");
+      if(Math.random()<PS.getBlockChance()){
+        combatLog(cb,`You block the ${cb.name}'s attack entirely!`);
+      } else {
+        let mdmg=randRange(cb.dmgMin,cb.dmgMax);
+        mdmg*=(1.0-PS.getArmor());
+        PS.current_hp-=mdmg;
+        combatLog(cb,`The ${cb.name} hits you for ${Math.round(mdmg)} damage.`);
+        if(PS.current_hp<1){ PS.current_hp=0; endCombatDeath(); return; }
+      }
+      autosave();
+      render();
+      return;
+    }
+    GF.combat=null; resetMazePositionToStart(); PS.saveGame(); setToast("You flee back to camp, but remember your way through these woods."); GF.goto("town");
+  }
+
   root.appendChild(h("div",{class:"row",style:{marginTop:"10px"}},[
     h("button",{class:"play",onClick:playerTurn},["Attack"]),
     h("button",{disabled:!PS.canUseConsumable(PS.bestAvailableConsumable("health")),onClick:()=>{ PS.useConsumable(PS.bestAvailableConsumable("health")); autosave(); render(); }},["Use Health Potion"]),
     h("button",{disabled:!PS.canUseConsumable(PS.bestAvailableConsumable("stamina")),onClick:()=>{ PS.useConsumable(PS.bestAvailableConsumable("stamina")); autosave(); render(); }},["Use Stamina Potion"]),
-    h("button",{class:"danger",onClick:()=>{ GF.combat=null; resetMazePositionToStart(); PS.saveGame(); setToast("You flee back to camp, but remember your way through these woods."); GF.goto("town"); }},["Flee"]),
+    h("button",{class:"danger",onClick:attemptFlee},["Flee"]),
   ]));
   return root;
 }
@@ -2936,7 +3180,7 @@ function screenStrongholdChest(){
   root.appendChild(h("div",{class:"row"},[
     h("button",{class:"play",onClick:()=>{
       PS._removeConsumableOne("stronghold_key");
-      const tier=Balance.itemTierForAreaLevel(GF.maze_depth);
+      const tier=Balance.rollItemTier(GF.maze_depth);
       const msgs=[];
 
       const gearCount=randIntRange(Balance.STRONGHOLD_CHEST_GEAR_COUNT_MIN,Balance.STRONGHOLD_CHEST_GEAR_COUNT_MAX);
@@ -3044,6 +3288,10 @@ function gearRow(inst, actions){
     gearIcon(inst),
     h("div",{class:"col",style:{flex:"1",minWidth:"0",gap:"2px"}},[
       h("div",{class:"tooltip rarity-"+inst.rarity,style:{fontWeight:"bold"},"data-tip":IF.tooltipText(inst)},[IF.displayName(inst)+` (T${inst.tier})`]),
+      // v0.14: a plain "Ring"/"Head"/"Weapon"/etc. category subtext under every gear name,
+      // so new players don't have to guess an item's slot from its flavorful base name
+      // (e.g. "Rare Withered Petal Ring of Fire" -> "Ring").
+      h("div",{class:"muted",style:{fontSize:".85em"}},[IF.categoryLabel(inst)]),
       h("div",{class:"muted"},[IF.affixSummary(inst)]),
     ]),
     h("div",{class:"gear-row-actions"},actions),
@@ -3156,7 +3404,12 @@ function equipSlotTile(slot){
 
 function screenInventory(){
   const root=h("div",{});
-  root.appendChild(h("h2",{},["Character Sheet"]));
+  root.appendChild(h("div",{class:"row",style:{justifyContent:"space-between",alignItems:"center"}},[
+    h("h2",{style:{margin:"0"}},["Character Sheet"]),
+    // v0.14: entry point into the new Itemization Guide (Tier/Rarity/affix-roll
+    // reference page) -- see screenItemization().
+    h("button",{onClick:()=>{ GF._preItemizationScreen="inventory"; GF.goto("itemization"); }},["Itemization Guide"]),
+  ]));
   const t=toastBox(); if(t) root.appendChild(t);
   root.appendChild(statHeader());
   root.appendChild(skillsBonusPanel());
@@ -3176,8 +3429,9 @@ function screenInventory(){
   root.appendChild(h("div",{class:"muted",style:{marginBottom:"6px"}},["Visit the Blacksmith to salvage gear, or the Merchant to sell it."]));
   if(PS.gear_instances.length===0) root.appendChild(h("div",{class:"muted"},["Empty. Go find some loot in the woods."]));
   for(const inst of [...PS.gear_instances]){
+    const canEquip=PS.canEquipGear(inst);
     root.appendChild(gearRow(inst,[
-      h("button",{onClick:()=>{PS.equipGear(inst.instance_id);autosave();render();}},[PS.wouldSwap(inst)?"Swap":"Equip"]),
+      h("button",{disabled:!canEquip,title:canEquip?"":`Requires Level ${Balance.tierLevelRequirement(inst.tier)} to equip (you are Lv ${PS.level})`,onClick:()=>{PS.equipGear(inst.instance_id);autosave();render();}},[PS.wouldSwap(inst)?"Swap":"Equip"]),
     ]));
   }
 
@@ -3193,7 +3447,7 @@ function screenInventory(){
   for(const itemId of consEntries){
     const item=DL.getItem(itemId);
     root.appendChild(h("div",{class:"row gap",style:{marginBottom:"4px",alignItems:"center",justifyContent:"space-between"}},[
-      h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId,22), `${item.name} x${PS.consumables[itemId]}`]),
+      h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId,22), h("div",{},[`${item.name} x${PS.consumables[itemId]}`, h("div",{class:"muted",style:{fontSize:".85em"}},[DL.itemCategoryLabel(itemId)])])]),
       item.type==="consumable"?h("button",{disabled:!PS.canUseConsumable(itemId),onClick:()=>{PS.useConsumable(itemId);autosave();render();}},["Use"]):
         h("button",{onClick:()=>{PS.useScroll(itemId);autosave();setToast(`${item.name} will boost your next descent by ${item.level_bonus} levels.`);render();}},["Use"]),
     ]));
@@ -3203,7 +3457,7 @@ function screenInventory(){
   const herbEntries=Object.keys(PS.herbs).filter(k=>PS.herbs[k]>0);
   if(herbEntries.length===0) root.appendChild(h("div",{class:"muted"},["None."]));
   for(const herbId of herbEntries){
-    root.appendChild(h("div",{class:"row gap",style:{marginBottom:"4px",alignItems:"center"}},[herbIcon(herbId,22), `${DL.getHerb(herbId).name} x${PS.herbs[herbId]}`]));
+    root.appendChild(h("div",{class:"row gap",style:{marginBottom:"4px",alignItems:"center"}},[herbIcon(herbId,22), h("div",{},[`${DL.getHerb(herbId).name} x${PS.herbs[herbId]}`, h("div",{class:"muted",style:{fontSize:".85em"}},["Herb"])])]));
   }
 
   root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto(GF.inventory_return_to||"town")},["← Back"]));
@@ -3218,7 +3472,15 @@ function screenBlacksmith(){
   const t=toastBox(); if(t) root.appendChild(t);
   root.appendChild(statHeader());
 
-  root.appendChild(h("h3",{},["Reroll Gear (uses materials)"]));
+  root.appendChild(h("div",{class:"row gap",style:{alignItems:"center"}},[
+    h("h3",{style:{margin:"0"}},["Reroll Gear (uses materials)"]),
+    // v0.14 tooltip overhaul: "which items -> which materials" -- the exact formula behind
+    // Salvage/Reroll costs was previously only discoverable by trial and error. Salvage
+    // value and Reroll cost both scale with an item's Tier and its number of affixes
+    // (i.e. its rarity -- Legendary items with more affixes are worth more to salvage AND
+    // cost more to reroll), using the same Balance constants the buttons' numbers come from.
+    h("span",{class:"tooltip muted",style:{fontSize:".85em"},"data-tip":`Salvage value = Tier x number of affixes x ${Balance.SALVAGE_MATERIALS_PER_SLOT} materials.\nReroll cost = Salvage value x ${Balance.REROLL_MATERIAL_COST_MULT}.\nHigher tier and higher rarity (more affixes) both mean more materials.`},["(?)"]),
+  ]));
   if(PS.gear_instances.length===0) root.appendChild(h("div",{class:"muted"},["Bring gear from your backpack to reroll its bonuses."]));
   for(const inst of PS.gear_instances){
     const cost=Balance.rerollCost(inst.tier,IF.slotCount(inst));
@@ -3236,7 +3498,7 @@ function screenBlacksmith(){
     const cost=Balance.bagCraftCost(item.capacity);
     const craftingThis=GF.crafting && GF.crafting.itemId===itemId;
     const tileKids=[
-      h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId), h("div",{style:{fontWeight:"bold"}},[item.name])]),
+      h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId), h("div",{},[h("div",{style:{fontWeight:"bold"}},[item.name]), h("div",{class:"muted",style:{fontSize:".85em"}},["Bag"])])]),
       h("div",{class:"muted"},[`Capacity +${item.capacity}`]),
     ];
     if(craftingThis){
@@ -3262,7 +3524,17 @@ function screenAlchemist(){
 
   root.appendChild(h("h3",{},["Your Herbs"]));
   const herbEntries=Object.keys(PS.herbs).filter(k=>PS.herbs[k]>0);
-  root.appendChild(h("div",{class:"muted"},[herbEntries.length?herbEntries.map(id=>`${DL.getHerb(id).name} x${PS.herbs[id]}`).join(", "):"None yet, gather herbs in the woods."]));
+  // v0.14 tooltip overhaul: each herb name is individually hoverable, showing exactly
+  // where it's found in the maze (HERBS[id].found_in) -- per Gwen's tester finding that
+  // this kind of thing was taking real time to figure out instead of being instant.
+  root.appendChild(h("div",{class:"muted"},
+    herbEntries.length
+      ? herbEntries.flatMap((id,i)=>[
+          i>0?", ":null,
+          h("span",{class:"tooltip","data-tip":DL.getHerb(id).found_in||""},[`${DL.getHerb(id).name} x${PS.herbs[id]}`]),
+        ]).filter(x=>x!=null)
+      : ["None yet, gather herbs in the woods."]
+  ));
 
   root.appendChild(h("h3",{},["Recipes"]));
   const grid=h("div",{class:"grid3"});
@@ -3270,9 +3542,20 @@ function screenAlchemist(){
     const result=DL.getItem(recipe.result_item);
     const can=PS.canAffordRecipe(recipe);
     const brewingThis=GF.brewing && GF.brewing.recipeId===recipe.result_item;
+    const herbIds=Object.keys(recipe.herbs);
     const tileKids=[
-      h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(recipe.result_item), h("div",{style:{fontWeight:"bold"}},[result.name])]),
-      h("div",{class:"muted"},[Object.keys(recipe.herbs).map(h2=>`${DL.getHerb(h2).name} x${recipe.herbs[h2]}`).join(", ")]),
+      h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(recipe.result_item), h("div",{},[
+        // v0.14: hovering the potion/scroll's name itself shows exactly what it does,
+        // with exact numbers (see DL.itemEffectDescription) -- not just its category.
+        h("div",{class:"tooltip",style:{fontWeight:"bold"},"data-tip":DL.itemEffectDescription(recipe.result_item)},[result.name]),
+        h("div",{class:"muted",style:{fontSize:".85em"}},[DL.itemCategoryLabel(recipe.result_item)]),
+      ])]),
+      h("div",{class:"muted"},
+        herbIds.flatMap((h2,i)=>[
+          i>0?", ":null,
+          h("span",{class:"tooltip","data-tip":DL.getHerb(h2).found_in||""},[`${DL.getHerb(h2).name} x${recipe.herbs[h2]}`]),
+        ]).filter(x=>x!=null).concat(recipe.gold_cost?[`, ${recipe.gold_cost}g`]:[])
+      ),
     ];
     if(brewingThis){
       const elapsed=Date.now()-GF.brewing.startedAt;
@@ -3431,7 +3714,7 @@ function screenMerchant(){
     if(item.type==="bag" || Balance.MERCHANT_EXCLUDED_ITEMS.includes(itemId)) continue;
     const price=Balance.itemBuyPrice(item);
     grid.appendChild(h("div",{class:"tile"},[
-      h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId), h("div",{style:{fontWeight:"bold"}},[item.name])]),
+      h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId), h("div",{},[h("div",{style:{fontWeight:"bold"}},[item.name]), h("div",{class:"muted",style:{fontSize:".85em"}},[DL.itemCategoryLabel(itemId)])])]),
       h("div",{class:"muted"},[`${price} gold`]),
       h("button",{style:{marginTop:"6px"},disabled:PS.gold<price,onClick:()=>{ if(PS.buyConsumable(itemId)){autosave(); setToast(`Bought ${item.name}.`);} render(); }},["Buy"]),
     ]));
@@ -3444,7 +3727,7 @@ function screenMerchant(){
     const item=ITEMS[itemId]; if(item.type!=="bag") continue;
     const price=Balance.bagBuyPrice(item.capacity);
     bagGrid.appendChild(h("div",{class:"tile"},[
-      h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId), h("div",{style:{fontWeight:"bold"}},[item.name])]),
+      h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId), h("div",{},[h("div",{style:{fontWeight:"bold"}},[item.name]), h("div",{class:"muted",style:{fontSize:".85em"}},["Bag"])])]),
       h("div",{class:"muted"},[`Capacity +${item.capacity}, ${price} gold`]),
       h("button",{style:{marginTop:"6px"},disabled:PS.gold<price||PS.equipped_bags.length>=Balance.MAX_BAG_SLOTS,onClick:()=>{
         const r=PS.buyBag(itemId); if(r.success){autosave(); setToast(`Bought ${item.name}!`);} else setToast(r.reason); render();
@@ -3546,8 +3829,12 @@ function screenAuctionHouse(){
       const labelEl=isGear
         ? h("span",{class:"tooltip rarity-"+listing.item.rarity,style:{fontWeight:"bold"},"data-tip":IF.tooltipText(listing.item)},[label])
         : h("span",{style:{fontWeight:"bold"}},[label]);
+      // v0.14: a plain-language category subtext (Herb/Ring/Potion/etc.) on every listing,
+      // same reasoning as the gear/consumable rows elsewhere -- buyers browsing the block
+      // shouldn't have to guess what a flavorful item name actually is.
+      const categoryLabel=isGear?IF.categoryLabel(listing.item):(listing.type==="herb"?"Herb":DL.itemCategoryLabel(listing.item_key));
       root.appendChild(h("div",{class:"tile row",style:{marginBottom:"6px",justifyContent:"space-between"}},[
-        h("div",{},[labelEl, h("span",{class:"muted"},[`, listed by ${listing.seller_character_name} (${listing.seller_username})`])]),
+        h("div",{},[labelEl, categoryLabel?h("span",{class:"muted",style:{fontSize:".85em"}},[` (${categoryLabel})`]):null, h("span",{class:"muted"},[`, listed by ${listing.seller_character_name} (${listing.seller_username})`])]),
         h("div",{class:"row gap"},[
           h("span",{class:"gold-text"},[`${listing.price}g`]),
           isMine?h("button",{class:"danger",onClick:async ()=>{
@@ -3625,6 +3912,7 @@ function screenGamblingGoblin(){
       root.appendChild(h("div",{class:"panel"},[
         gearIcon(inst,40),
         h("div",{class:"tooltip rarity-"+inst.rarity,style:{fontWeight:"bold",marginTop:"6px"}},[IF.displayName(inst)+` (T${inst.tier})`]),
+        h("div",{class:"muted",style:{fontSize:".85em"}},[IF.categoryLabel(inst)]),
         h("div",{class:"muted"},[IF.affixSummary(inst)]),
       ]));
       root.appendChild(h("div",{class:"row",style:{marginTop:"10px"}},[
@@ -3645,7 +3933,7 @@ function screenGamblingGoblin(){
 function startGambleRoll(){
   if(PS.gold<Balance.GAMBLE_ITEM_COST) return;
   PS.gold-=Balance.GAMBLE_ITEM_COST;
-  const tier=Balance.itemTierForAreaLevel(PS.level);
+  const tier=Balance.rollItemTier(PS.level);
   const item=IF.generate(tier);
   GF.gambleReveal={startedAt:Date.now(), item, timerStarted:false, granted:false};
   autosave();
@@ -3858,6 +4146,21 @@ function screenAdminPanel(){
 // Kept brief on purpose -- players don't need the internal blow-by-blow, just the
 // highlights per version, most recent first.
 const CHANGELOG=[
+  { version:"v0.14.1", notes:[
+    "Item Tier overhaul: Tier now also gates which character level can equip it (T1 Lv1+, T2 Lv5+, T3 Lv10+, T4 Lv15+, T5 Lv20+) -- you can always still wear a lower tier than your level allows.",
+    "Loot no longer drops a guaranteed fixed tier for its area -- an area's own tier is the likeliest drop, but lower tiers can still turn up (rarely at high level), so low-tier legendaries stay worth finding and trading.",
+    "Every affix stat now has its own roll cap that scales up per tier (e.g. Armor% rolls up to 20/40/60/80/100% across T1-T5), instead of one flat range shared by every stat.",
+    "New Itemization Guide page (via the Character Sheet) spelling out tier level requirements, how many affixes each rarity carries, and the max roll for every stat at every tier.",
+    "Gear tooltips now state the exact character level required to equip that item.",
+  ]},
+  { version:"v0.14", notes:[
+    "Goedendag is now just a plain Dagger, no more in-game joke description.",
+    "Fixed a bug where a found Dry Branch wouldn't register with the Bonfire's chevron stepper.",
+    "Every item now shows a plain category subtext (Herb, Ring, Head, Potion, Scroll, Bag, Key, Kindling, etc.) across the Character Sheet, Blacksmith, Alchemist, Merchant, Auction House, and the Gambling Den.",
+    "Fleeing combat now has a 20% chance to fail, costing you one more hit before you can try again.",
+    "5 new rare herbs and 5 new Alchemist potions: Might (Strength), Swiftness (Dexterity), Intellect (Intelligence), Wardveil (Block Chance), and Renewal (HP/Stamina regen), each a 10-minute temporary buff shown as a hoverable icon in your status area.",
+    "Hover tooltips overhaul: herb names show where to find them, potions/scrolls show exactly what they do, and the Blacksmith's Reroll Gear section explains the materials formula.",
+  ]},
   { version:"v0.13", notes:[
     "Steeper XP curve for high-level characters, so overleveled farming in a low area yields real diminishing returns instead of an easy grind. (Contribution by ImpulseBE)",
     "Broken Bridge Challenge remembers every plank that's already broken under you, not just the ones you've safely crossed, so a step can never truly stall you forever. (Contribution by ImpulseBE)",
@@ -3925,6 +4228,64 @@ function screenChangelog(){
   return root;
 }
 
+/* ================= ITEMIZATION GUIDE (v0.14) =================
+   Player-facing reference page for the Tier/Rarity/affix-roll system -- built in
+   response to tester feedback that "lots of tooltip is missing" for theorycrafting-
+   minded players. Reachable from the Character Sheet's "Itemization Guide" link. */
+
+// A lightweight CSS-grid row helper, matching this file's existing div/row/panel
+// idiom instead of introducing real <table> markup.
+function gridRow(cells, opts={}){
+  return h("div",{style:{display:"grid",gridTemplateColumns:opts.cols||"1fr",gap:"6px",padding:"5px 0",borderBottom:opts.noBorder?"none":"1px solid var(--border)",fontWeight:opts.header?"bold":"normal"}},
+    cells.map(c=>h("div",{class:opts.header?"":"muted",style:{fontSize:opts.header?"1em":".9em"}},[c])));
+}
+
+function screenItemization(){
+  const root=h("div",{});
+  root.appendChild(h("h2",{},["Itemization Guide"]));
+  root.appendChild(h("div",{class:"lore"},["Everything gear-related in one place: tiers, level requirements, rarity, and exactly how high each stat can roll."]));
+
+  root.appendChild(h("h3",{},["Item Tiers"]));
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},["Tier (T1-T5) is separate from Rarity. A tier's level requirement is the LOWEST character level that can equip it -- you can always still wear a lower tier than your level allows. An area's level mostly drops its own \"natural\" tier, but occasionally hands out a lower tier too (never a higher one), so low-tier legendaries stay worth finding and trading even for high-level characters."]));
+  const tierPanel=h("div",{class:"panel",style:{marginBottom:"16px"}});
+  tierPanel.appendChild(gridRow(["Tier","Equip Requirement","Most Common Drop Area"],{cols:"1fr 1fr 1fr",header:true}));
+  for(let t=1;t<=Balance.ITEM_TIER_MAX;t++){
+    const lo=Balance.tierLevelRequirement(t);
+    const areaRange=t<Balance.ITEM_TIER_MAX?`Area level ${lo}-${lo+Balance.ITEM_TIER_BRACKET_WIDTH-1}`:`Area level ${lo}+`;
+    tierPanel.appendChild(gridRow([`T${t} (${Balance.itemTierAdjective(t)})`,`Character Level ${lo}+`,areaRange],{cols:"1fr 1fr 1fr",noBorder:t===Balance.ITEM_TIER_MAX}));
+  }
+  root.appendChild(tierPanel);
+
+  root.appendChild(h("h3",{},["Rarity"]));
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},["Rarity decides how many affixes (rolled bonus stats) an item can carry, independent of its Tier."]));
+  const rarityPanel=h("div",{class:"panel",style:{marginBottom:"16px"}});
+  rarityPanel.appendChild(gridRow(["Rarity","Affixes"],{cols:"1fr 1fr",header:true}));
+  Balance.RARITY_TABLE.forEach((r,i)=>{
+    rarityPanel.appendChild(h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px",padding:"5px 0",borderBottom:i===Balance.RARITY_TABLE.length-1?"none":"1px solid var(--border)"}},[
+      h("div",{class:"rarity-"+r.name},[Balance.rarityDisplayName(r.name)||r.name]),
+      h("div",{class:"muted"},[`${r.slots} affix${r.slots===1?"":"es"}`]),
+    ]));
+  });
+  root.appendChild(rarityPanel);
+
+  root.appendChild(h("h3",{},["Max Affix Rolls Per Tier"]));
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},["Every affix rolls between 1 and the max shown below for its own stat and tier -- each stat's max always scales up linearly with tier (Tier N's max = N x that stat's Tier 1 max). Weapons roll a further +40% on any Damage affix they get. Mana and Spell Power affixes are planned for a future update."]));
+  const affixPanel=h("div",{class:"panel",style:{marginBottom:"16px",overflowX:"auto"}});
+  const cols=`1.3fr repeat(${Balance.ITEM_TIER_MAX},1fr)`;
+  affixPanel.appendChild(gridRow(["Stat",...Array.from({length:Balance.ITEM_TIER_MAX},(_,i)=>`T${i+1}`)],{cols,header:true}));
+  Balance.AFFIX_POOL.forEach((stat,i)=>{
+    const maxCells=Array.from({length:Balance.ITEM_TIER_MAX},(_,ti)=>{
+      const max=Balance.affixMaxForTier(stat,ti+1);
+      return IF.affixIsPercent(stat)?`${max}%`:`+${max}`;
+    });
+    affixPanel.appendChild(gridRow([IF.affixLabel(stat),...maxCells],{cols,noBorder:i===Balance.AFFIX_POOL.length-1}));
+  });
+  root.appendChild(affixPanel);
+
+  root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>{ GF.goto(GF._preItemizationScreen||"town"); }},["← Back"]));
+  return root;
+}
+
 /* ================= SCREEN ROUTER ================= */
 
 const SCREENS={
@@ -3952,6 +4313,7 @@ const SCREENS={
   masterTrial: screenMasterTrial,
   adminPanel: screenAdminPanel,
   changelog: screenChangelog,
+  itemization: screenItemization,
 };
 
 // v0.13: town regen tick, reworked -- no more "resting" toggle to click, it's simply
@@ -3961,7 +4323,9 @@ const SCREENS={
 setInterval(()=>{
   if(PS.current_slot<0) return;
   if(!REGEN_ACTIVE_SCREENS.includes(GF.screen)) return;
-  const bonus=PS.getActiveBonfireBonus();
+  // v0.14: Potion of Renewal's temporary regen buff stacks additively with the Bonfire's
+  // kindled bonus, same flat HP/sec + Stamina/sec addition on top of the baseline rate.
+  const bonus=PS.getActiveBonfireBonus()+PS.getActiveTempBuff("regen");
   let changed=false;
   if(PS.current_hp<PS.getMaxHp()){ PS.current_hp=Math.min(PS.getMaxHp(),PS.current_hp+Balance.CAMPFIRE_REGEN_PER_SECOND+bonus); changed=true; }
   if(PS.current_stamina<PS.getMaxStamina()){ PS.current_stamina=Math.min(PS.getMaxStamina(),PS.current_stamina+Balance.CAMPFIRE_STAMINA_REGEN_PER_SECOND+bonus); changed=true; }
