@@ -232,6 +232,13 @@ const ITEMS = {
   // for free, it just never satisfies canUseConsumable() since it has no heal/stamina/
   // eyesight field, so the maze's quick-use buttons never touch it by accident.
   stronghold_key:{name:"Stronghold Key",type:"consumable",sell_value:150},
+  // v0.13: fuel for "Kindle the Bonfire" in town (see PS.kindleBonfire) -- each branch fed
+  // in adds Balance.DRY_BRANCH_REGEN_PER_UNIT to both HP and Stamina regen for 10 minutes.
+  // Same plain "consumable" pattern as stronghold_key: rides the stackable-item plumbing
+  // for free and is excluded from the Merchant's Buy grid (Balance.MERCHANT_EXCLUDED_ITEMS)
+  // since it's meant to be found in the woods or traded on the Auction House, not bought
+  // outright.
+  dry_branch:{name:"Dry Branch",type:"consumable",sell_value:5},
   traveler_pouch:{name:"Traveler's Pouch",type:"bag",capacity:8,sell_value:10},
   woven_bag:{name:"Woven Bramble Bag",type:"bag",capacity:16,sell_value:20},
   bramble_sack:{name:"Bramble Sack",type:"bag",capacity:24,sell_value:32},
@@ -265,10 +272,13 @@ const RECIPES = [
 // medium->greater), leaving Supreme reserved for the Stronghold chest so it stays a
 // step above anything ordinary combat can hand out.
 const LOOT_TABLES = {
-  common:[{type:"nothing",weight:55},{type:"gear",weight:15},{type:"consumable",weight:20,item_id:"minor_health_potion"},{type:"herb",weight:10,herb_id:"sunpetal"}],
-  uncommon:[{type:"nothing",weight:50},{type:"gear",weight:20},{type:"consumable",weight:15,item_id:"health_potion"},{type:"herb",weight:15,herb_id:"emberroot"}],
-  rare:[{type:"nothing",weight:40},{type:"gear",weight:30},{type:"consumable",weight:15,item_id:"medium_health_potion"},{type:"herb",weight:15,herb_id:"frostvine"}],
-  epic:[{type:"nothing",weight:30},{type:"gear",weight:45},{type:"consumable",weight:15,item_id:"greater_health_potion"},{type:"herb",weight:10,herb_id:"frostvine"}],
+  // v0.13: added a small dry_branch weight to every tier (Bonfire kindling fuel, see
+  // ITEMS.dry_branch) -- a basic, unremarkable drop rate for now per Gwen's "we'll tweak
+  // later if needed", shaved off "nothing" so the other odds stay proportionally the same.
+  common:[{type:"nothing",weight:47},{type:"gear",weight:15},{type:"consumable",weight:20,item_id:"minor_health_potion"},{type:"herb",weight:10,herb_id:"sunpetal"},{type:"consumable",weight:8,item_id:"dry_branch"}],
+  uncommon:[{type:"nothing",weight:42},{type:"gear",weight:20},{type:"consumable",weight:15,item_id:"health_potion"},{type:"herb",weight:15,herb_id:"emberroot"},{type:"consumable",weight:8,item_id:"dry_branch"}],
+  rare:[{type:"nothing",weight:34},{type:"gear",weight:30},{type:"consumable",weight:15,item_id:"medium_health_potion"},{type:"herb",weight:15,herb_id:"frostvine"},{type:"consumable",weight:6,item_id:"dry_branch"}],
+  epic:[{type:"nothing",weight:25},{type:"gear",weight:45},{type:"consumable",weight:15,item_id:"greater_health_potion"},{type:"herb",weight:10,herb_id:"frostvine"},{type:"consumable",weight:5,item_id:"dry_branch"}],
 };
 
 const PORTRAITS = {
@@ -382,6 +392,14 @@ function gearIcon(inst,size=30){ return iconBadge(gearIconSvg(inst),size); }
 
 const Balance = {
   LEVEL_CAP:60, KILLS_PER_LEVEL_TARGET:20, MONSTER_BASE_XP:8.0, AREA_XP_GROWTH:0.062,
+  // v0.13: xpRequiredForLevel used to reuse AREA_XP_GROWTH (the same curve monster XP
+  // rewards scale by area level with), which meant a level-28 character farming a level-1
+  // area was only ever a modest ~5x behind what level 29 demanded -- cheap enough that
+  // overleveled players could sit in trivial areas indefinitely. LEVEL_XP_GROWTH is now
+  // its own, steeper constant so the per-level requirement climbs much faster than any
+  // fixed-area monster's reward ever will, without touching area-based combat/loot
+  // balance at all (see xpRequiredForLevel/monsterXpReward below -- they're independent).
+  LEVEL_XP_GROWTH:0.11,
   AREA_LEVEL_MIN:1, AREA_LEVEL_MAX:100, AREA_HP_GROWTH:0.15, AREA_DAMAGE_GROWTH:0.12, AREA_LOOT_GROWTH:0.05,
   // v0.11 difficulty pass: combat was too easy (1-3 shotting things several area levels
   // above character level with only common gear). MONSTER_HP_MULT/MONSTER_DAMAGE_MULT
@@ -397,6 +415,11 @@ const Balance = {
   DEATH_GOLD_LOSS_MIN_PCT:0.30, DEATH_GOLD_LOSS_MAX_PCT:0.60,
   DEATH_ITEM_LOSS_CHANCE:0.50, DEATH_EQUIPPED_LOSS_WEIGHT:0.20, DEATH_BACKPACK_LOSS_WEIGHT:0.30,
   DEATH_ITEM_LOSS_MAX_COUNT:6,
+  // v0.13: a softcore death also costs some experience progress -- 10% of the xp needed
+  // to reach your NEXT level (not your total lifetime xp), floored at 0/xp_to_next so it
+  // can never go negative or eat into an already-earned level. Waking up at 1 HP (not a
+  // full heal) is also new this version, matching Gwen's "knocked out, not rested" note.
+  DEATH_XP_LOSS_PCT:0.10, DEATH_WAKE_HP:1,
   ENCOUNTER_CHANCE_PER_STEP:0.12, TRAP_CHANCE_PER_TILE:0.05,
   OBSTACLE_DENSITY:0.25, GRASS_PATCH_COUNT:18,
   // Independent per-tile roll chances (a 20x10 maze = 200 tiles), replacing the old
@@ -418,19 +441,24 @@ const Balance = {
   // the Stronghold Key, which is meant to be an achievement drop (kill a guardian, get
   // lucky) rather than something gold can shortcut. Still fully tradable on the Auction
   // House between players, that path is untouched.
-  MERCHANT_EXCLUDED_ITEMS:["stronghold_key"],
+  MERCHANT_EXCLUDED_ITEMS:["stronghold_key","dry_branch"],
   STRONGHOLD_CHEST_GOLD_MIN:500, STRONGHOLD_CHEST_GOLD_MAX:1500,
   STRONGHOLD_CHEST_HERBS_MIN:5, STRONGHOLD_CHEST_HERBS_MAX:15,
   STRONGHOLD_CHEST_GEAR_COUNT_MIN:2, STRONGHOLD_CHEST_GEAR_COUNT_MAX:4,
   STRONGHOLD_CHEST_SCROLL_CHANCE:0.25, STRONGHOLD_CHEST_EYESIGHT_CHANCE:0.10, STRONGHOLD_CHEST_BAG_CHANCE:0.30,
   STRONGHOLD_CHEST_POTIONS_MIN:3, STRONGHOLD_CHEST_POTIONS_MAX:9,
+  // v0.13: HP/Stamina regen while in town no longer requires clicking a "Rest" toggle --
+  // it's always on the moment you're in town (see REGEN_ACTIVE_SCREENS below), and
+  // "Kindle the Bonfire" now spends Dry Branches for a temporary bonus stacked on top of
+  // this baseline, instead of being the only way to start regen at all.
   CAMPFIRE_REGEN_PER_SECOND:1.0, CAMPFIRE_STAMINA_REGEN_PER_SECOND:5.0,
+  DRY_BRANCH_REGEN_PER_UNIT:7.0, BONFIRE_KINDLE_DURATION_MS:10*60*1000,
   EXIT_DEPTH_BONUS_PER_DESCENT:1, TRAPDOOR_DEPTH_PENALTY:1,
   CHARACTER_NAME_MAX_LEN:20, ELEMENT_ITEM_CHANCE:0.3,
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.12-web",
+  GAME_VERSION:"v0.13-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   NPC_BLACKSMITH_NAME:"Grondar Emberhand", NPC_ALCHEMIST_NAME:"Maren Thistlebrew", NPC_MERCHANT_NAME:"Cassius Wraithcoin",
@@ -488,10 +516,16 @@ const Balance = {
 
   killStreakStatMult(s){return 1.0+this.KILL_STREAK_STAT_GROWTH_PER_KILL*Math.min(s,this.KILL_STREAK_CAP);},
   killStreakLootMult(s){return 1.0+this.KILL_STREAK_LOOT_GROWTH_PER_KILL*Math.min(s,this.KILL_STREAK_CAP);},
-  xpRequiredForLevel(level){return Math.round(this.KILLS_PER_LEVEL_TARGET*this.monsterXpReward(this.MONSTER_BASE_XP,level));},
+  xpRequiredForLevel(level){return Math.round(this.KILLS_PER_LEVEL_TARGET*this.MONSTER_BASE_XP*Math.pow(1.0+this.LEVEL_XP_GROWTH,level));},
   monsterXpReward(baseXp,areaLevel){return baseXp*Math.pow(1.0+this.AREA_XP_GROWTH,areaLevel);},
   monsterHp(baseHp,areaLevel){return baseHp*this.MONSTER_HP_MULT*Math.pow(1.0+this.AREA_HP_GROWTH,areaLevel);},
   monsterDamage(baseDmg,areaLevel){return baseDmg*this.MONSTER_DAMAGE_MULT*Math.pow(1.0+this.AREA_DAMAGE_GROWTH,areaLevel);},
+  // v0.13: the ankle-bite "trap" tile (NOT the trapdoor, which stays a flat fall-damage
+  // hit) now scales with the area's level -- Gwen's report: a flat 4-12 damage trap was
+  // trivial at area level 13 with 357 HP, multiplying by area level (so ~52-156 at 13)
+  // makes it a real threat again. Traps can now also be lethal (see onStepMaze), which
+  // this scaling is what makes meaningful in the first place.
+  trapDamage(areaLevel){ return randRange(this.TRAP_DAMAGE_MIN,this.TRAP_DAMAGE_MAX)*(areaLevel||1); },
   lootMultiplier(areaLevel){return Math.pow(1.0+this.AREA_LOOT_GROWTH,areaLevel);},
   itemTierForAreaLevel(areaLevel){return clampi(1+Math.floor(areaLevel/15.0),1,this.ITEM_TIER_MAX);},
   itemTierStatRange(tier){const t=clampi(tier,1,this.ITEM_TIER_MAX);return [(t-1)*this.ITEM_STAT_PER_TIER+1,t*this.ITEM_STAT_PER_TIER];},
@@ -582,7 +616,11 @@ const DL = {
 
 const IF = {
   BASE_NAMES:{
-    weapon:["Twig Wand","Bramblestaff","Rootcarver","Thornbow","Charwood Axe","Emberbrand"],
+    // v0.13: added the Dagger weapon type. "Goedendag" is a deliberate easter egg -- a
+    // real 13th/14th-century Flemish spiked club/short-polearm whose name literally
+    // translates from Dutch as "good day"/"hello", requested as an inside joke for
+    // Gwen's Dutch-speaking early testers. See IF.SPECIAL_ITEM_FLAVOR for its flavor text.
+    weapon:["Twig Wand","Bramblestaff","Rootcarver","Thornbow","Charwood Axe","Emberbrand","Thornfang","Bramblespike","Quickthorn","Goedendag"],
     head:["Bramble Circlet","Mosscap","Antlercrown","Leafwood Hood"],
     shoulders:["Bark Mantle","Rootguard Pauldrons","Thistle Shoulderguard"],
     armor:["Big Leaf Wrap","Bark Plate","Mosscloak","Reedmail","Ashen Hide"],
@@ -601,9 +639,13 @@ const IF = {
   // one of a handful of weapon types, and each character tracks permanent, per-type
   // progression (see PS.weapon_skills) built up purely by landing hits with that type
   // equipped -- see registerWeaponHit() in the combat screen's playerTurn().
-  WEAPON_TYPE_BY_BASE_NAME:{"Twig Wand":"wand","Bramblestaff":"staff","Rootcarver":"sword","Thornbow":"bow","Charwood Axe":"axe","Emberbrand":"sword"},
-  WEAPON_TYPE_LIST:["wand","staff","sword","axe","bow"],
-  WEAPON_TYPE_LABELS:{wand:"Wand",staff:"Staff",sword:"Sword",axe:"Axe",bow:"Bow"},
+  WEAPON_TYPE_BY_BASE_NAME:{"Twig Wand":"wand","Bramblestaff":"staff","Rootcarver":"sword","Thornbow":"bow","Charwood Axe":"axe","Emberbrand":"sword","Thornfang":"dagger","Bramblespike":"dagger","Quickthorn":"dagger","Goedendag":"dagger"},
+  WEAPON_TYPE_LIST:["wand","staff","sword","axe","bow","dagger"],
+  WEAPON_TYPE_LABELS:{wand:"Wand",staff:"Staff",sword:"Sword",axe:"Axe",bow:"Bow",dagger:"Dagger"},
+  // v0.13 easter egg: a per-base-name flavor line shown in the item tooltip, currently
+  // only used for the Goedendag joke item (a real medieval weapon whose name is Dutch for
+  // "good day"/"hello" -- see IF.BASE_NAMES.weapon).
+  SPECIAL_ITEM_FLAVOR:{"Goedendag":"A spiked club the size of a person, favored by Flemish militia. Its name literally means \"good day\" in Dutch, and yes, that's the joke."},
   weaponTypeForInstance(inst){ return (inst&&inst.base_name) ? (this.WEAPON_TYPE_BY_BASE_NAME[inst.base_name]||null) : null; },
 
   slotLabel(slot){return this.SLOT_LABELS[slot]||slot;},
@@ -681,6 +723,8 @@ const IF = {
   },
   tooltipText(inst){
     const lines=[`${this.displayName(inst)} (Tier ${inst.tier})`];
+    const flavor=this.SPECIAL_ITEM_FLAVOR[inst.base_name];
+    if(flavor) lines.push(flavor);
     for(const a of inst.affixes) lines.push(this.formatAffix(a));
     return lines.join("\n");
   },
@@ -1133,17 +1177,42 @@ const PS = {
   restoreStamina(amount){ this.current_stamina=Math.min(this.getMaxStamina(),this.current_stamina+amount); },
   addStaminaShrineBuff(bonus){ this.current_stamina=this.getMaxStamina(); this.stamina_shrine_buff+=bonus; },
   addGold(amount){ this.gold=Math.max(0,Math.round(this.gold+amount*this.getGoldFindMult())); },
-  // v0.12: softcore ("non-hardcore") death penalty. Returns {goldLost, itemsLost} so the
-  // caller can tell the player exactly what happened, this is deliberately NOT a silent
-  // penalty (players losing gear they didn't see an explanation for would look like a bug).
+  // v0.13: "Kindle the Bonfire" -- burn `count` Dry Branches for a flat +7/branch bonus to
+  // BOTH HP and Stamina regen per second, for a fixed 10-minute window (real time, tracked
+  // as a wall-clock expiry so it keeps ticking down even if you leave town and come back).
+  // Re-kindling before the old bonus expires simply replaces it (not additive) -- see
+  // getActiveBonfireBonus() for how the regen tick reads this back out.
+  kindleBonfire(count){
+    const have=this.dry_branches||0;
+    if(!count || count<=0 || count>have) return false;
+    this.dry_branches=have-count;
+    this.bonfire_bonus_regen=count*Balance.DRY_BRANCH_REGEN_PER_UNIT;
+    this.bonfire_bonus_expires_at=Date.now()+Balance.BONFIRE_KINDLE_DURATION_MS;
+    return true;
+  },
+  getActiveBonfireBonus(){
+    if(this.bonfire_bonus_expires_at && Date.now()<this.bonfire_bonus_expires_at) return this.bonfire_bonus_regen||0;
+    return 0;
+  },
+  // v0.12: softcore ("non-hardcore") death penalty. Returns {goldLost, itemsLost, xpLost}
+  // so the caller can tell the player exactly what happened, this is deliberately NOT a
+  // silent penalty (players losing progress they didn't see an explanation for would look
+  // like a bug). v0.13 added the xp penalty and dropped the old full-HP-restore -- waking
+  // up back at camp now leaves you at Balance.DEATH_WAKE_HP, not fully healed.
   applyDeathPenalty(){
     const pct=Balance.DEATH_GOLD_LOSS_MIN_PCT+Math.random()*(Balance.DEATH_GOLD_LOSS_MAX_PCT-Balance.DEATH_GOLD_LOSS_MIN_PCT);
     const goldLost=Math.round(this.gold*pct);
     this.gold=Math.max(0,this.gold-goldLost);
+    // 10% of the xp needed for your NEXT level, capped by however much progress you
+    // actually have this level (can't go below 0/xp_to_next, and never touches an
+    // already-earned level -- dying at 0 xp progress costs nothing further).
+    const targetXpLoss=Math.round((this.xp_to_next||0)*Balance.DEATH_XP_LOSS_PCT);
+    const xpLost=Math.min(this.xp,targetXpLoss);
+    this.xp=Math.max(0,this.xp-targetXpLoss);
     const itemsLost=this._rollDeathItemLosses();
-    this.current_hp=this.getMaxHp();
+    this.current_hp=Balance.DEATH_WAKE_HP;
     this.resetKillStreak();
-    return {goldLost,itemsLost};
+    return {goldLost,itemsLost,xpLost};
   },
   // Whether anything is lost at all is a single Balance.DEATH_ITEM_LOSS_CHANCE (50%) roll.
   // If so, how MANY items is a geometric countdown -- keep flipping a 50/50 coin and adding
@@ -1340,6 +1409,9 @@ const PS = {
     // PS is one shared object across character creations in a session, so anything not
     // explicitly reset here would otherwise leak from whatever was played last).
     this.weapon_skills={}; this.ensureWeaponSkills();
+    // v0.13: same reused-singleton leak class as weapon_skills above -- a fresh character
+    // must not inherit the previous character's Broken Bridge memory or bonfire kindling.
+    this.trial_progress={}; this.dry_branches=0; this.bonfire_bonus_regen=0; this.bonfire_bonus_expires_at=0;
     // Bug fix (v0.12): this MUST run before getMaxHp()/getMaxStamina() below. PS is a
     // reused singleton across character creations in the same session, so bonus_hp_from_
     // attributes/bonus_stamina_from_attributes/attributes still held whatever the last-
@@ -1362,7 +1434,14 @@ const PS = {
       max_maze_depth_reached:this.max_maze_depth_reached,
       attributes:this.attributes,unspent_stat_points:this.unspent_stat_points,
       bonus_hp_from_attributes:this.bonus_hp_from_attributes,bonus_stamina_from_attributes:this.bonus_stamina_from_attributes,
-      weapon_skills:this.weapon_skills};
+      weapon_skills:this.weapon_skills,
+      // v0.13: Broken Bridge Challenge progress (which planks are already known-safe per
+      // step, and which have already been tried-and-failed at the current step) must
+      // survive a save/reload, otherwise the "remembers the faulty plank" guarantee only
+      // held within a single browser session -- see getTrialProgress()/screenMasterTrial().
+      trial_progress:this.trial_progress||{},
+      dry_branches:this.dry_branches||0,
+      bonfire_bonus_regen:this.bonfire_bonus_regen||0, bonfire_bonus_expires_at:this.bonfire_bonus_expires_at||0};
     if(Net.online) Net.saveCharacter(this.current_slot, data);
     else Storage_.setItem(SAVE_KEY(this.current_slot), JSON.stringify(data));
   },
@@ -1391,6 +1470,13 @@ const PS = {
     // anything -- a save with no weapon_skills yet (pre-v0.12) just starts everyone at 0.
     this.weapon_skills=parsed.weapon_skills||{};
     this.ensureWeaponSkills();
+    // v0.13: Broken Bridge Challenge memory and bonfire kindling state, both must survive
+    // a save/reload -- see getTrialProgress()/screenMasterTrial() and the Kindle the
+    // Bonfire button in screenTown().
+    this.trial_progress=parsed.trial_progress||{};
+    this.dry_branches=parsed.dry_branches||0;
+    this.bonfire_bonus_regen=parsed.bonfire_bonus_regen||0;
+    this.bonfire_bonus_expires_at=parsed.bonfire_bonus_expires_at||0;
     return true;
   },
   loadGame(slot){
@@ -1406,7 +1492,10 @@ const PS = {
 
 /* ---------- GameFlow-equivalent (screen router) ---------- */
 
-const NO_REGEN_SCREENS_ON_LEAVE=["town","inventory","merchant","alchemist","blacksmith","auctionHouse"];
+// v0.13: HP/Stamina regen is no longer a manually-toggled "resting" state -- it's simply
+// active whenever you're on one of these town-adjacent screens (see the regen tick near
+// the bottom of the file), so it starts the instant you arrive in town, no click required.
+const REGEN_ACTIVE_SCREENS=["town","inventory","merchant","alchemist","blacksmith","auctionHouse","vault","gamblingGoblin","masterTrial"];
 
 const GF = {
   screen:"authGate", selected_slot:-1, pending_delete_slot:-1,
@@ -1418,10 +1507,9 @@ const GF = {
   trialJustFailed:false, trialFailedPlankIndex:null, trialFailedStepIndex:-1,
   ventureDepth:null, mazeOverlay:null, gambleReveal:null,
   admin_token:"", admin_leaderboard_cache:null, admin_leaderboard_error:"",
-  attributesCollapsed:false, leaderboardPage:null,
+  attributesCollapsed:false, leaderboardPage:null, bonfireBranchesToKindle:0,
   goto(screen, extra={}){
     Object.assign(this, extra);
-    if(PS.isRestingAtCampfire && !NO_REGEN_SCREENS_ON_LEAVE.includes(screen)) PS.isRestingAtCampfire=false;
     this.screen=screen; render();
   },
 };
@@ -1917,7 +2005,7 @@ function screenClassPicker(){
 function screenGraveyard(){
   const root=h("div",{});
   root.appendChild(h("h2",{},["Graveyard"]));
-  root.appendChild(h("div",{class:"lore"},["Final resting place for our fallen heroes."]));
+  root.appendChild(h("div",{class:"lore"},["Final resting place for our fallen heroes, every traveler's losses recorded here for all to see."]));
   if(Net.online && Net.graveyardCache===null){
     root.appendChild(h("div",{class:"muted"},["Loading..."]));
     Net.fetchGraveyard().then(render).catch(()=>{ setToast("Could not load the graveyard from the server."); render(); });
@@ -1934,6 +2022,7 @@ function screenGraveyard(){
         h("div",{style:{fontSize:"2.2em",marginBottom:"6px"}},["🪦"]),
         h("div",{style:{fontWeight:"bold"}},[`${e.name}`]),
         h("div",{class:"muted",style:{fontSize:".9em"}},[`Lv ${e.level} ${e.class_name}`]),
+        e.username?h("div",{class:"muted",style:{fontSize:".78em"}},[`played by ${e.username}`]):null,
         h("div",{class:"muted",style:{fontSize:".8em",marginTop:"6px"}},[`${e.cause||"Died in the wilds"}`]),
         h("div",{class:"muted",style:{fontSize:".75em"}},[new Date(e.date||e.died_at).toLocaleDateString()]),
       ]));
@@ -2060,6 +2149,7 @@ function screenLeaderboard(){
         h("span",{style:nameStyle},[`${e.character_name}`]),
         h("span",{class:"muted"},[` (${e.player})`]),
         e.hardcore?h("span",{style:{color:"#e0b23d",fontWeight:"bold"}},[" [Hardcore]"]):null,
+        isDead?h("span",{class:"muted"},[" [Dead]"]):null,
       ]),
       h("div",{class:"muted"},[`Lv ${e.level} ${e.class_name} (Tier ${e.highest_tier_reached}), ${e.lifetime_xp||0} Experience, ${e.gold} Gold`]),
     ]));
@@ -2106,6 +2196,49 @@ function getVentureDepth(){
   return GF.ventureDepth;
 }
 
+// v0.13: "Kindle the Bonfire" replaces the old click-to-toggle "Rest at the Bonfire"
+// button. Regen itself is now always-on in town (see REGEN_ACTIVE_SCREENS/the regen tick),
+// this panel is purely about spending Dry Branches for a temporary +7/branch bonus to
+// both HP and Stamina regen, previewed via a chevron stepper before you commit.
+function kindleBonfirePanel(){
+  const have=PS.dry_branches||0;
+  if(GF.bonfireBranchesToKindle==null || GF.bonfireBranchesToKindle>have) GF.bonfireBranchesToKindle=Math.min(GF.bonfireBranchesToKindle||0,have);
+  const picked=GF.bonfireBranchesToKindle||0;
+  const previewBonus=picked*Balance.DRY_BRANCH_REGEN_PER_UNIT;
+  const activeBonus=PS.getActiveBonfireBonus();
+  const msLeft=activeBonus>0?Math.max(0,(PS.bonfire_bonus_expires_at||0)-Date.now()):0;
+  const minutesLeft=Math.ceil(msLeft/60000);
+
+  const subtext = picked>0
+    ? `Feeding ${picked} Dry Branch${picked===1?"":"es"} would add +${Math.round(previewBonus)} HP/sec and +${Math.round(previewBonus)} Stamina/sec regen for 10 minutes.`
+    : (activeBonus>0
+      ? `Bonfire is kindled: +${Math.round(activeBonus)} HP/sec and +${Math.round(activeBonus)} Stamina/sec regen, ${minutesLeft} minute${minutesLeft===1?"":"s"} left.`
+      : `You have ${have} Dry Branch${have===1?"":"es"}. Each one adds +${Balance.DRY_BRANCH_REGEN_PER_UNIT} HP/sec and Stamina/sec regen for 10 minutes.`);
+
+  return h("div",{class:"col gap"},[
+    h("div",{class:"row venture-row"},[
+      h("div",{class:"panel venture-card",style:{cursor:"default"}},[
+        h("div",{class:"venture-title"},[inlineIcon(BONFIRE_SVG,18)," Kindle the Bonfire"]),
+        h("div",{class:"muted",style:{fontSize:".8em",marginTop:"2px"}},[subtext]),
+      ]),
+      h("div",{class:"panel venture-chevrons"},[
+        h("div",{class:"muted",style:{fontSize:".72em"}},["Branches"]),
+        h("button",{disabled:picked>=have,onClick:()=>{ GF.bonfireBranchesToKindle=Math.min(have,picked+1); render(); }},["▲"]),
+        h("span",{style:{fontWeight:"bold"}},[String(picked)]),
+        h("button",{disabled:picked<=0,onClick:()=>{ GF.bonfireBranchesToKindle=Math.max(0,picked-1); render(); }},["▼"]),
+      ]),
+    ]),
+    h("button",{class:"wide",disabled:picked<=0,onClick:()=>{
+      const ok=PS.kindleBonfire(picked);
+      if(ok){
+        GF.bonfireBranchesToKindle=0; autosave();
+        pushSystemChatMessage(`You feed ${picked} Dry Branch${picked===1?"":"es"} into the bonfire. Regen surges for 10 minutes.`);
+      }
+      render();
+    }},["Kindle the Bonfire"]),
+  ]);
+}
+
 function screenTown(){
   const root=h("div",{});
   root.appendChild(h("h2",{},[getTownName()]));
@@ -2129,11 +2262,7 @@ function screenTown(){
           h("button",{disabled:ventureDepth<=1,onClick:(e)=>{ e.stopPropagation(); GF.ventureDepth=Math.max(1,ventureDepth-1); render(); }},["▼"]),
         ]),
       ]),
-      h("button",{class:"wide",disabled:PS.isRestingAtCampfire && PS.current_hp>=PS.getMaxHp() && PS.current_stamina>=PS.getMaxStamina(),onClick:()=>{
-        PS.isRestingAtCampfire=true; autosave();
-        pushSystemChatMessage("You settle in by the bonfire. HP and Stamina will recover gradually while you stay in camp.");
-        render();
-      }},[inlineIcon(BONFIRE_SVG,18),PS.isRestingAtCampfire?" Resting by the Bonfire...":" Rest at the Bonfire"]),
+      kindleBonfirePanel(),
     ]),
     // top-right: compact stat/inventory tile
     statHeader({compact:true}),
@@ -2481,9 +2610,18 @@ function onStepMaze(maze,targetIdx){
   }
   if(cell.type==="trap" && !cell.cleared){
     cell.cleared=true; cell.type=cell.baseTerrain;
-    const dmg=randRange(Balance.TRAP_DAMAGE_MIN,Balance.TRAP_DAMAGE_MAX);
-    PS.current_hp=Math.max(1,PS.current_hp-dmg);
+    // v0.13: scales with area level now (Gwen's report: a flat 4-12 damage trap was a
+    // non-event at area level 13 with 357 HP) and can be outright lethal -- it no longer
+    // floors at 1 HP the way the trapdoor's fall damage still does.
+    const dmg=Balance.trapDamage(maze.depth);
     PS.spendStamina(Balance.TRAP_STAMINA_LOSS);
+    if(dmg>=PS.current_hp){
+      PS.current_hp=0;
+      autosave();
+      handleTrapDeath();
+      return;
+    }
+    PS.current_hp-=dmg;
     setToast(`Something bites at your ankle! You take ${Math.round(dmg)} damage.`);
     autosave(); render(); return;
   }
@@ -2578,29 +2716,46 @@ function grantLoot(lootTable, mult){
   return "";
 }
 
-function endCombatDeath(){
-  const wasHardcore=PS.hardcore;
-  const monsterName=GF.combat.name;
+// Shared by every death path (monster combat, a lethal Trap) so the graveyard entry,
+// global-chat announcement, and softcore penalty toast are always consistent. `cause` is
+// the graveyard/announce text ("Slain by a Wolf", "Slain by a Trap"); `defeatedLine` is
+// just the opening clause of the softcore toast, e.g. "You were defeated" or "The trap
+// proves fatal".
+function applyDeathAndRedirect(cause, defeatedLine){
   const cd=PS.getClassData();
-  const announcePayload={character_name:PS.character_name, level:PS.level, class_name:cd.display_name||PS.class_id, cause:`been slain by a ${monsterName}`};
-  const result=PS.handleDeath(`Slain by a ${monsterName}`);
-  GF.combat=null;
+  const announcePayload={character_name:PS.character_name, level:PS.level, class_name:cd.display_name||PS.class_id, cause:`been ${cause.charAt(0).toLowerCase()}${cause.slice(1)}`};
+  const result=PS.handleDeath(cause);
   if(result.dead){
     setToast("Your journey ends here. A new entry has been added to the Graveyard.");
     Net.announceDeath(announcePayload);
     GF.goto("mainMenuSlots");
   }
   else {
-    // v0.12: spell out exactly what the death penalty took, so losing gear on death
-    // doesn't read as a bug -- see PS.applyDeathPenalty/_rollDeathItemLosses.
+    // v0.12: spell out exactly what the death penalty took, so losing gear/xp on death
+    // doesn't read as a bug -- see PS.applyDeathPenalty/_rollDeathItemLosses. v0.13 added
+    // the experience loss to that same spelled-out message.
     const p=result.penalty;
-    let msg=`You were defeated and wake up back at camp, having lost ${p.goldLost} gold.`;
+    let msg=`${defeatedLine} and wake up back at camp with ${Balance.DEATH_WAKE_HP} HP, having lost ${p.goldLost} gold and ${p.xpLost} experience.`;
     if(p.itemsLost.length>0) msg+=` You also lost: ${p.itemsLost.join(", ")}.`;
     setToast(msg);
     resetMazePositionToStart();
     PS.saveGame();
     GF.goto("town");
   }
+  return result;
+}
+
+function endCombatDeath(){
+  const monsterName=GF.combat.name;
+  GF.combat=null;
+  applyDeathAndRedirect(`Slain by a ${monsterName}`, "You were defeated");
+}
+
+// v0.13: traps can now kill outright (see onStepMaze) -- a hardcore character slain this
+// way gets the same graveyard/announce treatment as a monster kill, just with "a Trap" as
+// the cause instead of a monster name.
+function handleTrapDeath(){
+  applyDeathAndRedirect("Slain by a Trap", "The trap proves fatal");
 }
 
 function screenCombat(){
@@ -3381,8 +3536,14 @@ function screenAuctionHouse(){
     for(const listing of Net.auctionCache){
       const isMine=listing.seller_username===Net.username;
       const label=listing.quantity>1?`${listing.display_name} x${listing.quantity}`:listing.display_name;
+      // v0.13: gear listings get the same hover tooltip (full stat breakdown) the
+      // Character Sheet already shows, so buyers can inspect an item before spending gold.
+      const isGear=listing.type==="gear" && listing.item;
+      const labelEl=isGear
+        ? h("span",{class:"tooltip rarity-"+listing.item.rarity,style:{fontWeight:"bold"},"data-tip":IF.tooltipText(listing.item)},[label])
+        : h("span",{style:{fontWeight:"bold"}},[label]);
       root.appendChild(h("div",{class:"tile row",style:{marginBottom:"6px",justifyContent:"space-between"}},[
-        h("div",{},[h("span",{style:{fontWeight:"bold"}},[label]), h("span",{class:"muted"},[`, listed by ${listing.seller_character_name} (${listing.seller_username})`])]),
+        h("div",{},[labelEl, h("span",{class:"muted"},[`, listed by ${listing.seller_character_name} (${listing.seller_username})`])]),
         h("div",{class:"row gap"},[
           h("span",{class:"gold-text"},[`${listing.price}g`]),
           isMine?h("button",{class:"danger",onClick:async ()=>{
@@ -3492,9 +3653,17 @@ function startGambleRoll(){
 
 function getTrialProgress(){
   if(!PS.trial_progress) PS.trial_progress={};
-  if(!PS.trial_progress[PS.class_id]) PS.trial_progress[PS.class_id]={stage:0,discoveredSides:[]};
-  if(!PS.trial_progress[PS.class_id].discoveredSides) PS.trial_progress[PS.class_id].discoveredSides=[];
-  return PS.trial_progress[PS.class_id];
+  if(!PS.trial_progress[PS.class_id]) PS.trial_progress[PS.class_id]={stage:0,discoveredSides:[],stepFailedPlanks:{}};
+  const p=PS.trial_progress[PS.class_id];
+  if(!p.discoveredSides) p.discoveredSides=[];
+  // v0.13: per-step memory of which planks have already been tried and failed AT THE
+  // CURRENT (not-yet-solved) step, keyed by step index. Never reset by a failed attempt --
+  // that's the whole point, "the bridge remembers every faulty plank you've already
+  // found" now applies mid-step too, not just to fully-solved steps. See attemptStep()
+  // in screenMasterTrial() for how this guarantees a step is solved within plankCount
+  // attempts (the last untried plank is always the safe one).
+  if(!p.stepFailedPlanks) p.stepFailedPlanks={};
+  return p;
 }
 
 function screenMasterTrial(){
@@ -3532,14 +3701,22 @@ function screenMasterTrial(){
 
   function attemptStep(plankIndex){
     if(failed) return;
-    const passed=Math.random()<stepChance;
+    const stepIdx=progress.discoveredSides.length;
+    const failedHere=progress.stepFailedPlanks[stepIdx]||[];
+    if(failedHere.includes(plankIndex)) return; // already known-bad, shouldn't be clickable anyway
+    // v0.13: once every OTHER plank at this step has already failed, the last remaining
+    // one is guaranteed safe -- "the bridge remembers the faulty plank", so this can never
+    // regress into an unwinnable step. Otherwise it's a plain 1-in-remaining roll.
+    const remaining=plankCount-failedHere.length;
+    const passed=remaining<=1 ? true : Math.random()<(1/remaining);
     if(passed){
       progress.discoveredSides.push(plankIndex);
+      delete progress.stepFailedPlanks[stepIdx];
       autosave();
       if(progress.discoveredSides.length>=rows){
         const nameBefore=c.display_name, levelBefore=PS.level;
         const result=PS.resolveMasterTrial(true);
-        PS.trial_progress[PS.class_id]={stage:0,discoveredSides:[]};
+        PS.trial_progress[PS.class_id]={stage:0,discoveredSides:[],stepFailedPlanks:{}};
         autosave();
         Net.announceTrialResult({character_name:PS.character_name, level:levelBefore, class_name:nameBefore, result:"passed", new_class_name:DL.getClass(PS.class_id).display_name});
         setToast(result.final_tier?`You have mastered the ${c.chain} path completely!`:`You are promoted to ${DL.getClass(PS.class_id).display_name}!`);
@@ -3547,9 +3724,11 @@ function screenMasterTrial(){
       }
       render();
     } else {
-      GF.trialJustFailed=true; GF.trialFailedPlankIndex=plankIndex; GF.trialFailedStepIndex=progress.discoveredSides.length;
-      setToast("The plank gives way beneath you! The attempt ends here.");
-      Net.announceTrialResult({character_name:PS.character_name, level:PS.level, class_name:c.display_name, result:"failed", failed_step:progress.discoveredSides.length+1});
+      failedHere.push(plankIndex);
+      progress.stepFailedPlanks[stepIdx]=failedHere;
+      GF.trialJustFailed=true; GF.trialFailedPlankIndex=plankIndex; GF.trialFailedStepIndex=stepIdx;
+      setToast("The plank gives way beneath you! The attempt ends here, but you'll remember this plank next time.");
+      Net.announceTrialResult({character_name:PS.character_name, level:PS.level, class_name:c.display_name, result:"failed", failed_step:stepIdx+1});
       PS.resolveMasterTrial(false);
       autosave();
       render();
@@ -3562,13 +3741,17 @@ function screenMasterTrial(){
   for(let i=0;i<rows;i++){
     const discoveredPlank=progress.discoveredSides[i];
     const isCurrent=i===progress.discoveredSides.length && !failed;
-    const isFailedStep=failed && i===GF.trialFailedStepIndex;
+    // v0.13: show EVERY plank already tried-and-failed at the current step as red/known-
+    // bad, not just the most recent one -- this is the persistent memory the player is
+    // relying on to narrow down (and eventually guarantee) the safe plank.
+    const knownFailedHere=progress.stepFailedPlanks[i]||[];
     const col=h("div",{class:"col gap",style:{alignItems:"center"}});
     for(let p=0;p<plankCount;p++){
       const isSafe=discoveredPlank===p;
-      const isUnsafe=isFailedStep && GF.trialFailedPlankIndex===p;
+      const isUnsafe=knownFailedHere.includes(p);
       col.appendChild(h("button",{class:"plank-btn"+(isSafe?" safe":(isUnsafe?" unsafe":"")),
-        disabled:!isCurrent,
+        disabled:!isCurrent || isUnsafe,
+        title:isUnsafe?"You already know this plank breaks.":"",
         onClick:()=>attemptStep(p)},[inlineIcon(FOOTSTEP_SVG,16)]));
     }
     plankCols.appendChild(col);
@@ -3671,6 +3854,19 @@ function screenAdminPanel(){
 // Kept brief on purpose -- players don't need the internal blow-by-blow, just the
 // highlights per version, most recent first.
 const CHANGELOG=[
+  { version:"v0.13", notes:[
+    "Steeper XP curve for high-level characters, so overleveled farming in a low area yields real diminishing returns instead of an easy grind. (Contribution by ImpulseBE)",
+    "Broken Bridge Challenge remembers every plank that's already broken under you, not just the ones you've safely crossed, so a step can never truly stall you forever. (Contribution by ImpulseBE)",
+    "New Dagger weapon class, including a certain oddly-named Flemish surprise for the Dutch speakers in the room. (Contribution by ImpulseBE)",
+    "Auction House listings now show the same full item tooltip on hover as your Character Sheet. (Shared Discord contribution)",
+    "HP and Stamina regeneration now kicks in the moment you set foot in town, no more clicking Rest first. (Contributions by Evsie & Fragbunny)",
+    "Rest at the Bonfire is now Kindle the Bonfire: burn Dry Branches (a new woodland find) for a temporary regen boost.",
+    "Softcore defeat now leaves you at 1 HP and costs a slice of your current level's experience, both spelled out in the same message as your gold and gear losses.",
+    "The ankle-biting trap now scales with the area you're in, and can be lethal.",
+    "Fixed the leaderboard showing a stale, long-gone peak level/tier instead of your character's current standing.",
+    "The public Leaderboard shows [Dead] on fallen hardcore characters, matching the admin view.",
+    "The Graveyard is now a true public memorial, showing every fallen hero, not just your own.",
+  ]},
   { version:"v0.12", notes:[
     "Maze Strongholds: every venture now hides a guarded 3x3 vault with a locked chest worth fighting for.",
     "Necromancer renamed to Summoner.",
@@ -3754,15 +3950,17 @@ const SCREENS={
   changelog: screenChangelog,
 };
 
-/* ---------- Campfire regen tick: gradual HP/Stamina recovery while resting in camp ---------- */
-const REGEN_ACTIVE_SCREENS=["town","inventory"];
+// v0.13: town regen tick, reworked -- no more "resting" toggle to click, it's simply
+// active on any REGEN_ACTIVE_SCREENS screen (see GF above), and the Bonfire's kindled
+// bonus (getActiveBonfireBonus, from spending Dry Branches) stacks on top of the flat
+// baseline rate for as long as its 10-minute window lasts.
 setInterval(()=>{
-  if(!PS.isRestingAtCampfire || PS.current_slot<0) return;
+  if(PS.current_slot<0) return;
   if(!REGEN_ACTIVE_SCREENS.includes(GF.screen)) return;
+  const bonus=PS.getActiveBonfireBonus();
   let changed=false;
-  if(PS.current_hp<PS.getMaxHp()){ PS.current_hp=Math.min(PS.getMaxHp(),PS.current_hp+Balance.CAMPFIRE_REGEN_PER_SECOND); changed=true; }
-  if(PS.current_stamina<PS.getMaxStamina()){ PS.current_stamina=Math.min(PS.getMaxStamina(),PS.current_stamina+Balance.CAMPFIRE_STAMINA_REGEN_PER_SECOND); changed=true; }
-  if(PS.current_hp>=PS.getMaxHp() && PS.current_stamina>=PS.getMaxStamina()) PS.isRestingAtCampfire=false;
+  if(PS.current_hp<PS.getMaxHp()){ PS.current_hp=Math.min(PS.getMaxHp(),PS.current_hp+Balance.CAMPFIRE_REGEN_PER_SECOND+bonus); changed=true; }
+  if(PS.current_stamina<PS.getMaxStamina()){ PS.current_stamina=Math.min(PS.getMaxStamina(),PS.current_stamina+Balance.CAMPFIRE_STAMINA_REGEN_PER_SECOND+bonus); changed=true; }
   if(changed){ PS.saveGame(); render(); }
 },1000);
 

@@ -300,16 +300,22 @@ app.put("/api/characters/:slot", requireAuth, (req, res) => {
      ON CONFLICT(account_id, slot) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at`
   ).run(req.account.id, slot, json, nowIso());
 
-  // Track this character's personal best for the leaderboard, independent of live deletion.
+  // Track this character on the leaderboard. `level` and `gold` reflect the character's
+  // CURRENT state (a Broken Bridge Challenge failure resets level to 1, and that must be
+  // visible on the leaderboard, not masked by a frozen historic peak -- see Gwen's v0.13
+  // bug report: a demoted-and-reground level 2 character was still showing as level 12 /
+  // rank 1). `highest_tier_reached` and `lifetime_xp` are genuinely monotonic lifetime
+  // stats (tier never decreases, lifetime_xp only ever accumulates), so those two keep
+  // their MAX() semantics.
   if (data.character_name && data.class_display_name) {
     db.prepare(
       `INSERT INTO leaderboard_bests (account_id, character_name, class_name, level, highest_tier_reached, gold, updated_at, hardcore, lifetime_xp, is_dead)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
        ON CONFLICT(account_id, character_name) DO UPDATE SET
          class_name=excluded.class_name,
-         level=MAX(leaderboard_bests.level, excluded.level),
+         level=excluded.level,
          highest_tier_reached=MAX(leaderboard_bests.highest_tier_reached, excluded.highest_tier_reached),
-         gold=MAX(leaderboard_bests.gold, excluded.gold),
+         gold=excluded.gold,
          updated_at=excluded.updated_at,
          hardcore=excluded.hardcore,
          lifetime_xp=MAX(leaderboard_bests.lifetime_xp, excluded.lifetime_xp),
@@ -389,10 +395,12 @@ app.put("/api/vault", requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+// v0.13: the Graveyard is a public memorial, not a per-account death log -- every
+// fallen hardcore character should be visible to every player, not just their own.
 app.get("/api/graveyard", requireAuth, (req, res) => {
   const rows = db
-    .prepare("SELECT name, class_name, level, cause, died_at FROM graveyard WHERE account_id = ? ORDER BY died_at DESC LIMIT 100")
-    .all(req.account.id);
+    .prepare("SELECT username, name, class_name, level, cause, died_at FROM graveyard ORDER BY died_at DESC LIMIT 200")
+    .all();
   res.json({ entries: rows });
 });
 
