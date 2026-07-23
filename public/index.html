@@ -479,6 +479,12 @@ const Balance = {
     while(this.weaponSkillCumulativeHitsForLevel(level+1)<=hits) level++;
     return level;
   },
+  // Bug fix (v0.12): Stronghold Keys must only be obtainable while fighting in an area
+  // at or above the character's own level, otherwise a high-level character could revisit
+  // a trivial low-level maze and farm guaranteed-easy guardian kills for keys, undermining
+  // the whole "worth the effort" point of the mechanic. The guardian fight itself, and the
+  // chest's other loot, are unaffected -- only the key drop roll is gated.
+  strongholdKeyEligible(mazeDepth, playerLevel){ return (mazeDepth||1)>=(playerLevel||1); },
   salvageValue(tier,slots){return tier*slots*this.SALVAGE_MATERIALS_PER_SLOT;},
   rerollCost(tier,slots){return this.salvageValue(tier,slots)*this.REROLL_MATERIAL_COST_MULT;},
   sellValue(tier,slots){return tier*this.SELL_GOLD_PER_TIER+slots*this.SELL_GOLD_PER_SLOT;},
@@ -2439,7 +2445,14 @@ function onStepMaze(maze,targetIdx){
   // Monsters only lurk in tall grass, dirt paths and other special tiles are always safe.
   if(cell.type==="grass" && Math.random()<Balance.ENCOUNTER_CHANCE_PER_STEP){
     const monster=DL.pickRandomMonsterForArea(maze.depth);
-    GF.goto("combat",{maze_depth:maze.depth, pending_monster_id:monster.id});
+    // Bug fix (v0.12): pending_guardian_cell_idx MUST be explicitly cleared here. GF.goto
+    // only Object.assign()s the keys it's given, so a leftover guardian-cell index from a
+    // PREVIOUS Stronghold fight this session would otherwise still be sitting on GF and
+    // get picked up by ensureCombat()'s isGuardian check for this completely unrelated,
+    // ordinary grass encounter -- that's what was turning every regular mob into a
+    // "Guardian" (with the tripled HP and Stronghold Key drop chance) once you'd fought
+    // even one real guardian.
+    GF.goto("combat",{maze_depth:maze.depth, pending_monster_id:monster.id, pending_guardian_cell_idx:null});
     return;
   }
   autosave();
@@ -2578,11 +2591,17 @@ function screenCombat(){
           if(cell){ cell.cleared=true; }
           if(maze.stronghold && cell && cell.guardianSlot!=null) maze.stronghold.guardianDefeated[cell.guardianSlot]=true;
         }
-        if(Math.random()<Balance.STRONGHOLD_KEY_DROP_CHANCE){
+        // v0.12 bug fix: keys only drop in an area at or above the character's own level,
+        // so a high-level character can't revisit a trivial low-level maze and farm
+        // guaranteed-easy guardian kills for keys (see Balance.strongholdKeyEligible).
+        const keyEligible=Balance.strongholdKeyEligible(GF.maze_depth, PS.level);
+        if(keyEligible && Math.random()<Balance.STRONGHOLD_KEY_DROP_CHANCE){
           PS.addConsumable("stronghold_key",1);
           cb.result_text+=" It drops a Stronghold Key!";
-        } else {
+        } else if(keyEligible){
           cb.result_text+=" The path to the Stronghold's chest is open, if you can find a key.";
+        } else {
+          cb.result_text+=" The path to the Stronghold's chest is open, though this area is too tame for its guardians to yield a Stronghold Key.";
         }
       }
       autosave();
