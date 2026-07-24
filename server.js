@@ -82,6 +82,20 @@ db.exec(`
     cause TEXT,
     died_at TEXT NOT NULL
   );
+  -- v0.16 (#334): Graveyard flower tribute -- one row per (grave, account) pair, so a
+  -- given logged-in account can leave exactly one tribute on any given grave (the UNIQUE
+  -- constraint below is what enforces that server-side; the client can retry all it wants,
+  -- it'll just get the same 400 back). username is copied from the account at insert time
+  -- (not client-supplied) purely so the public GET /api/graveyard response doesn't need to
+  -- join against accounts every time it's read.
+  CREATE TABLE IF NOT EXISTS graveyard_tributes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    grave_id INTEGER NOT NULL,
+    account_id INTEGER NOT NULL,
+    username TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(grave_id, account_id)
+  );
   CREATE TABLE IF NOT EXISTS leaderboard_bests (
     account_id INTEGER NOT NULL,
     character_name TEXT NOT NULL,
@@ -150,6 +164,13 @@ function newToken() {
 }
 function nowIso() {
   return new Date().toISOString();
+}
+// v0.16: Auction House listing fee -- Gwen's spec is "1g for items priced 1-99g, 2g for
+// 100-199, 3g for 200-299, and continue like that", i.e. +1g of fee per 100g bracket the
+// asking price falls into. Charged server-side (not just checked/deducted on the client)
+// so a modified client can't post free listings -- see its use in POST /api/auction below.
+function auctionListingFee(price) {
+  return Math.floor(price / 100) + 1;
 }
 
 function createAccount(username, passcode, email) {
@@ -297,10 +318,40 @@ app.put("/api/characters/:slot", requireAuth, (req, res) => {
   const data = req.body;
   if (!data || typeof data !== "object") return res.status(400).json({ error: "Invalid character data." });
   const json = JSON.stringify(data);
-  db.prepare(
-    `INSERT INTO characters (account_id, slot, data, updated_at) VALUES (?, ?, ?, ?)
-     ON CONFLICT(account_id, slot) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at`
-  ).run(req.account.id, slot, json, nowIso());
+
+  // v0.15.1 BUG FIX (progression/loot/trial setbacks on browser close, etc.): autosave
+  // fires very frequently (every meaningful action, plus once a second while regen is
+  // active) and each call used to be an independent, un-awaited PUT with zero ordering
+  // guarantee -- ordinary network jitter could let an OLDER save's request arrive here
+  // AFTER a NEWER one that had already landed, and this route would just blindly overwrite
+  // the newer state with the older one. That's a real, silent rollback with no error on
+  // either end, and it explains reports of "random" progress/loot/trial setbacks that have
+  // nothing to do with the browser Back button specifically (see the bfcache/pageshow fix
+  // above this route in a previous patch, which only covers that one distinct cause).
+  //
+  // Each save now carries a strictly-increasing `_save_seq` (see PS._nextSaveSeq() and
+  // Net.saveCharacter()'s client-side request-coalescing, which already makes this race far
+  // less likely on its own). This WHERE clause is the server-side backstop: the UPDATE
+  // becomes a no-op (0 rows changed, NOT an error) whenever the incoming sequence isn't
+  // actually newer than what's already stored, so a late-arriving stale write can never
+  // clobber a fresher one. Saves with no _save_seq at all (older cached clients, or this
+  // being the very first save for a fresh slot) are always let through.
+  const result = db
+    .prepare(
+      `INSERT INTO characters (account_id, slot, data, updated_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(account_id, slot) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at
+       WHERE json_extract(excluded.data, '$._save_seq') IS NULL
+          OR json_extract(characters.data, '$._save_seq') IS NULL
+          OR json_extract(excluded.data, '$._save_seq') > json_extract(characters.data, '$._save_seq')`
+    )
+    .run(req.account.id, slot, json, nowIso());
+
+  if (result.changes === 0) {
+    // A newer (or equal-sequence) save is already stored -- tell the caller so a future
+    // client could react to it, without treating this as an error (autosave doesn't need
+    // conflict-resolution UX the way the Vault's user-facing deposit/withdraw does).
+    return res.json({ ok: true, ignored: true });
+  }
 
   // Track this character on the leaderboard. `level` and `gold` reflect the character's
   // CURRENT state (a Broken Bridge Trial failure resets level to 1, and that must be
@@ -437,11 +488,53 @@ app.put("/api/vault", requireAuth, (req, res) => {
 
 // v0.13: the Graveyard is a public memorial, not a per-account death log -- every
 // fallen hardcore character should be visible to every player, not just their own.
+// v0.16 (#334): now also includes each grave's `id` (needed to target a tribute) and a
+// `tributes` array of usernames who've left a flower on that grave -- fetched as a single
+// second query keyed by grave id, then grouped in JS, rather than an N+1 query per grave.
 app.get("/api/graveyard", requireAuth, (req, res) => {
   const rows = db
-    .prepare("SELECT username, name, class_name, level, cause, died_at FROM graveyard ORDER BY died_at DESC LIMIT 200")
+    .prepare("SELECT id, username, name, class_name, level, cause, died_at FROM graveyard ORDER BY died_at DESC LIMIT 200")
     .all();
-  res.json({ entries: rows });
+  const graveIds = rows.map((r) => r.id);
+  const tributesByGrave = {};
+  if (graveIds.length > 0) {
+    const placeholders = graveIds.map(() => "?").join(",");
+    const tributeRows = db
+      .prepare(`SELECT grave_id, username FROM graveyard_tributes WHERE grave_id IN (${placeholders}) ORDER BY created_at ASC`)
+      .all(...graveIds);
+    for (const t of tributeRows) {
+      (tributesByGrave[t.grave_id] = tributesByGrave[t.grave_id] || []).push(t.username);
+    }
+  }
+  const entries = rows.map((r) => Object.assign({}, r, { tributes: tributesByGrave[r.id] || [] }));
+  res.json({ entries });
+});
+
+// v0.16 (#334): leave a flower/herb tribute on a fallen hero's grave -- purely a cosmetic,
+// lighthearted "mockery" gesture (per Gwen's spec), no gold/item cost, but still fully
+// server-validated: the grave must actually exist, and the tribute is attributed to
+// req.account.username from the caller's OWN session token, never a client-supplied name
+// (so nobody can post a tribute "as" another player). The UNIQUE(grave_id, account_id)
+// constraint on graveyard_tributes caps each account to exactly one tribute per grave --
+// enforced by the database itself, not just a client-side disabled button, so a modified
+// client can't spam the same grave's tribute list with duplicate entries of its own name.
+app.post("/api/graveyard/:id/tribute", requireAuth, (req, res) => {
+  const graveId = Number(req.params.id);
+  if (!Number.isInteger(graveId)) return res.status(400).json({ error: "Invalid grave id." });
+  const grave = db.prepare("SELECT id FROM graveyard WHERE id = ?").get(graveId);
+  if (!grave) return res.status(404).json({ error: "That grave doesn't exist." });
+  try {
+    db.prepare(
+      "INSERT INTO graveyard_tributes (grave_id, account_id, username, created_at) VALUES (?, ?, ?, ?)"
+    ).run(graveId, req.account.id, req.account.username, nowIso());
+  } catch (e) {
+    // UNIQUE constraint violation -- this account already left a tribute here.
+    return res.status(400).json({ error: "You've already left a tribute on this grave." });
+  }
+  const tributeRows = db
+    .prepare("SELECT username FROM graveyard_tributes WHERE grave_id = ? ORDER BY created_at ASC")
+    .all(graveId);
+  res.json({ ok: true, tributes: tributeRows.map((t) => t.username) });
 });
 
 app.get("/api/leaderboard", (req, res) => {
@@ -612,6 +705,39 @@ app.post("/api/auction", requireAuth, (req, res) => {
   if (!character_name || !display_name) return res.status(400).json({ error: "Missing listing details." });
   const numQty = type === "gear" ? 1 : Math.max(1, Number(quantity) || 1);
   const itemJson = type === "gear" ? JSON.stringify(item || {}) : null;
+  const roundedPrice = Math.round(numPrice);
+
+  // v0.16: charge the listing fee against the SELLER'S OWN stored character row before
+  // creating the listing, exactly like the auction buy route already credits the seller's
+  // stored row directly (see /api/auction/:id/buy above) rather than trusting whatever gold
+  // figure the client's request happens to carry. This is the actual security boundary --
+  // the client-side check in index.html is just a convenience/early-exit for the player.
+  const slot = Number.isInteger(seller_slot) ? seller_slot : -1;
+  if (slot < 0) return res.status(400).json({ error: "Missing seller character slot." });
+  const charRow = db.prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?").get(req.account.id, slot);
+  if (!charRow) return res.status(400).json({ error: "Character not found." });
+  let charData;
+  try {
+    charData = JSON.parse(charRow.data);
+  } catch (e) {
+    return res.status(400).json({ error: "Corrupt character data." });
+  }
+  const fee = auctionListingFee(roundedPrice);
+  if ((charData.gold || 0) < fee) {
+    return res.status(400).json({ error: `Not enough gold for the ${fee}g listing fee.` });
+  }
+  charData.gold = (charData.gold || 0) - fee;
+  // Same _save_seq bump pattern as the v0.15.1 stale-write guard, so this direct write
+  // can't be silently clobbered by a slightly-stale autosave already in flight from the
+  // seller's own client (see PS._nextSaveSeq()/saveGame() in index.html).
+  charData._save_seq = Math.max(Date.now(), (charData._save_seq || 0) + 1);
+  db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(
+    JSON.stringify(charData),
+    nowIso(),
+    req.account.id,
+    slot
+  );
+
   const info = db
     .prepare(
       `INSERT INTO auction_listings
@@ -622,16 +748,16 @@ app.post("/api/auction", requireAuth, (req, res) => {
       req.account.id,
       req.account.username,
       character_name,
-      Number.isInteger(seller_slot) ? seller_slot : -1,
+      slot,
       type,
       type === "gear" ? null : String(item_key || ""),
       itemJson,
       display_name,
       numQty,
-      Math.round(numPrice),
+      roundedPrice,
       nowIso()
     );
-  res.json({ ok: true, id: Number(info.lastInsertRowid) });
+  res.json({ ok: true, id: Number(info.lastInsertRowid), fee });
 });
 
 app.delete("/api/auction/:id", requireAuth, (req, res) => {
@@ -676,6 +802,13 @@ app.post("/api/auction/:id/buy", requireAuth, (req, res) => {
       try {
         const d = JSON.parse(sellerRow.data);
         d.gold = (d.gold || 0) + listing.price;
+        // v0.15.1: this credit is written directly to the DB, bypassing the seller's own
+        // client entirely (they aren't present for this request). Bump _save_seq past
+        // whatever's currently stored (see the same field's use in PUT /api/characters/:slot)
+        // so that an older autosave from the seller's client -- one that had already been
+        // queued up before this sale landed, carrying gold data from before the sale --
+        // can't silently overwrite this credit the moment it arrives.
+        d._save_seq = Math.max(Date.now(), (d._save_seq || 0) + 1);
         db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(
           JSON.stringify(d),
           nowIso(),

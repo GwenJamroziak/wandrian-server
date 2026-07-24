@@ -79,6 +79,19 @@ a.back-link,.linklike{color:#cbd9a0;cursor:pointer;text-decoration:underline;}
 .maze-grid{display:grid;gap:1px;background:#000;border:2px solid #333;}
 .maze-tile{width:34px;height:34px;}
 .side-panel{min-width:260px;display:flex;flex-direction:column;gap:8px;}
+/* v0.16 (#332): on-screen D-pad for maze navigation, brought back specifically for
+   touch/mobile -- keyboard arrow keys (see the maze's keydown handler) already cover
+   desktop, and clicking an adjacent tile always works everywhere, so these buttons would
+   just be visual clutter on a desktop screen that already has a keyboard. Hidden by
+   default; only revealed under the same narrow/touch-oriented media query used nowhere
+   else in this file yet, so it never appears at typical desktop browser widths. */
+.maze-mobile-arrows{display:none;}
+@media (max-width:820px){
+  .maze-mobile-arrows{
+    display:grid;grid-template-columns:repeat(3,44px);grid-template-rows:repeat(3,44px);gap:4px;margin-top:6px;
+  }
+  .maze-mobile-arrows button{width:44px;height:44px;font-size:1.2em;padding:0;}
+}
 hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 .tooltip{position:relative;cursor:help;border-bottom:1px dotted var(--muted);}
 .tooltip:hover::after{
@@ -232,13 +245,17 @@ const ITEMS = {
   // for free, it just never satisfies canUseConsumable() since it has no heal/stamina/
   // eyesight field, so the maze's quick-use buttons never touch it by accident.
   stronghold_key:{name:"Stronghold Key",type:"consumable",sell_value:150},
-  // v0.13: fuel for "Kindle the Bonfire" in town (see PS.kindleBonfire) -- each branch fed
-  // in adds Balance.DRY_BRANCH_REGEN_PER_UNIT to both HP and Stamina regen for 10 minutes.
+  // v0.13: fuel for "Kindle the Bonfire" in town (see PS.kindleBonfire) -- each log fed
+  // in adds Balance.DRY_LOG_REGEN_PER_UNIT to both HP and Stamina regen for 10 minutes.
   // Same plain "consumable" pattern as stronghold_key: rides the stackable-item plumbing
   // for free and is excluded from the Merchant's Buy grid (Balance.MERCHANT_EXCLUDED_ITEMS)
   // since it's meant to be found in the woods or traded on the Auction House, not bought
   // outright.
-  dry_branch:{name:"Dry Branch",type:"consumable",sell_value:5},
+  // v0.16: rebranded from the old fallen-twig name to "Dry Log" (10 whole minutes of
+  // surging flame never made sense for a mere twig) -- the internal id key stays
+  // "dry_branch" so existing players' saved stacks of it aren't silently orphaned, only
+  // the display name and all player-facing wording changed.
+  dry_branch:{name:"Dry Log",type:"consumable",sell_value:5},
   // v0.14: 5 new Alchemist-brewed temporary stat-buff potions (see RECIPES for their
   // gold+herb cost, and PS.applyTempBuff/getActiveTempBuff/useConsumable for the buff
   // mechanic itself). All last Balance.POTION_BUFF_DURATION_MS (10 real-time minutes) and
@@ -251,6 +268,14 @@ const ITEMS = {
   potion_of_intellect:{name:"Potion of Intellect",type:"consumable",buff_type:"intelligence",buff_amount:15,buff_duration_ms:10*60*1000,sell_value:35},
   potion_of_wardveil:{name:"Potion of Wardveil",type:"consumable",buff_type:"block_chance",buff_amount:15,buff_duration_ms:10*60*1000,sell_value:50},
   potion_of_renewal:{name:"Potion of Renewal",type:"consumable",buff_type:"regen",buff_amount:12,buff_duration_ms:10*60*1000,sell_value:50},
+  // v0.16: cures the new Poison effect (see PS.applyPoison(), the ankle-bite trap, and
+  // PS.curePoison()/useConsumable() below). Deliberately single-tier only -- no Minor/
+  // Greater variants like the health/stamina potions -- per Gwen's exact spec. Brewed only
+  // at the Alchemist (see RECIPES) and excluded from the Merchant's Buy grid
+  // (Balance.MERCHANT_EXCLUDED_ITEMS), same "found or brewed, not bought outright" pattern
+  // as dry_branch/the stat-buff potions -- but it still rides the ordinary stackable-item
+  // plumbing, so it's freely tradable on the Auction House like anything else.
+  antidote:{name:"Antidote",type:"consumable",cures_poison:true,sell_value:12},
   traveler_pouch:{name:"Traveler's Pouch",type:"bag",capacity:8,sell_value:10},
   woven_bag:{name:"Woven Bramble Bag",type:"bag",capacity:16,sell_value:20},
   bramble_sack:{name:"Bramble Sack",type:"bag",capacity:24,sell_value:32},
@@ -275,6 +300,10 @@ const HERBS = {
   mindroot:{name:"Mindroot Tuber",found_in:"A rare find in herb nodes -- brews into a Potion of Intellect (temporary Intelligence).",rare:true},
   stoneshell_moss:{name:"Stoneshell Moss",found_in:"A rare find in herb nodes -- brews into a Potion of Wardveil (temporary Block Chance).",rare:true},
   vitalbloom:{name:"Vitalbloom Petal",found_in:"A rare find in herb nodes -- brews into a Potion of Renewal (temporary HP/Stamina regen).",rare:true},
+  // v0.16: sole ingredient for the new Antidote (see ITEMS.antidote/RECIPES). A common
+  // (non-rare) herb like sunpetal/moonleaf/emberroot/frostvine, not one of the scarcer
+  // "rare" finds above -- a poison cure shouldn't be gated behind rare-herb luck.
+  cleanwort:{name:"Cleanwort Leaf",found_in:"Herb nodes in any maze."},
 };
 
 const RECIPES = [
@@ -297,6 +326,10 @@ const RECIPES = [
   {id:"brew_potion_of_intellect",result_item:"potion_of_intellect",herbs:{mindroot:3},gold_cost:130},
   {id:"brew_potion_of_wardveil",result_item:"potion_of_wardveil",herbs:{stoneshell_moss:3},gold_cost:190},
   {id:"brew_potion_of_renewal",result_item:"potion_of_renewal",herbs:{vitalbloom:3},gold_cost:190},
+  // v0.16: the Antidote (see ITEMS.antidote/HERBS.cleanwort) -- single-tier only, cheap
+  // since Cleanwort is a common (non-rare) herb, so poison never becomes a run-ending
+  // problem for anyone who's bothered to stock up.
+  {id:"brew_antidote",result_item:"antidote",herbs:{cleanwort:2},gold_cost:20},
 ];
 
 // v0.12.1: potion drops now scale with the same monster tier the loot table is named
@@ -304,13 +337,22 @@ const RECIPES = [
 // medium->greater), leaving Supreme reserved for the Stronghold chest so it stays a
 // step above anything ordinary combat can hand out.
 const LOOT_TABLES = {
-  // v0.13: added a small dry_branch weight to every tier (Bonfire kindling fuel, see
-  // ITEMS.dry_branch) -- a basic, unremarkable drop rate for now per Gwen's "we'll tweak
-  // later if needed", shaved off "nothing" so the other odds stay proportionally the same.
-  common:[{type:"nothing",weight:47},{type:"gear",weight:15},{type:"consumable",weight:20,item_id:"minor_health_potion"},{type:"herb",weight:10,herb_id:"sunpetal"},{type:"consumable",weight:8,item_id:"dry_branch"}],
-  uncommon:[{type:"nothing",weight:42},{type:"gear",weight:20},{type:"consumable",weight:15,item_id:"health_potion"},{type:"herb",weight:15,herb_id:"emberroot"},{type:"consumable",weight:8,item_id:"dry_branch"}],
-  rare:[{type:"nothing",weight:34},{type:"gear",weight:30},{type:"consumable",weight:15,item_id:"medium_health_potion"},{type:"herb",weight:15,herb_id:"frostvine"},{type:"consumable",weight:6,item_id:"dry_branch"}],
-  epic:[{type:"nothing",weight:25},{type:"gear",weight:45},{type:"consumable",weight:15,item_id:"greater_health_potion"},{type:"herb",weight:10,herb_id:"frostvine"},{type:"consumable",weight:5,item_id:"dry_branch"}],
+  // v0.13: added a small dry_branch weight to every tier (Bonfire kindling fuel, now
+  // displayed as "Dry Log", see ITEMS.dry_branch) -- a basic, unremarkable drop rate for
+  // now per Gwen's "we'll tweak later if needed", shaved off "nothing" so the other odds
+  // stay proportionally the same.
+  // v0.16: herb weight slashed to a flat 1 in every tier (all the OTHER weights scaled up
+  // ~3.3x around it, keeping their old relative proportions to each other) so herbs drop
+  // from monster kills/chests only ~1 time in 280-300 on average -- a drastic cut from the
+  // old ~1-in-7-to-10 rate. Gathering (herb nodes in the maze, see MAZE_HERB_CHANCE_PER_TILE/
+  // DL.pickHerbForNode, both UNCHANGED by this) is now the primary way to stock up on herbs;
+  // combat/chests are just an occasional bonus. Regular treasure chests (screenChest) roll
+  // against this same "epic" table, so they automatically inherit the same rarity -- no
+  // separate chest-specific change needed.
+  common:[{type:"nothing",weight:155},{type:"gear",weight:50},{type:"consumable",weight:66,item_id:"minor_health_potion"},{type:"herb",weight:1,herb_id:"sunpetal"},{type:"consumable",weight:26,item_id:"dry_branch"}],
+  uncommon:[{type:"nothing",weight:139},{type:"gear",weight:66},{type:"consumable",weight:50,item_id:"health_potion"},{type:"herb",weight:1,herb_id:"emberroot"},{type:"consumable",weight:26,item_id:"dry_branch"}],
+  rare:[{type:"nothing",weight:112},{type:"gear",weight:99},{type:"consumable",weight:50,item_id:"medium_health_potion"},{type:"herb",weight:1,herb_id:"frostvine"},{type:"consumable",weight:20,item_id:"dry_branch"}],
+  epic:[{type:"nothing",weight:83},{type:"gear",weight:149},{type:"consumable",weight:50,item_id:"greater_health_potion"},{type:"herb",weight:1,herb_id:"frostvine"},{type:"consumable",weight:17,item_id:"dry_branch"}],
 };
 
 const PORTRAITS = {
@@ -482,7 +524,7 @@ const Balance = {
   // the Stronghold Key, which is meant to be an achievement drop (kill a guardian, get
   // lucky) rather than something gold can shortcut. Still fully tradable on the Auction
   // House between players, that path is untouched.
-  MERCHANT_EXCLUDED_ITEMS:["stronghold_key","dry_branch","potion_of_might","potion_of_swiftness","potion_of_intellect","potion_of_wardveil","potion_of_renewal"],
+  MERCHANT_EXCLUDED_ITEMS:["stronghold_key","dry_branch","potion_of_might","potion_of_swiftness","potion_of_intellect","potion_of_wardveil","potion_of_renewal","antidote"],
   STRONGHOLD_CHEST_GOLD_MIN:500, STRONGHOLD_CHEST_GOLD_MAX:1500,
   STRONGHOLD_CHEST_HERBS_MIN:5, STRONGHOLD_CHEST_HERBS_MAX:15,
   STRONGHOLD_CHEST_GEAR_COUNT_MIN:2, STRONGHOLD_CHEST_GEAR_COUNT_MAX:4,
@@ -490,16 +532,19 @@ const Balance = {
   STRONGHOLD_CHEST_POTIONS_MIN:3, STRONGHOLD_CHEST_POTIONS_MAX:9,
   // v0.13: HP/Stamina regen while in town no longer requires clicking a "Rest" toggle --
   // it's always on the moment you're in town (see REGEN_ACTIVE_SCREENS below), and
-  // "Kindle the Bonfire" now spends Dry Branches for a temporary bonus stacked on top of
+  // "Kindle the Bonfire" now spends Dry Logs for a temporary bonus stacked on top of
   // this baseline, instead of being the only way to start regen at all.
+  // v0.16: feeding MORE logs in while the bonfire is still actively surging now ADDS to
+  // the existing bonus (7 -> 14 -> 21...) and refreshes the 10-minute window, instead of
+  // silently discarding the extra log's worth of bonus -- see PS.kindleBonfire().
   CAMPFIRE_REGEN_PER_SECOND:1.0, CAMPFIRE_STAMINA_REGEN_PER_SECOND:5.0,
-  DRY_BRANCH_REGEN_PER_UNIT:7.0, BONFIRE_KINDLE_DURATION_MS:10*60*1000,
+  DRY_LOG_REGEN_PER_UNIT:7.0, BONFIRE_KINDLE_DURATION_MS:10*60*1000,
   EXIT_DEPTH_BONUS_PER_DESCENT:1, TRAPDOOR_DEPTH_PENALTY:1,
   CHARACTER_NAME_MAX_LEN:20, ELEMENT_ITEM_CHANCE:0.3,
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.15-web",
+  GAME_VERSION:"v0.16-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   NPC_BLACKSMITH_NAME:"Grondar Emberhand", NPC_ALCHEMIST_NAME:"Maren Thistlebrew", NPC_MERCHANT_NAME:"Cassius Wraithcoin",
@@ -525,9 +570,12 @@ const Balance = {
   // across T1-T5); the rest of AFFIX_POOL's base values are my own balance judgment call,
   // following the same "meaningful single-affix bonus" sizing logic. Mana/spell-power
   // affixes are intentionally NOT here yet -- Gwen said those come later.
+  // v0.16: Poison Resistance's T1 max is 5, which -- run through the SAME max(tier) =
+  // tier * max(T1) formula above -- lands exactly on Gwen's spec (5/10/15/20/25% across
+  // T1-T5) with no special-casing needed.
   AFFIX_TIER1_MAX:{
     damage:5, hp:15, crit:5, armor:20, regen:5, gold_find:10, xp_find:10,
-    stamina_max:15, strength:5, dexterity:5, vitality:5, intelligence:5,
+    stamina_max:15, strength:5, dexterity:5, vitality:5, intelligence:5, poison_resist:5,
   },
   RARITY_TABLE:[{name:"Common",slots:1,weight:60},{name:"Uncommon",slots:2,weight:25},{name:"Rare",slots:3,weight:10},{name:"Epic",slots:5,weight:4},{name:"Legendary",slots:8,weight:1}],
   // v0.12.1: player-facing rarity wording only -- RARITY_TABLE's own `name` values stay
@@ -540,7 +588,12 @@ const Balance = {
   // plainly low-quality adjective. Legendary is untouched, Gwen didn't ask for it to change.
   RARITY_DISPLAY_NAMES:{Common:"Crude", Uncommon:"", Rare:"Magical", Epic:"Rare", Legendary:"Legendary"},
   rarityDisplayName(name){ return this.RARITY_DISPLAY_NAMES[name]!=null ? this.RARITY_DISPLAY_NAMES[name] : name; },
-  AFFIX_POOL:["damage","hp","crit","armor","regen","gold_find","xp_find","stamina_max","strength","dexterity","vitality","intelligence"],
+  AFFIX_POOL:["damage","hp","crit","armor","regen","gold_find","xp_find","stamina_max","strength","dexterity","vitality","intelligence","poison_resist"],
+  // v0.16: the ankle-bite trap now applies a Poison effect instead of just a one-time
+  // hit -- see PS.applyPoison()/PS.getActiveBonfireBonus()-style getters below. Poison
+  // drains a flat 1 HP/sec (before Poison Resistance) for POISON_DURATION_MS, floors at
+  // 1 HP on its own (never lethal by itself), and can't reduce a resisted amount below 0.
+  POISON_DPS:1.0, POISON_DURATION_MS:40*1000,
   // v0.12: weapons should feel like the slot that defines your damage output. 70% of the
   // time a weapon's affix pool gets "damage" pinned first (guaranteeing it rolls, instead
   // of competing 1-in-12 with every other stat), and when it does, the rolled value is 40%
@@ -633,6 +686,11 @@ const Balance = {
   bridgePlankCount(tier){return clampi((tier||1)+1,this.BRIDGE_MIN_PLANKS,this.BRIDGE_MAX_PLANKS);},
   bridgeStepPassChance(tier){return 1.0/this.bridgePlankCount(tier);},
   trialLevelRequirement(tier){return clampi(tier||1,1,4)*this.TRIAL_LEVEL_REQUIREMENT_PER_TIER;},
+  // v0.16: Auction House listing fee -- 1g for a 1-99g asking price, 2g for 100-199,
+  // 3g for 200-299, and so on (+1g of fee per 100g bracket). Mirrored server-side in
+  // evergrind-server/server.js's own auctionListingFee() -- the SERVER charges this, this
+  // client-side copy is only used to preview/pre-validate before the request is sent.
+  auctionListingFee(price){return Math.floor((price||0)/100)+1;},
   // v0.12: weapon skill hit-count math. Level L is reached once cumulative hits pass
   // WEAPON_SKILL_HIT_STEP * L*(L+1)/2 (a triangular number: 100, 300, 600, 1000, ...),
   // i.e. level L costs L*100 more hits than level L-1 -- matches Gwen's "100 strikes for
@@ -686,6 +744,7 @@ const DL = {
     if(item.type==="scroll") return "Scroll";
     if(id==="stronghold_key") return "Key";
     if(id==="dry_branch") return "Kindling";
+    if(item.cures_poison) return "Antidote";
     if(item.heal_amount!=null || item.stamina_amount!=null || item.eyesight_steps!=null || item.buff_type) return "Potion";
     return "Item";
   },
@@ -704,6 +763,7 @@ const DL = {
       const minutes=Math.round((item.buff_duration_ms||0)/60000);
       return `Temporarily grants +${item.buff_amount}${suffixByType[item.buff_type]||""} for ${minutes} minutes.`;
     }
+    if(item.cures_poison) return "Instantly cures the Poison effect, if you're currently poisoned.";
     if(item.level_bonus!=null) return `Your next venture starts ${item.level_bonus} area level${item.level_bonus===1?"":"s"} higher than your current one.`;
     if(item.type==="bag") return `+${item.capacity} inventory capacity while equipped.`;
     return "";
@@ -837,13 +897,14 @@ const IF = {
     return total;
   },
   slotCount(inst){return (inst.affixes||[]).length;},
-  affixIsPercent(stat){return ["crit","armor","gold_find","xp_find"].includes(stat);},
+  affixIsPercent(stat){return ["crit","armor","gold_find","xp_find","poison_resist"].includes(stat);},
   affixLabel(stat){
     switch(stat){
       case "damage": return "Damage"; case "hp": return "Hit Points"; case "crit": return "Critical Strike";
       case "armor": return "Armor"; case "regen": return "Regeneration"; case "gold_find": return "Gold Found";
       case "xp_find": return "Experience Gained"; case "stamina_max": return "Stamina"; case "eyesight": return "Eyesight";
       case "strength": return "Strength"; case "dexterity": return "Dexterity"; case "vitality": return "Vitality"; case "intelligence": return "Intelligence";
+      case "poison_resist": return "Poison Resistance";
       default: return stat;
     }
   },
@@ -953,13 +1014,54 @@ const Net = {
     this.online=false; this.token=null; this.username=null; this.cache=null;
     this.graveyardCache=null; this.leaderboardCache=null; this.leaderboardCacheHardcore=null;
     this.auctionCache=null; this.vaultCache=null; this.vaultVersion=0; this.chatMessages=[]; this.privateMessages=[];
+    this._saveInFlight={};
     if(this.chatSocket){ try{this.chatSocket.close();}catch(e){} this.chatSocket=null; }
     this.clearPersistedSession();
   },
+  // v0.15.1: autosave fires very often (every action, plus once a second while regen is
+  // active), and every call used to fire its own independent, un-awaited fetch. With no
+  // ordering guarantee on the network, two of those requests could arrive at the server
+  // out of order, letting an OLDER snapshot silently overwrite a NEWER one that had
+  // already landed -- a real, hard-to-reproduce cause of "my progress randomly rolled
+  // back" reports that has nothing to do with the browser Back button. Two fixes:
+  //   1) Coalesce here: never have more than one save in flight per character slot. If a
+  //      save is already in flight when another comes in, just remember the latest data
+  //      and send THAT (not the older one that triggered this call) the moment the current
+  //      request finishes -- this alone eliminates almost all the out-of-order risk since
+  //      there's rarely more than one request on the wire at once.
+  //   2) A per-save sequence number (data._save_seq, see PS._nextSaveSeq()) travels with
+  //      every request as a backstop: the server (see PUT /api/characters/:slot) refuses
+  //      to let a save with an older sequence number overwrite a newer one that's already
+  //      stored, even if it somehow still arrives late.
+  _saveInFlight:{},
   saveCharacter(slot,data){
     if(this.cache) this.cache[slot]={slot,data,updated_at:new Date().toISOString(),empty:false};
-    fetch(this.apiBase()+"/api/characters/"+slot,{method:"PUT",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify(data)})
-      .catch(e=>console.warn("save to server failed",e));
+    let state=this._saveInFlight[slot];
+    if(state && state.busy){ state.latest=data; return; }
+    state={busy:true,latest:null}; this._saveInFlight[slot]=state;
+    this._sendCharacterSave(slot,data,state);
+  },
+  _sendCharacterSave(slot,data,state){
+    const body=JSON.stringify(data);
+    // keepalive lets this request survive the page actually being torn down (tab close,
+    // navigating away) instead of being aborted mid-flight -- this matters most for the
+    // very last save of a session. It has a small body-size ceiling in some browsers, so
+    // a huge payload (a maxed-out endgame backpack) falls back to a plain request rather
+    // than failing to send at all.
+    const attempt=(useKeepalive)=>fetch(this.apiBase()+"/api/characters/"+slot,{method:"PUT",keepalive:useKeepalive,headers:this.authHeaders({"Content-Type":"application/json"}),body})
+      .catch(e=>{
+        if(useKeepalive){
+          // Some browsers throw synchronously/reject a keepalive request that's too large
+          // instead of silently ignoring the flag -- retry once without it.
+          return attempt(false);
+        }
+        console.warn("save to server failed",e);
+      });
+    attempt(true).finally(()=>{
+      const next=state.latest;
+      state.busy=false; state.latest=null;
+      if(next){ state.busy=true; this._sendCharacterSave(slot,next,state); }
+    });
   },
   deleteCharacter(slot,hardcoreDeath){
     if(this.cache) this.cache[slot]={slot,empty:true};
@@ -971,6 +1073,22 @@ const Net = {
     const res=await fetch(this.apiBase()+"/api/graveyard",{headers:this.authHeaders()});
     const json=await res.json().catch(()=>({entries:[]}));
     this.graveyardCache=json.entries||[];
+  },
+  // v0.16 (#334): leave a flower/herb tribute on a fallen hero's grave. Purely cosmetic
+  // (no gold/item cost) and server-attributed to the CALLER'S OWN logged-in username --
+  // see POST /api/graveyard/:id/tribute's comment for why that can't be spoofed, and why
+  // one account can only ever leave one tribute per grave. On success, patches the
+  // matching entry in graveyardCache in place with the server's fresh tribute list, so the
+  // caller can just render() instead of doing a whole fetchGraveyard() round-trip.
+  async leaveTribute(graveId){
+    const res=await fetch(this.apiBase()+"/api/graveyard/"+graveId+"/tribute",{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"})});
+    const json=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(json.error||"Could not leave a tribute.");
+    if(this.graveyardCache){
+      const entry=this.graveyardCache.find(e=>e.id===graveId);
+      if(entry) entry.tributes=json.tributes||entry.tributes;
+    }
+    return json;
   },
   async fetchLeaderboard(){
     const res=await fetch(this.apiBase()+"/api/leaderboard");
@@ -1132,6 +1250,19 @@ function appendGraveyard(entry){
 /* ---------- PlayerState-equivalent ---------- */
 
 const PS = {
+  // v0.15.1: every save gets a strictly-increasing sequence number (see saveGame() and
+  // Net.saveCharacter()) so the server can tell which of two saves is actually newer, even
+  // if their network requests arrive out of order. This is a simple monotonic clock: it
+  // normally just tracks Date.now() in milliseconds, but if two saves happen to fire
+  // within the same millisecond (common -- a maze step can both spend stamina AND trigger
+  // a shrine in one go), it still counts up by at least 1 from whatever it last returned,
+  // so no two saves in the same session ever produce the same or a decreasing number.
+  // _applyLoadedData() below also floors this against whatever sequence was already
+  // stored for the loaded character, so a skewed local clock can never produce a number
+  // lower than what the server already has (which would otherwise get every future save
+  // from that device rejected as "stale" forever).
+  _saveSeqFloor:0,
+  _nextSaveSeq(){ this._saveSeqFloor=Math.max(Date.now(), this._saveSeqFloor+1); return this._saveSeqFloor; },
   class_id:"", character_name:"Hero", level:1, xp:0, xp_to_next:0, gold:0,
   current_hp:0, current_stamina:0, gear_instances:[], equipped:{}, equipped_bags:[],
   consumables:{}, materials:0, herbs:{}, pending_scroll_bonus:0,
@@ -1248,6 +1379,10 @@ const PS = {
   },
   getCritChance(){const c=this.getClassData(); return clampf((c.base_crit||0.05)+this.gearBonus("crit")/100.0,0,0.95);},
   getArmor(){const c=this.getClassData(); return clampf((c.armor||0.0)+this.gearBonus("armor")/100.0,0,0.75);},
+  // v0.16: defensive stat, 0-100%, reduces the Poison effect's HP/sec drain proportionally
+  // (100% = fully immune). Purely gear-driven for now (see AFFIX_POOL/AFFIX_TIER1_MAX's
+  // poison_resist entry) -- no class innately has any.
+  getPoisonResistance(){return clampf(this.gearBonus("poison_resist"),0,100);},
   getRegen(){const c=this.getClassData(); return (c.regen||0.0)+this.gearBonus("regen");},
   getMaxStamina(){return Balance.STAMINA_MAX_BASE+this.gearBonus("stamina_max")+this.bonus_stamina_from_attributes;},
   getGoldFindMult(){return 1.0+this.gearBonus("gold_find")/100.0;},
@@ -1269,6 +1404,9 @@ const PS = {
     const dex=this.gearBonus("dexterity"); if(dex) parts.push(`+${Math.round(dex)} Dexterity`);
     const vit=this.gearBonus("vitality"); if(vit) parts.push(`+${Math.round(vit)} Vitality`);
     const intl=this.gearBonus("intelligence"); if(intl) parts.push(`+${Math.round(intl)} Intelligence`);
+    // v0.16: Poison Resistance is the new defensive stat on the player -- shown here the
+    // same way every other gear-only bonus is, via this per-line summary.
+    const pr=this.gearBonus("poison_resist"); if(pr) parts.push(`+${Math.round(pr)}% Poison Resistance`);
     return parts;
   },
 
@@ -1338,23 +1476,47 @@ const PS = {
   restoreStamina(amount){ this.current_stamina=Math.min(this.getMaxStamina(),this.current_stamina+amount); },
   addStaminaShrineBuff(bonus){ this.current_stamina=this.getMaxStamina(); this.stamina_shrine_buff+=bonus; },
   addGold(amount){ this.gold=Math.max(0,Math.round(this.gold+amount*this.getGoldFindMult())); },
-  // v0.13: "Kindle the Bonfire" -- burn `count` Dry Branches for a flat +7/branch bonus to
+  // v0.13: "Kindle the Bonfire" -- burn `count` Dry Logs for a flat +7/log bonus to
   // BOTH HP and Stamina regen per second, for a fixed 10-minute window (real time, tracked
   // as a wall-clock expiry so it keeps ticking down even if you leave town and come back).
-  // Re-kindling before the old bonus expires simply replaces it (not additive) -- see
+  // v0.16: re-kindling while the previous bonus is STILL ACTIVE now ADDS to it (7 -> 14 ->
+  // 21...) and refreshes the 10-minute window from now, instead of discarding whatever
+  // bonus was already active. Reported bug: feeding a 2nd log while still surging from a
+  // 1st reset the timer back to 10:00 but left the bonus at the old +7 -- see
   // getActiveBonfireBonus() for how the regen tick reads this back out.
   kindleBonfire(count){
     const have=this.consumables["dry_branch"]||0;
     if(!count || count<=0 || count>have) return false;
     const rem=have-count;
     if(rem>0) this.consumables["dry_branch"]=rem; else delete this.consumables["dry_branch"];
-    this.bonfire_bonus_regen=count*Balance.DRY_BRANCH_REGEN_PER_UNIT;
+    const currentBonus=this.getActiveBonfireBonus();
+    this.bonfire_bonus_regen=currentBonus+count*Balance.DRY_LOG_REGEN_PER_UNIT;
     this.bonfire_bonus_expires_at=Date.now()+Balance.BONFIRE_KINDLE_DURATION_MS;
     return true;
   },
   getActiveBonfireBonus(){
     if(this.bonfire_bonus_expires_at && Date.now()<this.bonfire_bonus_expires_at) return this.bonfire_bonus_regen||0;
     return 0;
+  },
+  // v0.16: Poison effect -- inflicted by the ankle-bite trap (see onStepMaze()'s "trap"
+  // case). Wall-clock expiry, same pattern as the Bonfire bonus above, so it keeps
+  // draining even if you change screens or close the tab and come back. Re-triggering
+  // (biting another trap while already poisoned) just refreshes the window back to the
+  // full duration rather than stacking multiple simultaneous poison timers -- there's only
+  // ever one DPS number (a flat 1 HP/sec, see Balance.POISON_DPS), so there's nothing
+  // meaningful to add together the way the Bonfire's per-log bonus stacks.
+  applyPoison(){
+    this.poison_expires_at=Date.now()+Balance.POISON_DURATION_MS;
+  },
+  isPoisoned(){
+    return !!(this.poison_expires_at && Date.now()<this.poison_expires_at);
+  },
+  // Cures the Poison effect outright (see the Antidote potion / useConsumable()).
+  curePoison(){
+    this.poison_expires_at=0;
+  },
+  getPoisonMsLeft(){
+    return this.isPoisoned() ? Math.max(0,this.poison_expires_at-Date.now()) : 0;
   },
   // v0.14: apply/read a temporary stat-buff potion's effect. `type` is one of
   // "intelligence"/"strength"/"dexterity"/"block_chance"/"regen" (see ITEMS' buff_type
@@ -1469,6 +1631,8 @@ const PS = {
     // -- always usable (unlike heal/stamina potions there's no "already full" cap), and
     // drinking one refreshes the timer rather than stacking.
     if(item.buff_type){ this.applyTempBuff(item.buff_type,item.buff_amount,item.buff_duration_ms||Balance.POTION_BUFF_DURATION_MS); used=true; }
+    // v0.16: the Antidote (see ITEMS.antidote/canUseConsumable() above).
+    if(item.cures_poison && this.isPoisoned()){ this.curePoison(); used=true; }
     if(used) this._removeConsumableOne(itemId);
     return used;
   },
@@ -1479,6 +1643,10 @@ const PS = {
     if((item.stamina_amount||0)>0 && this.current_stamina<this.getMaxStamina()) return true;
     if((item.eyesight_steps||0)>0) return true;
     if(item.buff_type) return true;
+    // v0.16: the Antidote is only "usable" (button enabled) while actually poisoned --
+    // same "don't let it fire as a no-op" pattern as health/stamina potions being gated
+    // on not-already-full.
+    if(item.cures_poison && this.isPoisoned()) return true;
     return false;
   },
   bestAvailableConsumable(kind){
@@ -1629,7 +1797,7 @@ const PS = {
   startNewCharacter(classId,name,slot,isHardcore){
     this.current_slot=slot; this.class_id=classId;
     this.character_name=(name||"Hero").slice(0,Balance.CHARACTER_NAME_MAX_LEN);
-    this.hardcore=isHardcore; this.level=1; this.xp=0; this.gold=20; this.materials=0;
+    this.hardcore=isHardcore; this.level=1; this.xp=0; this.gold=0; this.materials=0; // v0.16: new characters now start with 0 gold (was 20)
     this.herbs={}; this.consumables={}; this.gear_instances=[]; this.equipped={};
     for(const s of IF.EQUIPPED_SLOT_KEYS) this.equipped[s]=null;
     this.equipped_bags=[]; this.pending_scroll_bonus=0; this.xp_buff_multiplier=1.0;
@@ -1648,6 +1816,9 @@ const PS = {
     // v0.14: same reused-singleton leak class as above -- a fresh character must not
     // inherit the previous character's active potion buffs.
     this.temp_buffs={};
+    // v0.16: same reused-singleton leak class -- a fresh character must not inherit the
+    // previous character's active Poison effect.
+    this.poison_expires_at=0;
     // Bug fix (v0.12): this MUST run before getMaxHp()/getMaxStamina() below. PS is a
     // reused singleton across character creations in the same session, so bonus_hp_from_
     // attributes/bonus_stamina_from_attributes/attributes still held whatever the last-
@@ -1679,7 +1850,13 @@ const PS = {
       bonfire_bonus_regen:this.bonfire_bonus_regen||0, bonfire_bonus_expires_at:this.bonfire_bonus_expires_at||0,
       // v0.14: active stat-buff potion timers must survive a save/reload too, same
       // wall-clock-expiry reasoning as the Bonfire bonus above.
-      temp_buffs:this.temp_buffs||{}};
+      temp_buffs:this.temp_buffs||{},
+      // v0.16: the Poison effect (see PS.applyPoison()) is real-time and must keep
+      // draining even across a save/reload, same wall-clock-expiry pattern as above.
+      poison_expires_at:this.poison_expires_at||0,
+      // v0.15.1: see _nextSaveSeq() above -- lets the server (and Net.saveCharacter's own
+      // client-side coalescing) tell an old save from a new one regardless of arrival order.
+      _save_seq:this._nextSaveSeq()};
     if(Net.online) Net.saveCharacter(this.current_slot, data);
     else Storage_.setItem(SAVE_KEY(this.current_slot), JSON.stringify(data));
   },
@@ -1716,6 +1893,15 @@ const PS = {
     this.bonfire_bonus_expires_at=parsed.bonfire_bonus_expires_at||0;
     // v0.14: active stat-buff potion timers (see saveGame()).
     this.temp_buffs=parsed.temp_buffs||{};
+    // v0.16: Poison effect timer (see saveGame()/applyPoison()).
+    this.poison_expires_at=parsed.poison_expires_at||0;
+    // v0.15.1: guard against a skewed local clock producing a lower _nextSaveSeq() than
+    // what's already stored server-side for this character (see saveGame()/_nextSaveSeq())
+    // -- if that ever happened, every future save from this device would be silently
+    // rejected by the server's stale-write guard as "older" forever. Flooring the counter
+    // at the loaded save's own sequence number keeps this session's saves strictly above
+    // it regardless of local clock drift.
+    if(parsed._save_seq) this._saveSeqFloor=Math.max(this._saveSeqFloor, parsed._save_seq);
     return true;
   },
   loadGame(slot){
@@ -1772,7 +1958,10 @@ function h(tag, attrs={}, children=[]){
   }
   return e;
 }
-function bar(pct, cls, compact){ return h("div",{class:"bar-bg"+(compact?" compact":"")},[h("div",{class:"bar-fill "+cls, style:{width:clampf(pct,0,100)+"%"}})]); }
+// v0.16: optional `fillId` lets a caller (statHeader(), see refreshStatHeaderInPlace())
+// grab just the inner fill div later for an in-place width update, without touching
+// anything else in the DOM -- see the regen tick's dropdown-closing bug fix below.
+function bar(pct, cls, compact, fillId){ return h("div",{class:"bar-bg"+(compact?" compact":"")},[h("div",{id:fillId||undefined,class:"bar-fill "+cls, style:{width:clampf(pct,0,100)+"%"}})]); }
 function iconBadge(svg, size){ const d=h("div",{class:"icon-badge",style:size?{width:size+"px",height:size+"px"}:{}}); d.innerHTML=svg; return d; }
 
 /* ---------- App root + render ---------- */
@@ -1846,10 +2035,41 @@ function chatPanel(){
 function refreshStatHeaderInPlace(){
   const el=document.getElementById("stat-header-panel");
   if(!el || !el.parentNode) return false;
-  // Every REGEN_ACTIVE_SCREENS screen renders statHeader() with no args (only the maze
-  // view uses the {compact:true} variant, and maze is never a regen-active screen), so
-  // regenerating the plain, non-compact panel here always matches what's already on screen.
-  el.parentNode.replaceChild(statHeader(), el);
+  // v0.16 BUG FIX: this used to call el.parentNode.replaceChild(statHeader(), el) -- rebuild
+  // the whole panel and swap the node. That's a smaller blast radius than a full render(),
+  // but tester report showed even THIS was enough to auto-close an open native <select>
+  // dropdown elsewhere on the page (reported: Auction House filter/sort dropdown closing
+  // in sync with the once-a-second regen tick) -- browsers can treat any nearby DOM
+  // mutation/reflow as reason enough to dismiss an open <select> popup. So instead of
+  // replacing any node at all, just mutate the handful of leaf text/width values that
+  // can actually change on a regen tick (HP/Stamina numbers + bar fill %), in place.
+  const hpText=document.getElementById("stat-hp-text");
+  const hpFill=document.getElementById("stat-hp-bar-fill");
+  const stText=document.getElementById("stat-stamina-text");
+  const stFill=document.getElementById("stat-stamina-bar-fill");
+  if(!hpText||!hpFill||!stText||!stFill) return false;
+  hpText.textContent=`HP ${Math.round(PS.current_hp)}/${Math.round(PS.getMaxHp())}`;
+  hpFill.style.width=clampf(PS.current_hp/PS.getMaxHp()*100,0,100)+"%";
+  stText.textContent=`Stamina ${Math.round(PS.current_stamina)}/${Math.round(PS.getMaxStamina())}`;
+  stFill.style.width=clampf(PS.current_stamina/PS.getMaxStamina()*100,0,100)+"%";
+  return true;
+}
+
+// v0.16 (#331): same reasoning/pattern as refreshStatHeaderInPlace() above -- Gwen asked
+// for the Kindled Bonfire's "remaining" subtext to actually tick down second-by-second in
+// MM:SS, but wondered "will that eat up too much page rerendering?" if done the naive way
+// (a full render() every second just to update one line of text). It doesn't need to: only
+// the #bonfire-countdown-text leaf (see kindleBonfirePanel()) ever needs to change on a
+// plain countdown tick, so this patches just that node's textContent in place, no
+// teardown/rebuild of the page at all. Returns false (a no-op) if the bonfire isn't
+// currently kindled or the node isn't on screen, so the caller knows nothing was patched.
+function refreshBonfireCountdownInPlace(){
+  const el=document.getElementById("bonfire-countdown-text");
+  if(!el || !el.parentNode) return false;
+  const activeBonus=PS.getActiveBonfireBonus();
+  if(activeBonus<=0) return false;
+  const msLeft=Math.max(0,(PS.bonfire_bonus_expires_at||0)-Date.now());
+  el.textContent=`${formatMsAsMinSec(msLeft)} remaining (+${Math.round(activeBonus)} HP/sec and +${Math.round(activeBonus)} Stamina/sec regen).`;
   return true;
 }
 
@@ -1916,7 +2136,28 @@ function pushSystemChatMessage(message){
    meaningful action (combat rounds, maze steps/events, vendor transactions, campfire regen
    ticks) instead of on a fixed timer, so idle sessions don't spam the server with no-op saves. ---------- */
 function autosave(){ if(PS.current_slot>=0) PS.saveGame(); }
-window.addEventListener("beforeunload",()=>{ if(PS.current_slot>=0) PS.saveGame(); });
+// v0.15.1 SEVERE BUG FIX: players reported real progression/loot/trial setbacks after
+// simply closing the browser (or the tab getting backgrounded/killed on mobile) and
+// coming back later -- not a Back/Forward navigation, an actual close. `beforeunload` is
+// the traditional hook for "save before leaving", but it's unreliable in exactly this
+// scenario: it doesn't fire consistently on mobile Safari, doesn't fire at all when a
+// backgrounded tab is later killed by the OS rather than explicitly closed, and even when
+// it DOES fire, the fetch it kicks off can still be aborted mid-flight the instant the
+// page is actually torn down (see the `keepalive` flag added in Net._sendCharacterSave,
+// which specifically asks the browser to let this one survive that). So this now saves
+// on every signal the platform offers for "the page might be going away", not just one:
+//  - beforeunload: still fires reliably on desktop browser tab/window close.
+//  - pagehide: the modern, more reliable replacement/companion for beforeunload, and (unlike
+//    beforeunload) doesn't risk making the page ineligible for the bfcache we already rely
+//    on for the pageshow/persisted reload fix below.
+//  - visibilitychange (hidden): the one that actually matters most on mobile -- a
+//    backgrounded tab can be suspended or killed without pagehide/beforeunload ever firing
+//    in time, but visibilitychange->hidden fires the moment the tab stops being the active
+//    one, giving the save a head start before the OS has a chance to kill the page.
+function saveOnExit(){ if(PS.current_slot>=0) PS.saveGame(); }
+window.addEventListener("beforeunload",saveOnExit);
+window.addEventListener("pagehide",saveOnExit);
+document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden") saveOnExit(); });
 
 // v0.15 SEVERE BUG FIX: a player hit an unrecoverable progression setback after using the
 // BROWSER's own Back button, and re-logging in didn't fix it. Root cause: this whole app
@@ -2097,10 +2338,10 @@ function statHeader(opts={}){
       h("div",{class:"col",style:{gap:compact?"3px":"8px",flex:"0 0 33%",maxWidth:"33%",minWidth:"0"}},[
         h("div",{},[h("span",{class:"xp-text"},[`XP ${PS.xp}/${PS.xp_to_next}`]), PS.xp_buff_encounters_left>0?h("span",{title:`Experience shrine active: bonus XP for ${PS.xp_buff_encounters_left} more battle${PS.xp_buff_encounters_left===1?"":"s"}.`,style:{marginLeft:"4px"}},["✨"]):null]),
         bar(PS.xp/PS.xp_to_next*100,"bar-xp",compact),
-        h("div",{},[h("span",{class:"hp-text"},[`HP ${Math.round(PS.current_hp)}/${Math.round(PS.getMaxHp())}`])]),
-        bar(PS.current_hp/PS.getMaxHp()*100,"bar-hp",compact),
-        h("div",{},[h("span",{class:"stamina-text"},[`Stamina ${Math.round(PS.current_stamina)}/${Math.round(PS.getMaxStamina())}`]), PS.stamina_shrine_buff>0?h("span",{title:`Stamina shrine active: ${Math.round(PS.stamina_shrine_buff)} bonus stamina in reserve.`,style:{marginLeft:"4px"}},["✨"]):null]),
-        bar(PS.current_stamina/PS.getMaxStamina()*100,"bar-stamina",compact),
+        h("div",{},[h("span",{id:"stat-hp-text",class:"hp-text"},[`HP ${Math.round(PS.current_hp)}/${Math.round(PS.getMaxHp())}`]), PS.isPoisoned()?h("span",{title:`Poisoned: draining ${(Balance.POISON_DPS*(1-PS.getPoisonResistance()/100)).toFixed(1)} HP/sec for ${formatMsAsMinSec(PS.getPoisonMsLeft())} more (won't drop you below 1 HP on its own).`,style:{marginLeft:"4px"}},["☠️"]):null]),
+        bar(PS.current_hp/PS.getMaxHp()*100,"bar-hp",compact,"stat-hp-bar-fill"),
+        h("div",{},[h("span",{id:"stat-stamina-text",class:"stamina-text"},[`Stamina ${Math.round(PS.current_stamina)}/${Math.round(PS.getMaxStamina())}`]), PS.stamina_shrine_buff>0?h("span",{title:`Stamina shrine active: ${Math.round(PS.stamina_shrine_buff)} bonus stamina in reserve.`,style:{marginLeft:"4px"}},["✨"]):null]),
+        bar(PS.current_stamina/PS.getMaxStamina()*100,"bar-stamina",compact,"stat-stamina-bar-fill"),
       ]),
       inventoryPreview(),
     ]),
@@ -2276,6 +2517,9 @@ const CLASS_CREATION_SUBTEXT={
 function screenClassPicker(){
   const root=h("div",{});
   root.appendChild(h("h2",{},["Create Your Hero"]));
+  // v0.16: Back moved up here, right under the title, instead of below the whole class
+  // grid -- no need to scroll past all 3 classes just to back out.
+  root.appendChild(h("div",{style:{marginBottom:"10px"}},[h("span",{class:"linklike",onClick:()=>GF.goto("mainMenuSlots")},["← Back"])]));
   const nameInput=h("input",{type:"text",value:"",placeholder:"Enter a character name...",maxlength:String(Balance.CHARACTER_NAME_MAX_LEN)});
   const nameError=h("div",{class:"muted",style:{color:"#e07a7a",marginTop:"4px",minHeight:"1.2em"}},[""]);
   const hardcoreBox=h("input",{type:"checkbox",id:"hcbox"});
@@ -2317,38 +2561,93 @@ function screenClassPicker(){
     ]));
   }
   root.appendChild(grid);
-  root.appendChild(h("div",{style:{marginTop:"10px"}},[h("span",{class:"linklike",onClick:()=>GF.goto("mainMenuSlots")},["← Back"])]));
   return root;
+}
+
+// v0.16 (#334): the flower/herb tribute strip shown at the bottom of each grave tile in
+// screenGraveyard(). Only meaningful against the real server (needs a stable grave `id`
+// and a place to store who's left a tribute -- see GET/POST /api/graveyard[/:id/tribute]),
+// so it renders nothing at all for an entry that doesn't carry an `id` (e.g. a graveyard
+// entry synthesized purely client-side by Net.deleteCharacter()'s optimistic unshift,
+// before the real server row and its id have actually round-tripped back down yet).
+function graveTributeSection(entry){
+  if(!Net.online || entry.id==null) return null;
+  const tributes=entry.tributes||[];
+  const alreadyTributed=tributes.includes(Net.username);
+  return h("div",{style:{marginTop:"8px",paddingTop:"6px",borderTop:"1px solid #333"}},[
+    h("div",{class:"muted",style:{fontSize:".78em",minHeight:"1.4em"}},[
+      tributes.length>0 ? `🌸 Tribute${tributes.length===1?"":"s"} from: ${tributes.join(", ")}` : "No tributes left yet.",
+    ]),
+    h("button",{
+      style:{fontSize:".8em",marginTop:"4px",padding:"3px 10px"},
+      title:"Leave a flower (or a mocking bouquet) at this grave, purely for show, everyone visiting the Graveyard will see your name here.",
+      disabled:alreadyTributed,
+      onClick:()=>{
+        Net.leaveTribute(entry.id)
+          .then(()=>{ setToast("You leave a small tribute at the grave."); render(); })
+          .catch(err=>{ setToast(err.message); render(); });
+      },
+    },[alreadyTributed?"🌸 Tribute left":"🌸 Leave a Tribute"]),
+  ]);
+}
+
+// v0.16 (#336): a single grave tile's contents, shared by both the full-width spotlight
+// slot and the ordinary grid below it -- `isSpotlight` just scales up the tombstone/name
+// and gives the tile a distinguishing border/background, the underlying fields shown are
+// otherwise identical (including the tribute strip, so the newest grave can get tributes
+// left on it same as any other).
+function graveyardTile(e, isSpotlight){
+  return h("div",{class:"tile",style:Object.assign({textAlign:"center"},
+    isSpotlight
+      ? {padding:"22px 16px",border:"2px solid #8a4a3a",background:"#241a16"}
+      : {padding:"16px 12px"}
+  )},[
+    h("div",{style:{fontSize:isSpotlight?"3.4em":"2.2em",marginBottom:"6px"}},["🪦"]),
+    h("div",{style:{fontWeight:"bold",fontSize:isSpotlight?"1.3em":"1em"}},[`${e.name}`]),
+    h("div",{class:"muted",style:{fontSize:isSpotlight?"1em":".9em"}},[`Lv ${e.level} ${e.class_name}`]),
+    e.username?h("div",{class:"muted",style:{fontSize:".78em"}},[`played by ${e.username}`]):null,
+    h("div",{class:"muted",style:{fontSize:".8em",marginTop:"6px"}},[`${e.cause||"Died in the wilds"}`]),
+    h("div",{class:"muted",style:{fontSize:".75em"}},[new Date(e.date||e.died_at).toLocaleDateString()]),
+    graveTributeSection(e),
+  ]);
 }
 
 function screenGraveyard(){
   const root=h("div",{});
   root.appendChild(h("h2",{},["Graveyard"]));
   root.appendChild(h("div",{class:"lore"},["Final resting place for our fallen heroes, every traveler's losses recorded here for all to see."]));
+  // v0.16: Back moved up here, right under the title/lore, instead of below the whole
+  // grid of graves -- no need to scroll past every entry just to back out.
+  root.appendChild(h("button",{style:{marginBottom:"10px"},onClick:()=>GF.goto("mainMenuSlots")},["← Back"]));
+  // v0.16 (#335): a hardcore death now lands here directly (see applyDeathAndRedirect())
+  // instead of the main menu, so the "Your journey ends here..." toast needs somewhere to
+  // actually render -- this screen never had a toastBox() before since nothing used to
+  // set a toast before reaching it.
+  const t=toastBox(); if(t) root.appendChild(t);
   if(Net.online && Net.graveyardCache===null){
     root.appendChild(h("div",{class:"muted"},["Loading..."]));
     Net.fetchGraveyard().then(render).catch(()=>{ setToast("Could not load the graveyard from the server."); render(); });
-    root.appendChild(h("button",{onClick:()=>GF.goto("mainMenuSlots")},["← Back"]));
     return root;
   }
   const entries=readGraveyard();
   if(entries.length===0){
     root.appendChild(h("div",{class:"muted"},["No one has fallen yet."]));
   } else {
-    const grid=h("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(230px,1fr))",gap:"14px",margin:"16px 0"}});
-    for(const e of entries){
-      grid.appendChild(h("div",{class:"tile",style:{textAlign:"center",padding:"16px 12px"}},[
-        h("div",{style:{fontSize:"2.2em",marginBottom:"6px"}},["🪦"]),
-        h("div",{style:{fontWeight:"bold"}},[`${e.name}`]),
-        h("div",{class:"muted",style:{fontSize:".9em"}},[`Lv ${e.level} ${e.class_name}`]),
-        e.username?h("div",{class:"muted",style:{fontSize:".78em"}},[`played by ${e.username}`]):null,
-        h("div",{class:"muted",style:{fontSize:".8em",marginTop:"6px"}},[`${e.cause||"Died in the wilds"}`]),
-        h("div",{class:"muted",style:{fontSize:".75em"}},[new Date(e.date||e.died_at).toLocaleDateString()]),
-      ]));
+    // v0.16 (#336): entries are already newest-first (server: ORDER BY died_at DESC;
+    // local fallback: appendGraveyard()'s g.unshift(entry)), so entries[0] IS the most
+    // recent death -- no separate "find the newest" step needed, and a brand new death
+    // automatically promotes itself into the spotlight (bumping whatever was there down
+    // into the ordinary grid) the very next time this renders, with zero extra bookkeeping.
+    const [mostRecent, ...older]=entries;
+    root.appendChild(h("div",{class:"muted",style:{fontSize:".8em",marginBottom:"6px"}},["Most recently fallen:"]));
+    root.appendChild(graveyardTile(mostRecent, true));
+    if(older.length>0){
+      root.appendChild(h("div",{class:"muted",style:{fontSize:".8em",margin:"18px 0 6px"}},["Older graves:"]));
+      const grid=h("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(230px,1fr))",gap:"14px",margin:"0 0 16px"}});
+      for(const e of older) grid.appendChild(graveyardTile(e, false));
+      root.appendChild(grid);
     }
-    root.appendChild(grid);
   }
-  root.appendChild(h("button",{onClick:()=>GF.goto("mainMenuSlots")},["← Back"]));
   return root;
 }
 
@@ -2392,6 +2691,8 @@ function screenClassProgression(){
   const root=h("div",{});
   root.appendChild(h("h2",{},["Player Classes"]));
   root.appendChild(h("div",{class:"lore"},["Every hero begins along one of three paths below. Passing that class's Broken Bridge Trial promotes you to the next tier down the same column. Whoever is first to pass the final trial of the final tier wins the season, at that moment, every player's level and class progress resets for a fresh season, but gear, gold, and other (future) skill progress carry over."]));
+  // v0.16: Back moved up here instead of below the whole 3-column class grid.
+  root.appendChild(h("button",{style:{marginBottom:"10px"},onClick:()=>GF.goto("mainMenuSlots")},["← Back"]));
   const chainIds=["wizard","thornguard","windrider"];
   const grid=h("div",{class:"class-grid"});
   chainIds.forEach((chainId,i)=>{
@@ -2422,7 +2723,6 @@ function screenClassProgression(){
     grid.appendChild(h("div",{style:{gridColumn:col,gridRow:String(r++),zIndex:"1",padding:"0 0 14px"}},[]));
   });
   root.appendChild(grid);
-  root.appendChild(h("button",{style:{marginTop:"14px"},onClick:()=>GF.goto("mainMenuSlots")},["← Back"]));
   return root;
 }
 
@@ -2434,10 +2734,11 @@ function screenLeaderboard(){
   const root=h("div",{});
   root.appendChild(h("h2",{},["Leaderboard"]));
   root.appendChild(h("div",{class:"lore"},["The race is long, and in the end, it's only with yourself.", h("br",{}), "But still, here's a list of players outperforming you."]));
+  // v0.16: Back moved up here instead of below the whole (paginated) list of players.
+  root.appendChild(h("button",{style:{marginBottom:"10px"},onClick:()=>GF.goto("mainMenuSlots")},["← Back"]));
   if(Net.leaderboardCache===null||Net.leaderboardCache===undefined){
     root.appendChild(h("div",{class:"muted"},["Loading..."]));
     Net.fetchLeaderboard().then(render).catch(()=>{ setToast("Could not load the leaderboard."); render(); });
-    root.appendChild(h("button",{onClick:()=>GF.goto("mainMenuSlots")},["← Back"]));
     return root;
   }
   const entries=Net.leaderboardCache;
@@ -2468,10 +2769,11 @@ function screenLeaderboard(){
         isDead?h("span",{style:{marginRight:"4px"},title:"Fallen"},["🪦"]):null,
         h("span",{style:nameStyle},[`${e.character_name}`]),
         h("span",{class:"muted"},[` (${e.player})`]),
-        e.hardcore?h("span",{style:{color:"#e0b23d",fontWeight:"bold"}},[" [Hardcore]"]):null,
-        // v0.15: [Dead] now matches [Hardcore]'s exact color/weight/size instead of the
-        // smaller muted style, so the two tags read as a matched pair.
-        isDead?h("span",{style:{color:"#e0b23d",fontWeight:"bold"}},[" [Dead]"]):null,
+        // v0.16: [Hardcore]/[Dead] now use the same red (#e07a7a) as the "[Hardcore]" tag
+        // on the player's own stat header (statHeader()), instead of the gold used since
+        // v0.15 -- Gwen's ask was for the leaderboard tags to match that existing color.
+        e.hardcore?h("span",{style:{color:"#e07a7a",fontWeight:"bold"}},[" [Hardcore]"]):null,
+        isDead?h("span",{style:{color:"#e07a7a",fontWeight:"bold"}},[" [Dead]"]):null,
       ]),
       h("div",{class:"muted"},[`Lv ${e.level} ${e.class_name} (Tier ${e.highest_tier_reached}), ${e.lifetime_xp||0} Experience, ${e.gold} Gold`]),
     ]));
@@ -2485,7 +2787,6 @@ function screenLeaderboard(){
     ]));
   }
 
-  root.appendChild(h("button",{style:{marginTop:"10px"},onClick:()=>GF.goto("mainMenuSlots")},["← Back"]));
   return root;
 }
 
@@ -2520,47 +2821,46 @@ function getVentureDepth(){
 
 // v0.13: "Kindle the Bonfire" replaces the old click-to-toggle "Rest at the Bonfire"
 // button. Regen itself is now always-on in town (see REGEN_ACTIVE_SCREENS/the regen tick),
-// this panel is purely about spending Dry Branches for a temporary +7/branch bonus to
-// both HP and Stamina regen, previewed via a chevron stepper before you commit.
+// this panel is purely about spending Dry Logs for a temporary +7/log bonus to both HP and
+// Stamina regen.
+// v0.16 rework: dropped the "pick a quantity with chevrons, then confirm" 2-step flow --
+// each click of the right-hand button instantly feeds ONE Dry Log (if you have any), so
+// feeding 2 logs is just 2 clicks, no staging step. While the bonfire is actively surging,
+// the left card itself becomes disabled and relabeled "Kindled Bonfire" with a live
+// remaining-time subtext; the button on the right stays live the whole time so you can
+// keep throwing more logs on to stack the bonus higher (see PS.kindleBonfire()).
 function kindleBonfirePanel(){
   const have=PS.consumables["dry_branch"]||0;
-  if(GF.bonfireBranchesToKindle==null || GF.bonfireBranchesToKindle>have) GF.bonfireBranchesToKindle=Math.min(GF.bonfireBranchesToKindle||0,have);
-  const picked=GF.bonfireBranchesToKindle||0;
-  const previewBonus=picked*Balance.DRY_BRANCH_REGEN_PER_UNIT;
   const activeBonus=PS.getActiveBonfireBonus();
-  const msLeft=activeBonus>0?Math.max(0,(PS.bonfire_bonus_expires_at||0)-Date.now()):0;
-  const minutesLeft=Math.ceil(msLeft/60000);
+  const isKindled=activeBonus>0;
+  const msLeft=isKindled?Math.max(0,(PS.bonfire_bonus_expires_at||0)-Date.now()):0;
 
-  const subtext = picked>0
-    ? `Feeding ${picked} Dry Branch${picked===1?"":"es"} would add +${Math.round(previewBonus)} HP/sec and +${Math.round(previewBonus)} Stamina/sec regen for 10 minutes.`
-    : (activeBonus>0
-      ? `Bonfire is kindled: +${Math.round(activeBonus)} HP/sec and +${Math.round(activeBonus)} Stamina/sec regen, ${minutesLeft} minute${minutesLeft===1?"":"s"} left.`
-      : `You have ${have} Dry Branch${have===1?"":"es"}. Each one adds +${Balance.DRY_BRANCH_REGEN_PER_UNIT} HP/sec and Stamina/sec regen for 10 minutes.`);
+  const subtext = isKindled
+    ? `${formatMsAsMinSec(msLeft)} remaining (+${Math.round(activeBonus)} HP/sec and +${Math.round(activeBonus)} Stamina/sec regen).`
+    : "The bonfire grants everyone in town +1 regeneration rate. But, if you throw Dry Logs into the fire, it surges temporarily, granting +7 increased regeneration rate per second, for 10 minutes.";
 
-  // v0.13.1: the card itself IS the confirm button now (same "whole card is clickable"
-  // pattern as "Venture into the Woods" above it, with venture-clickable giving it the
-  // same flex:1 that keeps it on one line beside the chevrons instead of wrapping) --
-  // a separate wide "Kindle the Bonfire" button below was redundant with this dark
-  // flame-icon card and got cut per Gwen's feedback from live testers.
   return h("div",{class:"row venture-row"},[
-    h("div",{class:"panel venture-card venture-clickable",onClick:()=>{
-      if(picked<=0){ setToast("Use the chevrons to choose how many Dry Branches to feed first."); render(); return; }
-      const ok=PS.kindleBonfire(picked);
-      if(ok){
-        const fed=picked;
-        GF.bonfireBranchesToKindle=0; autosave();
-        pushSystemChatMessage(`You feed ${fed} Dry Branch${fed===1?"":"es"} into the bonfire. Regen surges for 10 minutes.`);
-      }
+    h("div",{class:"panel venture-card"+(isKindled?"":" venture-clickable"),style:isKindled?{opacity:"0.75",cursor:"default"}:{},onClick:isKindled?null:()=>{
+      setToast("Use the log button to feed the fire.");
       render();
     }},[
-      h("div",{class:"venture-title"},[inlineIcon(BONFIRE_SVG,18)," Kindle the Bonfire"]),
-      h("div",{class:"muted",style:{fontSize:".8em",marginTop:"2px"}},[subtext]),
+      h("div",{class:"venture-title"},[inlineIcon(BONFIRE_SVG,18)," ", isKindled?"Kindled Bonfire":"Kindle the Bonfire"]),
+      // v0.16 (#331): stable id only while kindled -- lets refreshBonfireCountdownInPlace()
+      // (see the regen tick) patch just this text node's seconds every tick instead of
+      // doing a full render(), same reasoning as refreshStatHeaderInPlace()/#328.
+      h("div",{id:isKindled?"bonfire-countdown-text":undefined,class:"muted",style:{fontSize:".8em",marginTop:"2px"}},[subtext]),
     ]),
     h("div",{class:"panel venture-chevrons"},[
-      h("div",{class:"muted",style:{fontSize:".72em"}},["Branches"]),
-      h("button",{disabled:picked>=have,onClick:(e)=>{ e.stopPropagation(); GF.bonfireBranchesToKindle=Math.min(have,picked+1); render(); }},["▲"]),
-      h("span",{style:{fontWeight:"bold"}},[String(picked)]),
-      h("button",{disabled:picked<=0,onClick:(e)=>{ e.stopPropagation(); GF.bonfireBranchesToKindle=Math.max(0,picked-1); render(); }},["▼"]),
+      h("div",{class:"muted",style:{fontSize:".72em"}},[`Logs (${have})`]),
+      h("button",{disabled:have<=0,onClick:(e)=>{
+        e.stopPropagation();
+        const ok=PS.kindleBonfire(1);
+        if(ok){
+          autosave();
+          pushSystemChatMessage("You feed 1 Dry Log into the bonfire. Regen surges for 10 minutes.");
+        }
+        render();
+      }},["+1"]),
     ]),
   ]);
 }
@@ -2794,6 +3094,18 @@ const TILE_COLOR={start:"#2a4a2a",exit:"#3a3a6a",chest:"#5a4a1a",shrine:"#3a5a5a
   stronghold_chest:"#5a4a1a",stronghold_guardian:"#6a1e1e",stronghold_fence:"#4a3a26"};
 const HIDDEN_TILE_TYPES=["trap","trapdoor"];
 
+// v0.16 (#333): pure hex-color lerp used to fade a trampled grass tile's background
+// toward the dirt color in 3 gradient steps (see screenMaze()'s tile-rendering loop and
+// onStepMaze()'s cell.trampleCount, both below) -- no glyph changes needed since both
+// grass and dirt use an empty TILE_GLYPH entry already.
+function interpolateHexColor(hex1,hex2,t){
+  const c1=parseInt(hex1.slice(1),16), c2=parseInt(hex2.slice(1),16);
+  const r1=(c1>>16)&255, g1=(c1>>8)&255, b1=c1&255;
+  const r2=(c2>>16)&255, g2=(c2>>8)&255, b2=c2&255;
+  const r=Math.round(r1+(r2-r1)*t), g=Math.round(g1+(g2-g1)*t), b=Math.round(b1+(b2-b1)*t);
+  return "#"+[r,g,b].map(v=>v.toString(16).padStart(2,"0")).join("");
+}
+
 function isAdjacent4(x1,y1,x2,y2){
   const dx=Math.abs(x1-x2), dy=Math.abs(y1-y2);
   return (dx+dy)===1;
@@ -2849,6 +3161,12 @@ function screenMaze(){
         else if(isKnown){
           bg=TILE_COLOR[displayType]||TILE_COLOR.dirt;
           label=TILE_GLYPH[displayType]||"";
+          // v0.16 (#333): fade a trampled grass tile toward the dirt color in 3 gradient
+          // steps as cell.trampleCount rises (see onStepMaze()) -- purely visual, doesn't
+          // touch displayType/cell.type, so nothing else about the tile's identity changes.
+          if(displayType==="grass" && cell.trampleCount){
+            bg=interpolateHexColor(TILE_COLOR.grass, TILE_COLOR.dirt, Math.min(3,cell.trampleCount)/3);
+          }
           if(cell.cleared && !hidden) opacity="0.4"; // hidden tiles never visually change, even once triggered
         }
         const inner=h("span",{style:{opacity}},[label]);
@@ -2865,9 +3183,21 @@ function screenMaze(){
       h("div",{class:"col",style:{gap:"2px"}},[
         h("div",{class:"muted",style:{lineHeight:"1.5em"}},["Use the arrow keys to explore the wilderness. Wild creatures lure at you from the tall grass, reach the exit (⬇) before your stamina runs out. Every area hides a Stronghold too: a locked chest (🔒) guarded on 4 sides by tough guardians (💀), beat one to reach the chest, but you'll need a Stronghold Key to actually open it."]),
       ]),
+      // v0.16 (#332): on-screen D-pad, CSS-hidden on desktop-width screens (see the
+      // .maze-mobile-arrows rule) -- brought back specifically so touch/mobile players
+      // have SOME way to move that isn't "hope your adjacent tile is easy to tap."
+      h("div",{class:"maze-mobile-arrows"},[
+        h("div",{}), h("button",{onClick:()=>attemptMazeMove(0,-1)},["↑"]), h("div",{}),
+        h("button",{onClick:()=>attemptMazeMove(-1,0)},["←"]), h("div",{}), h("button",{onClick:()=>attemptMazeMove(1,0)},["→"]),
+        h("div",{}), h("button",{onClick:()=>attemptMazeMove(0,1)},["↓"]), h("div",{}),
+      ]),
       h("div",{class:"row gap"},[
         h("button",{disabled:!PS.canUseConsumable(PS.bestAvailableConsumable("health")),onClick:()=>{ PS.useConsumable(PS.bestAvailableConsumable("health")); autosave(); render(); }},["Use Health Potion"]),
         h("button",{disabled:!PS.canUseConsumable(PS.bestAvailableConsumable("stamina")),onClick:()=>{ PS.useConsumable(PS.bestAvailableConsumable("stamina")); autosave(); render(); }},["Use Stamina Potion"]),
+        // v0.16: quick-use Antidote, right alongside the Health/Stamina buttons -- poison
+        // drains "even outside of combat" (see the poison-drain setInterval), so a player
+        // needs to be able to cure it from the maze view itself, not just in town.
+        h("button",{disabled:!PS.canUseConsumable("antidote"),onClick:()=>{ PS.useConsumable("antidote"); autosave(); render(); }},["Use Antidote"]),
       ]),
       h("button",{onClick:()=>{ resetMazePositionToStart(); GF.goto("town"); }},["← Retreat to Town"]),
     ]),
@@ -2954,7 +3284,12 @@ function onStepMaze(maze,targetIdx){
       return;
     }
     PS.current_hp-=dmg;
-    setToast(`Something bites at your ankle! You take ${Math.round(dmg)} damage.`);
+    // v0.16: the ankle-bite trap now also inflicts the Poison effect (see
+    // PS.applyPoison()/the dedicated poison-drain setInterval near the bottom of the
+    // file) -- a real-time, non-lethal-by-itself HP drain that keeps ticking even
+    // outside of combat, reduced by the player's Poison Resistance.
+    PS.applyPoison();
+    setToast(`Something bites at your ankle! You take ${Math.round(dmg)} damage and feel a poison take hold.`);
     autosave(); render(); return;
   }
   if(cell.type==="shrine" && !cell.cleared){
@@ -2983,8 +3318,23 @@ function onStepMaze(maze,targetIdx){
     return;
   }
 
-  // Monsters only lurk in tall grass, dirt paths and other special tiles are always safe.
-  if(cell.type==="grass" && Math.random()<Balance.ENCOUNTER_CHANCE_PER_STEP){
+  // v0.16 (#333): grass tiles gradually get trampled bare after repeated steps, and stop
+  // spawning encounters once fully trampled -- fixes players farming easy encounters by
+  // pacing back and forth between 2 adjacent grass tiles forever. The counter lives only
+  // on the in-memory cell object (see ensureMaze()/generateMaze()'s established "maze
+  // state resets on reload, not persisted" convention, same as discovered/cleared/
+  // wasHidden), capped at 3. Incrementing happens BEFORE the encounter-eligibility check
+  // below, so the 3rd step onto a tile is the one that both reaches the cap AND is the
+  // last chance for an encounter to fire on it -- from the 4th step on, that tile is safe.
+  // screenMaze()'s tile-color interpolation (see interpolateHexColor() near TILE_COLOR)
+  // uses this same 0-3 range to visually fade the tile from grass to dirt color.
+  if(cell.type==="grass"){
+    cell.trampleCount=Math.min(3,(cell.trampleCount||0)+1);
+  }
+
+  // Monsters only lurk in tall grass that hasn't been trampled bare yet -- dirt paths,
+  // fully-trampled grass, and other special tiles are always safe.
+  if(cell.type==="grass" && (cell.trampleCount||0)<3 && Math.random()<Balance.ENCOUNTER_CHANCE_PER_STEP){
     PS.tickXpBuff();
     const monster=DL.pickRandomMonsterForArea(maze.depth);
     // Bug fix (v0.12): pending_guardian_cell_idx MUST be explicitly cleared here. GF.goto
@@ -3001,19 +3351,26 @@ function onStepMaze(maze,targetIdx){
   render();
 }
 
-window.addEventListener("keydown",(e)=>{
-  if(GF.screen!=="maze") return;
-  const keyMap={ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0]};
-  const d=keyMap[e.key]; if(!d) return;
+// v0.16 (#332): shared by the keydown handler below AND the on-screen mobile D-pad (see
+// screenMaze()'s .maze-mobile-arrows) -- same bounds/boulder/locked-Stronghold-chest
+// validity checks either way, just extracted so the two input methods can't drift apart.
+function attemptMazeMove(dx,dy){
   const maze=GF.overworld_snapshot; if(!maze) return;
-  e.preventDefault();
   const px=maze.playerIdx%maze.size, py=Math.floor(maze.playerIdx/maze.size);
-  const nx=px+d[0], ny=py+d[1];
+  const nx=px+dx, ny=py+dy;
   if(nx<0||nx>=maze.size||ny<0||ny>=maze.sizeH) return;
   const ni=ny*maze.size+nx;
   if(maze.cells[ni].type==="boulder") return;
   if(maze.cells[ni].type==="stronghold_chest" && !strongholdChestUnlocked(maze)) return;
   onStepMaze(maze,ni);
+}
+
+window.addEventListener("keydown",(e)=>{
+  if(GF.screen!=="maze") return;
+  const keyMap={ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0]};
+  const d=keyMap[e.key]; if(!d) return;
+  e.preventDefault();
+  attemptMazeMove(d[0],d[1]);
 });
 
 
@@ -3063,9 +3420,13 @@ function applyDeathAndRedirect(cause, defeatedLine){
   const announcePayload={character_name:PS.character_name, level:PS.level, class_name:cd.display_name||PS.class_id, cause:`been ${cause.charAt(0).toLowerCase()}${cause.slice(1)}`};
   const result=PS.handleDeath(cause);
   if(result.dead){
+    // v0.16 (#335): land the player straight on the Graveyard instead of the character
+    // select menu -- their fallen hero's own fresh memorial (see screenGraveyard()'s
+    // spotlight treatment) is right there waiting, instead of forcing an extra manual
+    // click through to go look at it themselves.
     setToast("Your journey ends here. A new entry has been added to the Graveyard.");
     Net.announceDeath(announcePayload);
-    GF.goto("mainMenuSlots");
+    GF.goto("graveyard");
   }
   else {
     // v0.12: spell out exactly what the death penalty took, so losing gear/xp on death
@@ -3216,6 +3577,7 @@ function screenCombat(){
     h("button",{class:"play",onClick:playerTurn},["Attack"]),
     h("button",{disabled:!PS.canUseConsumable(PS.bestAvailableConsumable("health")),onClick:()=>{ PS.useConsumable(PS.bestAvailableConsumable("health")); autosave(); render(); }},["Use Health Potion"]),
     h("button",{disabled:!PS.canUseConsumable(PS.bestAvailableConsumable("stamina")),onClick:()=>{ PS.useConsumable(PS.bestAvailableConsumable("stamina")); autosave(); render(); }},["Use Stamina Potion"]),
+    h("button",{disabled:!PS.canUseConsumable("antidote"),onClick:()=>{ PS.useConsumable("antidote"); autosave(); render(); }},["Use Antidote"]),
     h("button",{class:"danger",onClick:attemptFlee},["Flee"]),
   ]));
   return root;
@@ -3449,14 +3811,21 @@ function attributesPanel(){
   const collapsed=!!GF.attributesCollapsed;
   const body=[];
   if(!collapsed){
+    // v0.16: each attribute's benefit line now renders directly beneath that attribute's
+    // own row, instead of all 4 sentences being dumped together in one block at the very
+    // bottom of the panel (which made it hard to tell which sentence described which stat
+    // at a glance). rows and summaryLines are built in the same Strength/Dexterity/
+    // Vitality/Intelligence order, so they line up by index.
     body.push(...rows.map((r,i)=>{
       const gearAmt=PS.gearBonus(r.gearStat);
-      return h("div",{class:"row",style:{justifyContent:"space-between",marginBottom:"4px",alignItems:"center"}},[
-        h("div",{},[`${r.label}: ${PS.attributes[r.key]}`, gearAmt?h("span",{class:"muted"},[` (+${Math.round(gearAmt)} from gear)`]):null]),
-        h("button",{disabled:PS.unspent_stat_points<=0,onClick:()=>{ PS.spendStatPoint(r.key); autosave(); render(); }},["+"]),
+      return h("div",{style:{marginBottom:"8px"}},[
+        h("div",{class:"row",style:{justifyContent:"space-between",alignItems:"center"}},[
+          h("div",{},[`${r.label}: ${PS.attributes[r.key]}`, gearAmt?h("span",{class:"muted"},[` (+${Math.round(gearAmt)} from gear)`]):null]),
+          h("button",{disabled:PS.unspent_stat_points<=0,onClick:()=>{ PS.spendStatPoint(r.key); autosave(); render(); }},["+"]),
+        ]),
+        summaryLines[i]?h("div",{class:"muted",style:{fontSize:"0.85em",lineHeight:"1.3em",marginTop:"2px"}},[summaryLines[i]]):null,
       ]);
     }));
-    body.push(h("div",{class:"muted",style:{marginTop:"6px",lineHeight:"1.4em"}},summaryLines.map(l=>h("div",{},[l]))));
   }
   return h("div",{class:"panel",style:{marginTop:"12px",marginBottom:"12px",height:"100%"}},[
     h("div",{class:"row",style:{justifyContent:"space-between",marginBottom:collapsed?"0":"8px"}},[
@@ -3559,6 +3928,10 @@ function screenInventory(){
     // reference page) -- see screenItemization().
     h("button",{onClick:()=>{ GF._preItemizationScreen="inventory"; GF.goto("itemization"); }},["Itemization Guide"]),
   ]));
+  // v0.16: Back moved up here instead of below the whole Skills/Attributes/Equipped/
+  // Backpack/Bags/Consumables/Herbs stack -- this is one of the longest screens in the
+  // game, no one should have to scroll past all of that just to leave.
+  root.appendChild(h("button",{style:{marginTop:"8px",marginBottom:"4px"},onClick:()=>GF.goto(GF.inventory_return_to||"town")},["← Back"]));
   const t=toastBox(); if(t) root.appendChild(t);
   root.appendChild(statHeader());
   root.appendChild(skillsBonusPanel());
@@ -3614,7 +3987,6 @@ function screenInventory(){
     root.appendChild(h("div",{class:"row gap",style:{marginBottom:"4px",alignItems:"center"}},[herbIcon(herbId,22), h("div",{},[`${DL.getHerb(herbId).name} x${PS.herbs[herbId]}`, h("div",{class:"muted",style:{fontSize:".85em"}},["Herb"])])]));
   }
 
-  root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto(GF.inventory_return_to||"town")},["← Back"]));
   return root;
 }
 
@@ -3623,6 +3995,8 @@ function screenInventory(){
 function screenBlacksmith(){
   const root=h("div",{});
   root.appendChild(h("div",{class:"row gap"},[iconBadge(`<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="19" fill="#5a4028"/><rect x="10" y="26" width="20" height="6" rx="1" fill="#333"/></svg>`,52),h("div",{},[h("h2",{},[Balance.NPC_BLACKSMITH_NAME]),h("div",{class:"flavor"},["\"Bring me your battered gear. I'll see what can be salvaged, or improved.\""])])]));
+  // v0.16: Back moved up here instead of below the gear/bag lists.
+  root.appendChild(h("button",{style:{marginBottom:"8px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
   const t=toastBox(); if(t) root.appendChild(t);
   root.appendChild(statHeader());
 
@@ -3664,7 +4038,6 @@ function screenBlacksmith(){
     bagGrid.appendChild(h("div",{class:"tile"},tileKids));
   }
   root.appendChild(bagGrid);
-  root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
   return root;
 }
 
@@ -3673,6 +4046,8 @@ function screenBlacksmith(){
 function screenAlchemist(){
   const root=h("div",{});
   root.appendChild(h("div",{class:"row gap"},[iconBadge(`<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="19" fill="#2a5a4a"/><rect x="16" y="10" width="8" height="18" rx="3" fill="#8fd0aa"/></svg>`,52),h("div",{},[h("h2",{},[Balance.NPC_ALCHEMIST_NAME]),h("div",{class:"flavor"},["\"The forest gives freely, if you know what to pick.\""])])]));
+  // v0.16: Back moved up here instead of below the herb list/recipe grid.
+  root.appendChild(h("button",{style:{marginBottom:"8px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
   const t=toastBox(); if(t) root.appendChild(t);
   root.appendChild(statHeader());
 
@@ -3720,7 +4095,6 @@ function screenAlchemist(){
     grid.appendChild(h("div",{class:"tile"},tileKids));
   }
   root.appendChild(grid);
-  root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
   return root;
 }
 
@@ -3818,13 +4192,14 @@ function vaultWithdraw(slotIndex){
 function screenVault(){
   const root=h("div",{});
   root.appendChild(h("div",{class:"row gap"},[iconBadge(`<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><rect x="6" y="14" width="28" height="20" rx="3" fill="#5a4028" stroke="#2a2a2a" stroke-width="1.5"/><rect x="6" y="14" width="28" height="6" fill="#7a5a38"/><circle cx="20" cy="26" r="4" fill="#2a2a2a"/><rect x="18.5" y="26" width="3" height="6" fill="#2a2a2a"/></svg>`,52),h("div",{},[h("h2",{},["Storage Vault"]),h("div",{class:"flavor"},["\"Whatever you leave here waits for any hero of yours who comes looking, it's shared across every character on your account.\""])])]));
+  // v0.16: Back moved up here instead of below the 200-slot grid and all 3 deposit lists.
+  root.appendChild(h("button",{style:{marginBottom:"8px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
   const t=toastBox(); if(t) root.appendChild(t);
   root.appendChild(statHeader());
 
   if(Net.vaultCache===null||Net.vaultCache===undefined){
     root.appendChild(h("div",{class:"muted"},["Loading..."]));
     Net.fetchVault().then(render).catch(()=>{ setToast("Could not load the vault."); render(); });
-    root.appendChild(h("button",{onClick:()=>GF.goto("town")},["← Back to Town"]));
     return root;
   }
 
@@ -3875,7 +4250,6 @@ function screenVault(){
     ]));
   }
 
-  root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
   return root;
 }
 
@@ -3884,6 +4258,8 @@ function screenVault(){
 function screenMerchant(){
   const root=h("div",{});
   root.appendChild(h("div",{class:"row gap"},[iconBadge(`<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="19" fill="#6a4a20"/><circle cx="20" cy="24" r="10" fill="#c99a50"/></svg>`,52),h("div",{},[h("h2",{},[`${Balance.NPC_MERCHANT_NAME} the Merchant`]),h("div",{class:"flavor"},["\"Best prices this side of the treeline. Probably.\""])])]));
+  // v0.16: Back moved up here instead of below the Buy/Buy Bags/Sell Gear lists.
+  root.appendChild(h("button",{style:{marginBottom:"8px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
   const t=toastBox(); if(t) root.appendChild(t);
   root.appendChild(statHeader());
 
@@ -3921,7 +4297,6 @@ function screenMerchant(){
   for(const inst of PS.gear_instances){
     root.appendChild(gearRow(inst,[h("button",{onClick:()=>{PS.sellGear(inst.instance_id);PS.saveGame();render();}},[`Sell (+${Balance.sellValue(inst.tier,IF.slotCount(inst))}g)`])]));
   }
-  root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
   return root;
 }
 
@@ -3931,16 +4306,21 @@ function screenAuctionHouse(){
   const root=h("div",{});
   root.appendChild(h("h2",{},["Auction House"]));
   root.appendChild(h("div",{class:"lore"},["A dusty ledger and an idle gavel. List your own finds, or see what other travelers are selling."]));
+  // v0.16: Back moved up here instead of below the whole listings feed.
+  root.appendChild(h("button",{style:{marginBottom:"8px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
   const t=toastBox(); if(t) root.appendChild(t);
   root.appendChild(statHeader());
 
   if(!Net.online){
     root.appendChild(h("div",{class:"muted"},["Log in online to buy and sell with other travelers."]));
-    root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
     return root;
   }
 
   root.appendChild(h("h3",{},["List an Item"]));
+  // v0.16: an upfront listing fee (server-charged, see auctionListingFee() in
+  // evergrind-server/server.js) discourages spamming the block with junk listings --
+  // 1g per 100g bracket of the asking price.
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px",fontSize:".9em"}},["Listing fee: 1g for a 1-99g price, 2g for 100-199g, 3g for 200-299g, and so on -- charged upfront when you list."]));
   const gearOptions=[h("option",{value:""},["-- choose gear to sell --"])].concat(
     PS.gear_instances.map(inst=>h("option",{value:inst.instance_id},[`${IF.displayName(inst)} (T${inst.tier})`]))
   );
@@ -3953,12 +4333,19 @@ function screenAuctionHouse(){
       if(!instId){ setToast("Choose a gear item first."); render(); return; }
       const price=parseInt(gearPriceInput.value,10);
       if(!price||price<1){ setToast("Enter a valid price."); render(); return; }
+      const fee=Balance.auctionListingFee(price);
+      if(PS.gold<fee){ setToast(`Not enough gold for the ${fee}g listing fee.`); render(); return; }
       const idx=PS.findGearIndex(instId); if(idx===-1) return;
       const inst=PS.gear_instances[idx];
       try{
-        await Net.createAuctionListing({type:"gear", price, character_name:PS.character_name, seller_slot:PS.current_slot, item:inst, display_name:IF.displayName(inst)});
-        PS.gear_instances.splice(idx,1); PS.saveGame();
-        Net.auctionCache=null; setToast(`Listed ${IF.displayName(inst)} for ${price} gold.`);
+        const result=await Net.createAuctionListing({type:"gear", price, character_name:PS.character_name, seller_slot:PS.current_slot, item:inst, display_name:IF.displayName(inst)});
+        PS.gear_instances.splice(idx,1);
+        // v0.16: the server is the actual authority on the fee (see server.js) and already
+        // deducted it from this same character's stored row -- mirror that locally so the
+        // very next autosave doesn't stomp the server's write with a stale higher gold figure.
+        PS.gold-=(result.fee||fee);
+        PS.saveGame();
+        Net.auctionCache=null; setToast(`Listed ${IF.displayName(inst)} for ${price} gold (${result.fee||fee}g listing fee charged).`);
       }catch(e){ setToast(e.message); }
       render();
     }},["List Gear"]),
@@ -3982,12 +4369,15 @@ function screenAuctionHouse(){
       const have=(kind==="consumable"?PS.consumables[id]:PS.herbs[id])||0;
       if(!qty||qty<1||qty>have){ setToast("Enter a valid quantity you actually have."); render(); return; }
       if(!price||price<1){ setToast("Enter a valid price."); render(); return; }
+      const fee=Balance.auctionListingFee(price);
+      if(PS.gold<fee){ setToast(`Not enough gold for the ${fee}g listing fee.`); render(); return; }
       const displayName=kind==="consumable"?DL.getItem(id).name:DL.getHerb(id).name;
       try{
-        await Net.createAuctionListing({type:kind, item_key:id, quantity:qty, price, character_name:PS.character_name, seller_slot:PS.current_slot, display_name:displayName});
+        const result=await Net.createAuctionListing({type:kind, item_key:id, quantity:qty, price, character_name:PS.character_name, seller_slot:PS.current_slot, display_name:displayName});
         if(kind==="consumable") PS.consumables[id]-=qty; else PS.herbs[id]-=qty;
+        PS.gold-=(result.fee||fee);
         PS.saveGame(); Net.auctionCache=null;
-        setToast(`Listed ${displayName} x${qty} for ${price} gold.`);
+        setToast(`Listed ${displayName} x${qty} for ${price} gold (${result.fee||fee}g listing fee charged).`);
       }catch(e){ setToast(e.message); }
       render();
     }},["List"]),
@@ -4052,7 +4442,6 @@ function screenAuctionHouse(){
     }
   }
 
-  root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
   return root;
 }
 
@@ -4061,12 +4450,13 @@ function screenAuctionHouse(){
 function screenGamblingGoblin(){
   const root=h("div",{});
   root.appendChild(h("div",{class:"row gap"},[iconBadge(`<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="19" fill="#2a4a1a"/><circle cx="14" cy="18" r="3" fill="#eee"/><circle cx="26" cy="18" r="3" fill="#eee"/><circle cx="14" cy="18" r="1.2" fill="#111"/><circle cx="26" cy="18" r="1.2" fill="#111"/><path d="M14,27 Q20,32 26,27" stroke="#eee" stroke-width="2" fill="none"/></svg>`,52),h("div",{},[h("h2",{},[Balance.NPC_GOBLIN_NAME]),h("div",{class:"flavor"},["\"The price you pay for anything is the amount of time you are willing to sacrifice for it.\""])])]));
+  // v0.16: Back moved up here (right under the header) instead of only below the gamble UI.
+  root.appendChild(h("button",{style:{marginBottom:"8px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
   const t=toastBox(); if(t) root.appendChild(t);
   root.appendChild(statHeader());
 
   if(!PS.gamblingUnlocked()){
     root.appendChild(h("div",{class:"lore"},["The goblin only deals with travelers who've proven themselves at the Broken Bridge Trial. Come back once you've passed your first trial."]));
-    root.appendChild(h("button",{onClick:()=>GF.goto("town")},["← Back to Town"]));
     return root;
   }
 
@@ -4107,7 +4497,6 @@ function screenGamblingGoblin(){
     ]));
   }
 
-  root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
   return root;
 }
 
@@ -4335,6 +4724,29 @@ function screenAdminPanel(){
 // Kept brief on purpose -- players don't need the internal blow-by-blow, just the
 // highlights per version, most recent first.
 const CHANGELOG=[
+  { version:"v0.16", notes:[
+    "Attributes panel now shows exactly what each stat point buys you, right next to the stat itself, instead of a single summary block at the bottom.",
+    "New characters now start with 0 gold instead of 20.",
+    "Auction House listings now cost a small fee (1g per 100g of asking price -- e.g. 2g to list something for 150g), charged up front from your own gold.",
+    "Bonfire kindling reworked: feeding it more Dry Logs (renamed from its old material name) while it's already lit now stacks additively and refreshes the timer, instead of being wasted. The remaining time now counts down live, second by second, instead of sitting on a static message.",
+    "New Poison status effect: certain traps can now poison you, draining HP over real time even outside of combat. A new Poison Resistance gear stat reduces it, and a new Antidote potion (brewed at the Alchemist from Cleanwort Leaf) cures it outright.",
+    "Herb drops from monster kills and chests slashed to roughly 1-in-300 (down from ~1-in-7-to-10) -- gathering herb nodes out in the maze is now the real way to stock up, monster/chest herbs are just an occasional bonus.",
+    "Fixed the Auction House's dropdown menus snapping shut mid-selection because of the once-a-second background regen tick.",
+    "Fixed the \"Regeneration\" gear affix doing nothing at all.",
+    "The Back button now sits at the top of most screens instead of the bottom, so you don't have to scroll through everything just to leave.",
+    "Added on-screen arrow buttons for maze navigation on mobile/touch devices (desktop keyboard arrow keys are unaffected and still work the same).",
+    "Grass tiles now gradually wear down to bare dirt after 3 steps on the same tile, and stop spawning monster encounters once fully worn -- pacing back and forth between two tiles to farm easy fights no longer works.",
+    "Added Graveyard tributes: leave a flower on a fallen hero's grave, and your name shows up there for everyone else to see.",
+    "A hardcore death now takes you straight to the Graveyard to see your fallen hero's memorial, instead of dropping you back at the main menu.",
+    "The most recently fallen hero is now spotlighted full-width at the top of the Graveyard, with everyone else in the grid below.",
+    "Leaderboard's [Hardcore] and [Dead] tags now match the same red used for hardcore elsewhere, instead of two slightly different shades.",
+  ]},
+  { version:"v0.15.1", notes:[
+    "PRIORITY FIX: closing the browser (or a tab getting backgrounded/killed, especially on mobile) could roll back your level, gold, gear, and Broken Bridge Trial progress to an earlier point, even though every stat you have is saved to the server, not your browser. The actual bug: autosave fires very often, and each save used to be an independent request with no guarantee they'd arrive at the server in the right order -- an older save could occasionally land AFTER a newer one and silently overwrite it, and the very last save of a session could also get cut off entirely when the tab closed before it finished sending.",
+    "Every save now carries a strictly increasing sequence number, and the server refuses to let an older save overwrite a newer one, no matter which order their requests actually arrive in.",
+    "Saves are now sent one at a time per character (never several at once racing each other), and are marked to survive the page actually closing instead of being cut off mid-request.",
+    "Added extra save triggers beyond just closing the tab -- backgrounding the tab or switching apps now also saves immediately, which matters most on mobile where a backgrounded tab can be killed by the OS without warning.",
+  ]},
   { version:"v0.15", notes:[
     "SEVERE fix: navigating with the browser's Back button could resurrect a stale, cached copy of the page (including its old save data) and silently overwrite your progress. The page now reloads itself fresh whenever it's restored this way.",
     "Fixed the Character Sheet's Back button becoming unresponsive after a while -- a once-a-second background timer was quietly rebuilding the entire screen and swallowing clicks.",
@@ -4355,7 +4767,7 @@ const CHANGELOG=[
   ]},
   { version:"v0.14", notes:[
     "Goedendag is now just a plain Dagger, no more in-game joke description.",
-    "Fixed a bug where a found Dry Branch wouldn't register with the Bonfire's chevron stepper.",
+    "Fixed a bug where a found Dry Log wouldn't register with the Bonfire's chevron stepper.",
     "Every item now shows a plain category subtext (Herb, Ring, Head, Potion, Scroll, Bag, Key, Kindling, etc.) across the Character Sheet, Blacksmith, Alchemist, Merchant, Auction House, and the Gambling Den.",
     "Fleeing combat now has a 20% chance to fail, costing you one more hit before you can try again.",
     "5 new rare herbs and 5 new Alchemist potions: Might (Strength), Swiftness (Dexterity), Intellect (Intelligence), Wardveil (Block Chance), and Renewal (HP/Stamina regen), each a 10-minute temporary buff shown as a hoverable icon in your status area.",
@@ -4367,7 +4779,7 @@ const CHANGELOG=[
     "New Dagger weapon class, including a certain oddly-named Flemish surprise for the Dutch speakers in the room. (Contribution by ImpulseBE)",
     "Auction House listings now show the same full item tooltip on hover as your Character Sheet. (Shared Discord contribution)",
     "HP and Stamina regeneration now kicks in the moment you set foot in town, no more clicking Rest first. (Contributions by Evsie & Fragbunny)",
-    "Rest at the Bonfire is now Kindle the Bonfire: burn Dry Branches (a new woodland find) for a temporary regen boost.",
+    "Rest at the Bonfire is now Kindle the Bonfire: burn Dry Logs (a new woodland find) for a temporary regen boost.",
     "Softcore defeat now leaves you at 1 HP and costs a slice of your current level's experience, both spelled out in the same message as your gold and gear losses.",
     "The ankle-biting trap now scales with the area you're in, and can be lethal.",
     "Fixed the leaderboard showing a stale, long-gone peak level/tier instead of your character's current standing.",
@@ -4418,13 +4830,14 @@ function screenChangelog(){
   const root=h("div",{});
   root.appendChild(h("h2",{},["Changelog"]));
   root.appendChild(h("div",{class:"lore"},["A brief history of Wandrian's woods, season by season."]));
+  // v0.16: Back moved up here instead of below the entire changelog history.
+  root.appendChild(h("button",{style:{marginBottom:"10px"},onClick:()=>{ GF.goto(GF._preChangelogScreen||"town"); }},["← Back"]));
   for(const entry of CHANGELOG){
     root.appendChild(h("div",{class:"panel",style:{marginBottom:"10px"}},[
       h("div",{style:{fontWeight:"bold",marginBottom:"6px"}},[entry.version]),
       h("ul",{style:{margin:"0",paddingLeft:"18px"}},entry.notes.map(n=>h("li",{},[n]))),
     ]));
   }
-  root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>{ GF.goto(GF._preChangelogScreen||"town"); }},["← Back"]));
   return root;
 }
 
@@ -4444,6 +4857,8 @@ function screenItemization(){
   const root=h("div",{});
   root.appendChild(h("h2",{},["Itemization Guide"]));
   root.appendChild(h("div",{class:"lore"},["Everything gear-related in one place: tiers, level requirements, rarity, and exactly how high each stat can roll."]));
+  // v0.16: Back moved up here instead of below all 3 reference tables.
+  root.appendChild(h("button",{style:{marginBottom:"10px"},onClick:()=>{ GF.goto(GF._preItemizationScreen||"town"); }},["← Back"]));
 
   root.appendChild(h("h3",{},["Item Tiers"]));
   root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},["Tier (T1-T5) is separate from Rarity. A tier's level requirement is the LOWEST character level that can equip it -- you can always still wear a lower tier than your level allows. An area's level mostly drops its own \"natural\" tier, but occasionally hands out a lower tier too (never a higher one), so low-tier legendaries stay worth finding and trading even for high-level characters."]));
@@ -4482,7 +4897,6 @@ function screenItemization(){
   });
   root.appendChild(affixPanel);
 
-  root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>{ GF.goto(GF._preItemizationScreen||"town"); }},["← Back"]));
   return root;
 }
 
@@ -4518,26 +4932,63 @@ const SCREENS={
 
 // v0.13: town regen tick, reworked -- no more "resting" toggle to click, it's simply
 // active on any REGEN_ACTIVE_SCREENS screen (see GF above), and the Bonfire's kindled
-// bonus (getActiveBonfireBonus, from spending Dry Branches) stacks on top of the flat
+// bonus (getActiveBonfireBonus, from spending Dry Logs) stacks on top of the flat
 // baseline rate for as long as its 10-minute window lasts.
 setInterval(()=>{
   if(PS.current_slot<0) return;
   if(!REGEN_ACTIVE_SCREENS.includes(GF.screen)) return;
   // v0.14: Potion of Renewal's temporary regen buff stacks additively with the Bonfire's
   // kindled bonus, same flat HP/sec + Stamina/sec addition on top of the baseline rate.
-  const bonus=PS.getActiveBonfireBonus()+PS.getActiveTempBuff("regen");
+  // v0.16 BUG FIX: PS.getRegen() (class-base regen + gear "Regeneration" affix) was being
+  // computed and shown in the Character Sheet's gear-bonus summary line, but was never
+  // actually folded into the per-second tick below -- so the "Regeneration" item stat did
+  // nothing at all in practice. Added here so it's real again.
+  const bonus=PS.getActiveBonfireBonus()+PS.getActiveTempBuff("regen")+PS.getRegen();
   let changed=false;
   if(PS.current_hp<PS.getMaxHp()){ PS.current_hp=Math.min(PS.getMaxHp(),PS.current_hp+Balance.CAMPFIRE_REGEN_PER_SECOND+bonus); changed=true; }
   if(PS.current_stamina<PS.getMaxStamina()){ PS.current_stamina=Math.min(PS.getMaxStamina(),PS.current_stamina+Balance.CAMPFIRE_STAMINA_REGEN_PER_SECOND+bonus); changed=true; }
+  if(changed) PS.saveGame();
+
+  // v0.16 (#331): the Kindled Bonfire card needs a full render() on the ONE tick where it
+  // actually expires (its title/lore/clickability all change, which no targeted text patch
+  // can express) -- detected by: the bonfire's bonus has dropped to 0 but the kindled
+  // countdown node from the last render is still sitting on screen. Every OTHER tick while
+  // kindled, refreshBonfireCountdownInPlace() below handles it with a cheap text-only patch.
+  const bonfireJustExpired = GF.screen==="town" && PS.getActiveBonfireBonus()<=0 && !!document.getElementById("bonfire-countdown-text");
+  if(bonfireJustExpired){
+    render();
+    return;
+  }
+
   if(changed){
-    PS.saveGame();
     // v0.15 BUG FIX: used to call render() here -- a full app.innerHTML="" + rebuild of
     // the entire screen, every second, on every regen-active screen. That was silently
     // swallowing clicks on buttons elsewhere on the page (reported: the Character Sheet's
     // "<- Back" button "not responding"). Only the live HP/Stamina numbers actually need
     // to change here, so just swap the stat header panel in place instead.
-    if(!refreshStatHeaderInPlace()) render();
+    if(!refreshStatHeaderInPlace()){ render(); return; }
   }
+  if(GF.screen==="town") refreshBonfireCountdownInPlace();
+},1000);
+
+// v0.16: Poison effect drain tick (see PS.applyPoison(), inflicted by the ankle-bite
+// trap). Deliberately NOT gated to REGEN_ACTIVE_SCREENS like the regen tick above --
+// Poison has to keep draining "even outside of combat", i.e. while wandering the maze
+// too, not just back in town -- so this runs on every screen. It only ever floors HP at
+// 1 (never lethal by itself, see Balance.POISON_DPS/getPoisonResistance()); any OTHER
+// damage source (a monster's hit, a fresh trap) can still kill you while it holds you
+// there. Uses the same refreshStatHeaderInPlace()-first pattern as the regen tick so it
+// doesn't reintroduce the swallowed-click bug on screens (maze, combat) that also render
+// a statHeader().
+setInterval(()=>{
+  if(PS.current_slot<0) return;
+  if(!PS.isPoisoned()) return;
+  if(PS.current_hp<=1) return;
+  const dps=Balance.POISON_DPS*(1-PS.getPoisonResistance()/100);
+  if(dps<=0) return;
+  PS.current_hp=Math.max(1,PS.current_hp-dps);
+  PS.saveGame();
+  if(!refreshStatHeaderInPlace()) render();
 },1000);
 
 (async function boot(){
