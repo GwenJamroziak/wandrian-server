@@ -3,6 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <title>Wandrian</title>
+<!-- v0.16.1: Cinzel/Merriweather, used ONLY by the .auth-* onboarding screens below (the
+     pre-login "Play Online" gate, Log In and Create Account forms) -- see redirect.html,
+     the marketing landing page Gwen pointed at as the trustworthiness/professionalism bar
+     to hit for a stranger's very first click in from itch.io/Battle.net/d2jsp. The rest of
+     the game keeps its existing Georgia look untouched; this link is scoped by being
+     unused outside those three screens' font-family declarations. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&family=Merriweather:wght@400;700&display=swap" rel="stylesheet">
 <style>
 :root{
   --hp:#d94a4a; --stamina:#eae6d9; --xp:#9e59d9; --gold:#e0b23d;
@@ -146,6 +155,60 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 .attr-collapse-btn:hover{color:#cbd9a0;}
 .stat-point-cta{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;background:var(--gold);color:#2a2210;font-weight:bold;border-radius:5px;cursor:pointer;font-size:1.1em;line-height:1;}
 .stat-point-cta:hover{background:#f0c85a;}
+
+/* v0.16.1: onboarding restyle (#345) -- scoped entirely to the pre-login "Play Online"
+   gate + Log In/Create Account forms (screenAuthGate()/authForm(), see authHeader() etc.
+   below), matching the calmer, more polished palette+type from redirect.html (the
+   marketing landing page) instead of the main game's busier in-session look. This is a
+   deliberate first-impression choice for strangers clicking in fresh off itch.io/Battle.
+   net/d2jsp -- nothing here touches the shared button/input/.panel rules the rest of the
+   game still relies on. */
+.auth-page{
+  position:fixed; inset:0; z-index:1; overflow-y:auto;
+  background:#212c1b; color:#e8dfc8;
+  font-family:'Merriweather',Georgia,serif;
+  display:flex; align-items:center; justify-content:center;
+  padding:24px;
+}
+.auth-card{width:760px; max-width:100%;}
+.auth-header{display:flex; align-items:center; margin-bottom:24px;}
+.auth-logo{
+  width:72px; height:72px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center; margin-right:18px; flex:none; overflow:hidden;
+}
+.auth-logo svg{width:100%;height:100%;}
+.auth-title{font-family:'Cinzel',serif; font-size:2.6rem; color:#fff; line-height:1.1; margin:0;}
+.auth-subtitle{color:#d8b566; margin-top:6px; font-family:'Merriweather',Georgia,serif; font-size:1.05em;}
+.auth-panel{border:1px solid rgba(214,194,133,.22); border-radius:10px; background:rgba(0,0,0,.15); padding:28px;}
+.auth-panel h2{font-family:'Cinzel',serif; margin:0 0 14px; color:#fff; font-size:1.5em;}
+.auth-panel p{line-height:1.7; margin:0 0 24px; color:#cfc6af;}
+.auth-cta{
+  display:block; width:100%; text-align:center; padding:16px 18px; background:#2f3a24;
+  border:1px solid rgba(214,194,133,.28); border-radius:8px; color:#fff; font-weight:bold;
+  font-family:'Merriweather',Georgia,serif; font-size:1em; cursor:pointer; transition:.15s;
+}
+.auth-cta:hover:not(:disabled){background:#3a492c; border-color:#d6c285;}
+.auth-cta.secondary{background:transparent; font-weight:normal;}
+.auth-cta.secondary:hover:not(:disabled){background:rgba(214,194,133,.08);}
+.auth-input{
+  width:100%; background:#1b2417; border:1px solid rgba(214,194,133,.28); color:#e8dfc8;
+  border-radius:6px; padding:13px 14px; font-family:'Merriweather',Georgia,serif; font-size:.95em;
+}
+.auth-input:focus{outline:none; border-color:#cda95d; box-shadow:0 0 0 2px rgba(205,169,93,.25);}
+.auth-input:-webkit-autofill,.auth-input:-webkit-autofill:hover,.auth-input:-webkit-autofill:focus{
+  -webkit-text-fill-color:#e8dfc8!important;
+  -webkit-box-shadow:0 0 0px 1000px #1b2417 inset!important;
+  box-shadow:0 0 0px 1000px #1b2417 inset!important;
+  transition:background-color 9999s ease-in-out 0s;
+  caret-color:#e8dfc8;
+}
+.auth-divider{flex:1; height:1px; background:rgba(214,194,133,.25);}
+.auth-back{color:#d8b566; cursor:pointer; text-decoration:underline; font-size:.9em;}
+.auth-back:hover{color:#e8dfc8;}
+.auth-footer{text-align:center; color:#8f917d; margin-top:20px; font-size:.9em;}
+.auth-footer .auth-back{color:#8f917d;}
+.auth-footer .auth-back:hover{color:#d8b566;}
+.auth-status{min-height:1.3em; color:#e0a870; font-size:.88em;}
 </style>
 </head>
 <body>
@@ -544,7 +607,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.16-web",
+  GAME_VERSION:"v0.16.1-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   NPC_BLACKSMITH_NAME:"Grondar Emberhand", NPC_ALCHEMIST_NAME:"Maren Thistlebrew", NPC_MERCHANT_NAME:"Cassius Wraithcoin",
@@ -2360,50 +2423,77 @@ function wandrianHeader(){
   ]);
 }
 
+// v0.16.1 (#345): dedicated header for the 3 pre-login onboarding screens only
+// (screenAuthGate()/authForm() below) -- deliberately separate from wandrianHeader()
+// (still used nowhere else at the moment, kept as-is/untouched) so this restyle can't
+// leak into any other screen. Matches redirect.html's logo treatment: a gold-ringed
+// circular badge instead of the game's plain icon-badge, plus a Cinzel display title.
+function authHeader(){
+  const logo=h("div",{class:"auth-logo"});
+  logo.innerHTML=LOGO_SVG;
+  return h("div",{class:"auth-header"},[
+    logo,
+    h("div",{},[h("div",{class:"auth-title"},["Wandrian"]), h("div",{class:"auth-subtitle"},["A nature-fantasy dungeon crawl"])]),
+  ]);
+}
+
 // Wandrian is online-only: every character lives on the server, so friends can log in
 // from any device and see the same shared graveyard, leaderboard, chat and auction
 // house. There is no offline/local-only mode anymore, so this is a single centered
 // "Play Online" container rather than a choice between two paths.
+// v0.16.1 (#345): restyled to match redirect.html (the marketing landing page) -- this is
+// genuinely the very first screen a brand new invite from itch.io/Battle.net/d2jsp ever
+// sees, so it needed to read as a real, trustworthy, professionally-made game rather than
+// a plain dev-tool-looking form.
 function screenAuthGate(){
-  const root=h("div",{});
-  root.appendChild(wandrianHeader());
-  const t=toastBox(); if(t) root.appendChild(t);
-  root.appendChild(h("div",{class:"panel",style:{maxWidth:"460px"}},[
-    h("div",{style:{fontWeight:"bold",marginBottom:"6px",fontSize:"1.1em"}},["Play Online"]),
-    h("div",{class:"muted",style:{marginBottom:"10px",lineHeight:"1.5em"}},[
-      "Wandrian requires an account so your progress lives on the server, not just in this browser. Log in (or create a free account in seconds) to: pick one of three class paths and climb through 5 tiers each via the Broken Bridge Trial, explore a fresh maze every descent with boulders, hidden traps, chests, shrines and herb gathering, gear up through the Blacksmith, Alchemist, Merchant and Auction House, chat with everyone else online, and race for the top of the leaderboard, hardcore deaths and all.",
+  const root=h("div",{class:"auth-page"});
+  const card=h("div",{class:"auth-card"});
+  card.appendChild(authHeader());
+  const t=toastBox(); if(t) card.appendChild(t);
+  card.appendChild(h("div",{class:"auth-panel"},[
+    h("h2",{},["Adventure Awaits"]),
+    h("p",{},[
+      "Descend into mysterious forests, forgotten ruins, and an ever-changing dungeon in a multiplayer roguelite RPG. Pick a class path and climb it through the Broken Bridge Trial, gather and craft your own gear, trade on a real player-driven Auction House, and race for the top of the leaderboard, hardcore deaths and all. Free to play, right in your browser.",
     ]),
-    h("div",{class:"row"},[
-      h("button",{style:{flex:"1"},onClick:()=>GF.goto("login")},["Log In"]),
-      h("button",{style:{flex:"1"},onClick:()=>GF.goto("register")},["Create Account"]),
+    h("div",{class:"row gap"},[
+      h("button",{class:"auth-cta",style:{flex:"1"},onClick:()=>GF.goto("login")},["Log In"]),
+      h("button",{class:"auth-cta",style:{flex:"1"},onClick:()=>GF.goto("register")},["Create Free Account"]),
     ]),
   ]));
+  card.appendChild(h("div",{class:"auth-footer"},["Play instantly, no download required."]));
+  root.appendChild(card);
   return root;
 }
 
-function socialLoginRow(){
+// v0.16.1 (#345): restyled alongside screenAuthGate()/authForm() below -- same
+// coming-soon behavior, just recolored to fit the new .auth-cta.secondary look instead
+// of the game's ordinary button chrome.
+function authSocialRow(){
   const comingSoon=()=>{ setToast("Social login is coming soon, use username and password for now."); render(); };
-  return h("div",{class:"col gap",style:{marginBottom:"10px"}},[
-    h("button",{class:"wide social-login-btn",onClick:comingSoon},["🔵 Continue with Google"]),
-    h("button",{class:"wide social-login-btn",onClick:comingSoon},["🔷 Continue with Facebook"]),
-    h("div",{class:"row",style:{alignItems:"center",gap:"8px",margin:"4px 0"}},[
-      h("div",{style:{flex:"1",height:"1px",background:"var(--border)"}}),
+  return h("div",{class:"col gap",style:{marginBottom:"8px"}},[
+    h("button",{class:"auth-cta secondary",onClick:comingSoon},["🔵 Continue with Google"]),
+    h("button",{class:"auth-cta secondary",onClick:comingSoon},["🔷 Continue with Facebook"]),
+    h("div",{class:"row",style:{alignItems:"center",gap:"10px",margin:"6px 0"}},[
+      h("div",{class:"auth-divider"}),
       h("span",{class:"muted"},["or"]),
-      h("div",{style:{flex:"1",height:"1px",background:"var(--border)"}}),
+      h("div",{class:"auth-divider"}),
     ]),
   ]);
 }
 
+// v0.16.1 (#345): restyled to match redirect.html -- login/register logic itself
+// (Net.login/Net.register/Net.afterAuth, the try/catch error surface) is UNCHANGED, only
+// the DOM/classes changed, see authHeader()/authSocialRow()/the .auth-* CSS rules above.
 function authForm(mode){
-  const root=h("div",{});
   const isLogin=mode==="login";
-  root.appendChild(wandrianHeader());
-  root.appendChild(h("h2",{},[isLogin?"Log In":"Create Account"]));
-  const t=toastBox(); if(t) root.appendChild(t);
-  const userInput=h("input",{type:"text",placeholder:"username",style:{width:"100%"}});
-  const passInput=h("input",{type:"password",placeholder:"password",style:{width:"100%"}});
-  const emailInput=isLogin?null:h("input",{type:"email",placeholder:"email (optional)",style:{width:"100%"}});
-  const statusDiv=h("div",{class:"muted"},[""]);
+  const root=h("div",{class:"auth-page"});
+  const card=h("div",{class:"auth-card"});
+  card.appendChild(authHeader());
+  const t=toastBox(); if(t) card.appendChild(t);
+  const userInput=h("input",{class:"auth-input",type:"text",placeholder:"Username"});
+  const passInput=h("input",{class:"auth-input",type:"password",placeholder:"Password"});
+  const emailInput=isLogin?null:h("input",{class:"auth-input",type:"email",placeholder:"Email (optional)"});
+  const statusDiv=h("div",{class:"auth-status"},[""]);
   const submit=async ()=>{
     const username=userInput.value.trim(), passcode=passInput.value;
     const email=emailInput?emailInput.value.trim():"";
@@ -2417,14 +2507,16 @@ function authForm(mode){
       statusDiv.textContent = e.message || "Something went wrong. Is the game server reachable?";
     }
   };
-  root.appendChild(h("div",{class:"panel col gap",style:{maxWidth:"360px"}},[
-    socialLoginRow(),
+  card.appendChild(h("div",{class:"auth-panel col gap"},[
+    h("h2",{},[isLogin?"Welcome Back":"Create Your Account"]),
+    authSocialRow(),
     userInput, passInput, emailInput,
-    isLogin?null:h("div",{class:"muted",style:{marginTop:"-4px"}},["Email is optional, just a nice-to-have. Jump in with only a username and password if you'd rather not share one yet."]),
-    h("button",{class:"wide play",onClick:submit},[isLogin?"Log In":"Create Account"]),
+    isLogin?null:h("div",{class:"muted",style:{marginTop:"-6px"}},["Email is optional, just a nice-to-have. Jump in with only a username and password if you'd rather not share one yet."]),
+    h("button",{class:"auth-cta",style:{marginTop:"4px"},onClick:submit},[isLogin?"Log In":"Create Account"]),
     statusDiv,
   ]));
-  root.appendChild(h("div",{style:{marginTop:"10px"}},[h("span",{class:"linklike",onClick:()=>GF.goto("authGate")},["← Back"])]));
+  card.appendChild(h("div",{class:"auth-footer"},[h("span",{class:"auth-back",onClick:()=>GF.goto("authGate")},["← Back"])]));
+  root.appendChild(card);
   return root;
 }
 function screenLogin(){ return authForm("login"); }
@@ -4724,6 +4816,9 @@ function screenAdminPanel(){
 // Kept brief on purpose -- players don't need the internal blow-by-blow, just the
 // highlights per version, most recent first.
 const CHANGELOG=[
+  { version:"v0.16.1", notes:[
+    "Redesigned the Play Online / Log In / Create Account screens to make a better first impression on new players: a calmer dark-green and gold look, proper display typography for the Wandrian logo, and cleaner buttons and forms. Nothing about how login or account creation actually works has changed.",
+  ]},
   { version:"v0.16", notes:[
     "Attributes panel now shows exactly what each stat point buys you, right next to the stat itself, instead of a single summary block at the bottom.",
     "New characters now start with 0 gold instead of 20.",
