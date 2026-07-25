@@ -511,6 +511,24 @@ app.delete("/api/characters/:slot", requireAuth, (req, res) => {
       req.account.id,
       hardcore_death.name || "Hero"
     );
+  } else {
+    // v0.17.1 (#16) BUG FIX: a player manually deleting a (non-hardcore-death) character
+    // slot used to leave its leaderboard_bests row sitting there forever -- the public
+    // leaderboard kept showing a character that, as far as the player could tell, no longer
+    // existed, until an admin noticed and removed it by hand via Dev Tools. Look up the
+    // character's own name from its stored row BEFORE deleting it (server-side, not trusting
+    // anything from the request body) and remove the matching leaderboard row too, so the
+    // deletion is reflected immediately. Only reached for an ordinary manual delete -- a
+    // hardcore death (handled above) deliberately KEEPS its leaderboard row, just marked dead.
+    const row = db.prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?").get(req.account.id, slot);
+    if (row) {
+      try {
+        const data = JSON.parse(row.data);
+        if (data.character_name) {
+          db.prepare("DELETE FROM leaderboard_bests WHERE account_id = ? AND character_name = ?").run(req.account.id, data.character_name);
+        }
+      } catch (e) { /* corrupt row -- nothing sensible to look up, just fall through and delete the character row itself */ }
+    }
   }
   db.prepare("DELETE FROM characters WHERE account_id = ? AND slot = ?").run(req.account.id, slot);
   res.json({ ok: true });

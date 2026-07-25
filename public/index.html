@@ -369,11 +369,14 @@ const HERBS = {
   // stat-buff potions -- see RECIPES and ITEMS' buff_type fields below. The intent (per
   // Gwen) is that players will often find the "wrong" attribute herb for their own class
   // and trade it away on the Auction House for the one they actually want.
-  ironbark_sap:{name:"Ironbark Sap",found_in:"A rare find in herb nodes -- brews into a Potion of Might (temporary Strength).",rare:true},
-  swiftfern:{name:"Swiftfern Frond",found_in:"A rare find in herb nodes -- brews into a Potion of Swiftness (temporary Dexterity).",rare:true},
-  mindroot:{name:"Mindroot Tuber",found_in:"A rare find in herb nodes -- brews into a Potion of Intellect (temporary Intelligence).",rare:true},
-  stoneshell_moss:{name:"Stoneshell Moss",found_in:"A rare find in herb nodes -- brews into a Potion of Wardveil (temporary Block Chance).",rare:true},
-  vitalbloom:{name:"Vitalbloom Petal",found_in:"A rare find in herb nodes -- brews into a Potion of Renewal (temporary HP/Stamina regen).",rare:true},
+  // v0.17.1 (#7): these 5 only start turning up in herb nodes once you're gathering at
+  // area level 5+ (see Balance.NEW_HERB_MIN_AREA_LEVEL/DL.pickHerbForNode) -- below that,
+  // the rare-herb roll can still only find Starveil Petal, same as before this patch.
+  ironbark_sap:{name:"Ironbark Sap",found_in:"A rare find in herb nodes at area level 5+ -- brews into a Potion of Might (temporary Strength).",rare:true,min_area_level:5},
+  swiftfern:{name:"Swiftfern Frond",found_in:"A rare find in herb nodes at area level 5+ -- brews into a Potion of Swiftness (temporary Dexterity).",rare:true,min_area_level:5},
+  mindroot:{name:"Mindroot Tuber",found_in:"A rare find in herb nodes at area level 5+ -- brews into a Potion of Intellect (temporary Intelligence).",rare:true,min_area_level:5},
+  stoneshell_moss:{name:"Stoneshell Moss",found_in:"A rare find in herb nodes at area level 5+ -- brews into a Potion of Wardveil (temporary Block Chance).",rare:true,min_area_level:5},
+  vitalbloom:{name:"Vitalbloom Petal",found_in:"A rare find in herb nodes at area level 5+ -- brews into a Potion of Renewal (temporary HP/Stamina regen).",rare:true,min_area_level:5},
   // v0.16: sole ingredient for the new Antidote (see ITEMS.antidote/RECIPES). A common
   // (non-rare) herb like sunpetal/moonleaf/emberroot/frostvine, not one of the scarcer
   // "rare" finds above -- a poison cure shouldn't be gated behind rare-herb luck.
@@ -589,10 +592,24 @@ const Balance = {
   // Independent per-tile roll chances (a 20x10 maze = 200 tiles), replacing the old
   // fixed-count-per-maze model: chest 0.05% (~1 chest per 10 mazes), herb 0.20%
   // (~1 per 2.5 mazes), shrine 0.10% (~1 per 5 mazes), trapdoor 0.5% (~1 per maze).
-  MAZE_CHEST_CHANCE_PER_TILE:0.0005, MAZE_SHRINE_CHANCE_PER_TILE:0.001,
+  MAZE_CHEST_CHANCE_PER_TILE:0.0005,
+  // v0.17.1 (#12): shrine spawn chance roughly doubled (0.001 -> 0.002, ~1 per 2.5 mazes
+  // instead of ~1 per 5) now that there are 5 possible shrine outcomes instead of 2 -- so
+  // players actually run into (and learn about) the 3 new shrine types at a reasonable
+  // clip, instead of them being buried under 5x rarer odds of the same total shrine rate.
+  MAZE_SHRINE_CHANCE_PER_TILE:0.002,
   MAZE_HERB_CHANCE_PER_TILE:0.002, MAZE_TRAPDOOR_CHANCE_PER_TILE:0.005,
   STAMINA_MAX_BASE:100.0, STAMINA_COST_PER_STEP:1.0,
   SHRINE_STAMINA_BUFF_PCT:1.0, SHRINE_XP_BUFF_MULT:1.5, SHRINE_XP_BUFF_ENCOUNTERS:20,
+  // v0.17.1 (#12): three new shrine types, each an even 1-in-5 outcome alongside the
+  // existing Stamina/XP shrines (see onStepMaze()'s "shrine" case). Invulnerability and
+  // Quad Damage are both COMBAT-ROUND-scoped (not wall-clock) per Gwen's exact spec --
+  // they tick down once per exchange of blows, not per second, so a long walk back to town
+  // doesn't burn them and a fast, back-to-back string of fights does. Magic Find instead
+  // uses the same wall-clock temp-buff pattern as the stat potions (Alchemist), since it
+  // affects loot rolls (chests, kills) rather than anything round-based.
+  SHRINE_INVULN_ROUNDS:15, SHRINE_QUAD_DAMAGE_ROUNDS:15,
+  SHRINE_MAGIC_FIND_PCT:25, SHRINE_MAGIC_FIND_DURATION_MS:10*60*1000,
   // v0.17 (#368): replaced the old flat "(4-12) * areaLevel" trap damage formula -- which
   // scaled linearly hard enough to hit 40-120 damage at area level 10, capable of one-
   // shotting a mid-progress character out of nowhere ("snipe, out" per Gwen's report) --
@@ -655,7 +672,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.17-web",
+  GAME_VERSION:"v0.17.1-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   NPC_BLACKSMITH_NAME:"Grondar Emberhand", NPC_ALCHEMIST_NAME:"Maren Thistlebrew", NPC_MERCHANT_NAME:"Cassius Wraithcoin",
@@ -687,6 +704,7 @@ const Balance = {
   AFFIX_TIER1_MAX:{
     damage:5, hp:15, crit:5, armor:20, regen:5, gold_find:10, xp_find:10,
     stamina_max:15, strength:5, dexterity:5, vitality:5, intelligence:5, poison_resist:5,
+    magic_find:10,
   },
   RARITY_TABLE:[{name:"Common",slots:1,weight:60},{name:"Uncommon",slots:2,weight:25},{name:"Rare",slots:3,weight:10},{name:"Epic",slots:5,weight:4},{name:"Legendary",slots:8,weight:1}],
   // v0.12.1: player-facing rarity wording only -- RARITY_TABLE's own `name` values stay
@@ -699,12 +717,26 @@ const Balance = {
   // plainly low-quality adjective. Legendary is untouched, Gwen didn't ask for it to change.
   RARITY_DISPLAY_NAMES:{Common:"Crude", Uncommon:"", Rare:"Magical", Epic:"Rare", Legendary:"Legendary"},
   rarityDisplayName(name){ return this.RARITY_DISPLAY_NAMES[name]!=null ? this.RARITY_DISPLAY_NAMES[name] : name; },
-  AFFIX_POOL:["damage","hp","crit","armor","regen","gold_find","xp_find","stamina_max","strength","dexterity","vitality","intelligence","poison_resist"],
+  // v0.17.1 (#12): magic_find added -- +% chance to bias a gear drop's rarity roll toward
+  // something better (see Balance.rollRarity()'s mfPct param). Its T1 max of 10 run through
+  // the SAME max(tier)=tier*max(T1) formula as poison_resist above lands exactly on Gwen's
+  // spec of 10/20/30/40/50% across T1-T5, no special-casing needed.
+  AFFIX_POOL:["damage","hp","crit","armor","regen","gold_find","xp_find","stamina_max","strength","dexterity","vitality","intelligence","poison_resist","magic_find"],
   // v0.16: the ankle-bite trap now applies a Poison effect instead of just a one-time
   // hit -- see PS.applyPoison()/PS.getActiveBonfireBonus()-style getters below. Poison
-  // drains a flat 1 HP/sec (before Poison Resistance) for POISON_DURATION_MS, floors at
-  // 1 HP on its own (never lethal by itself), and can't reduce a resisted amount below 0.
-  POISON_DPS:1.0, POISON_DURATION_MS:40*1000,
+  // drains for POISON_DURATION_MS, floors at 1 HP on its own (never lethal by itself), and
+  // can't reduce a resisted amount below 0.
+  // v0.17.1 (#10): drain rate changed from a flat 1 HP/sec to a PERCENTAGE of the player's
+  // max HP/sec, scaling with the "mob tier" of the area level that inflicted it -- T1 mobs
+  // (area level 1-4) drain 1%/sec, T2 (5-9) 2%/sec, T3 (10-14) 3%/sec, and so on, +1% per
+  // tier. A flat 1 HP/sec became trivially ignorable once players had a few hundred max HP;
+  // scaling with max HP keeps it a meaningful threat at every stage of progression.
+  POISON_PCT_PER_SEC_PER_TIER:0.01, POISON_DURATION_MS:40*1000,
+  // Mob tier buckets: T1 spans area levels 1-4 (4 levels), every tier after that spans 5
+  // levels (T2 5-9, T3 10-14, T4 15-19, ...) -- matches Gwen's exact spec, not a uniform
+  // bucket size.
+  mobTierForAreaLevel(lvl){ lvl=Math.max(1,lvl||1); if(lvl<=4) return 1; return 2+Math.floor((lvl-5)/5); },
+  poisonPctPerSecForAreaLevel(lvl){ return this.mobTierForAreaLevel(lvl)*this.POISON_PCT_PER_SEC_PER_TIER; },
   // v0.12: weapons should feel like the slot that defines your damage output. 70% of the
   // time a weapon's affix pool gets "damage" pinned first (guaranteeing it rolls, instead
   // of competing 1-in-12 with every other stat), and when it does, the rolled value is 40%
@@ -735,6 +767,25 @@ const Balance = {
   MAX_CHARACTER_SLOTS:6,
   EYESIGHT_AFFIX_CHANCE:0.03, ELIXIR_EYESIGHT_STEPS:500, RARE_HERB_CHANCE:0.06,
   GAMBLE_ITEM_COST:800, GAMBLE_REVEAL_MS:2000,
+  // v0.17.1 (#7): the area level at/above which the 5 newest rare herbs (feeding the Might/
+  // Swiftness/Intellect/Wardveil/Renewal potions) start turning up in herb nodes -- see each
+  // herb's own min_area_level in HERBS (kept as a literal there since HERBS is defined
+  // earlier in this file than Balance, so it can't reference this constant directly, but
+  // it's set to match this number) and DL.rareHerbIdsForAreaLevel().
+  NEW_HERB_MIN_AREA_LEVEL:5,
+  // Herbalism proficiency (v0.17.1 #7): mirrors the weapon-skill system's UX (Lv0 start,
+  // permanent, never reset) but with the LINEAR thresholds Gwen specified -- 100 points for
+  // Lv1, 200 more (300 total) for... actually per her exact spec: 100 cumulative for Lv1,
+  // 200 cumulative for Lv2, 300 cumulative for Lv3, etc. -- i.e. level L needs L*100 total
+  // points, NOT the weapon-skill system's triangular curve. Every herb-gathering "strike"
+  // (each click of the Gather button, see screenHerbEncounter) grants exactly 1 point.
+  HERBALISM_POINT_STEP:100,
+  herbalismCumulativePointsForLevel(level){ return this.HERBALISM_POINT_STEP*level; },
+  herbalismLevelForPoints(points){
+    let level=0;
+    while(this.herbalismCumulativePointsForLevel(level+1)<=points) level++;
+    return level;
+  },
 
   // Stat Points / Attributes (v0.10): +3 points per level-up, spent on Strength/Dexterity/
   // Vitality/Intelligence. See PS.getTotalAttr()/getDamageRange()/getBlockChance()/addXp()
@@ -798,11 +849,27 @@ const Balance = {
   },
   affixRangeForTier(stat, tier){ return [1, this.affixMaxForTier(stat,tier)]; },
   itemTierAdjective(tier){return this.ITEM_TIER_ADJECTIVES[clampi(tier-1,0,this.ITEM_TIER_ADJECTIVES.length-1)];},
-  rollRarity(){
-    let total=0; for(const r of this.RARITY_TABLE) total+=r.weight;
-    let roll=Math.floor(Math.random()*total), cum=0;
-    for(const r of this.RARITY_TABLE){cum+=r.weight; if(roll<cum) return r;}
-    return this.RARITY_TABLE[0];
+  rollRarity(mfPct=0){
+    const rollOnce=()=>{
+      let total=0; for(const r of this.RARITY_TABLE) total+=r.weight;
+      let roll=Math.floor(Math.random()*total), cum=0;
+      for(const r of this.RARITY_TABLE){cum+=r.weight; if(roll<cum) return r;}
+      return this.RARITY_TABLE[0];
+    };
+    const first=rollOnce();
+    if(!mfPct) return first;
+    // v0.17.1 (#12): Magic Find (gear affix + the Magic Find shrine buff, see
+    // PS.getMagicFind()) biases toward better rarity by rerolling and keeping whichever
+    // result is rarer, with a chance scaling directly with the MF% -- e.g. 20% MF gives a
+    // 20% chance to get a second roll and take the better of the two. Capped at 90% so it's
+    // never a guaranteed reroll even at very high MF. mfPct defaults to 0 (no behavior
+    // change for the many existing call sites that don't pass it).
+    if(Math.random()<Math.min(0.9,mfPct/100)){
+      const second=rollOnce();
+      const firstIdx=this.RARITY_TABLE.indexOf(first), secondIdx=this.RARITY_TABLE.indexOf(second);
+      return secondIdx>firstIdx?second:first;
+    }
+    return first;
   },
   bridgePlankCount(tier){return clampi((tier||1)+1,this.BRIDGE_MIN_PLANKS,this.BRIDGE_MAX_PLANKS);},
   bridgeStepPassChance(tier){return 1.0/this.bridgePlankCount(tier);},
@@ -827,7 +894,14 @@ const Balance = {
   // a trivial low-level maze and farm guaranteed-easy guardian kills for keys, undermining
   // the whole "worth the effort" point of the mechanic. The guardian fight itself, and the
   // chest's other loot, are unaffected -- only the key drop roll is gated.
-  strongholdKeyEligible(mazeDepth, playerLevel){ return (mazeDepth||1)>=(playerLevel||1); },
+  // v0.17.1 (#15) BUG FIX: this used to require mazeDepth>=playerLevel exactly -- so a
+  // player who was on-level (e.g. player Lv7 in an area-level-7 Stronghold) but leveled up
+  // mid-run from killing an earlier guardian (now Lv8) instantly lost ALL key-drop chance
+  // for the remaining guardians in that same Stronghold, even though they'd started the run
+  // perfectly eligible. Now tolerates the player being up to 1 level above the area level --
+  // only 2+ levels above (a real mismatch, not a mid-run level-up) triggers the existing
+  // "tame" 0%-chance message.
+  strongholdKeyEligible(mazeDepth, playerLevel){ return (mazeDepth||1)>=(playerLevel||1)-1; },
   salvageValue(tier,slots){return tier*slots*this.SALVAGE_MATERIALS_PER_SLOT;},
   rerollCost(tier,slots){return this.salvageValue(tier,slots)*this.REROLL_MATERIAL_COST_MULT;},
   sellValue(tier,slots){return tier*this.SELL_GOLD_PER_TIER+slots*this.SELL_GOLD_PER_SLOT;},
@@ -926,8 +1000,17 @@ const DL = {
   // rather than always handing out Starveil -- each individual rare herb is correspondingly
   // scarcer than before, matching Gwen's "a bit less common" request for the new ones.
   rareHerbIds(){return Object.keys(HERBS).filter(id=>HERBS[id].rare);},
-  pickHerbForNode(){
-    if(Math.random()<Balance.RARE_HERB_CHANCE) return pick(DL.rareHerbIds());
+  // v0.17.1 (#7): the 5 newest rare herbs (min_area_level:5) are excluded from the rare
+  // pool below that area level, so Starveil Petal is the only rare herb low-level mazes
+  // can produce -- matches the same area-level gate the guide/tooltips now advertise.
+  rareHerbIdsForAreaLevel(areaLevel){
+    return DL.rareHerbIds().filter(id=>(HERBS[id].min_area_level||1)<=(areaLevel||1));
+  },
+  pickHerbForNode(areaLevel=1){
+    if(Math.random()<Balance.RARE_HERB_CHANCE){
+      const pool=DL.rareHerbIdsForAreaLevel(areaLevel);
+      if(pool.length>0) return pick(pool);
+    }
     return pick(DL.commonHerbIds());
   },
   allRecipes(){return RECIPES;},
@@ -998,7 +1081,10 @@ const IF = {
     let chosenSlot=slot;
     if(!chosenSlot||!this.BASE_NAMES[chosenSlot]) chosenSlot=pick(this.GENERATION_SLOTS);
     const baseName=pick(this.BASE_NAMES[chosenSlot]||["Item"]);
-    const rarity=forcedRarityName ? (Balance.RARITY_TABLE.find(r=>r.name===forcedRarityName)||Balance.rollRarity()) : Balance.rollRarity();
+    // v0.17.1 (#12): Magic Find biases the rarity roll (see Balance.rollRarity()'s mfPct
+    // param) -- a forced rarity (Stronghold chests) is untouched, MF only affects the
+    // ordinary random roll.
+    const rarity=forcedRarityName ? (Balance.RARITY_TABLE.find(r=>r.name===forcedRarityName)||Balance.rollRarity()) : Balance.rollRarity(PS.getMagicFind());
     const slotCount=rarity.slots;
     let pool=[...Balance.AFFIX_POOL];
     shuffle(pool);
@@ -1066,7 +1152,7 @@ const IF = {
     }
     return total/statAffixes.length;
   },
-  affixIsPercent(stat){return ["crit","armor","gold_find","xp_find","poison_resist"].includes(stat);},
+  affixIsPercent(stat){return ["crit","armor","gold_find","xp_find","poison_resist","magic_find"].includes(stat);},
   affixLabel(stat){
     switch(stat){
       case "damage": return "Damage"; case "hp": return "Hit Points"; case "crit": return "Critical Strike";
@@ -1074,6 +1160,7 @@ const IF = {
       case "xp_find": return "Experience Gained"; case "stamina_max": return "Stamina"; case "eyesight": return "Eyesight";
       case "strength": return "Strength"; case "dexterity": return "Dexterity"; case "vitality": return "Vitality"; case "intelligence": return "Intelligence";
       case "poison_resist": return "Poison Resistance";
+      case "magic_find": return "Magic Find";
       default: return stat;
     }
   },
@@ -1460,6 +1547,12 @@ const PS = {
   get gold(){ return Net.accountGold||0; },
   set gold(v){ Net.accountGold=v; },
   current_hp:0, current_stamina:0, gear_instances:[], equipped:{}, equipped_bags:[],
+  // v0.17.1 (#8) BUG FIX: unequipping a bag used to just splice it out of equipped_bags
+  // with nowhere for it to actually go -- the bag was simply deleted. `bags` is a stackable
+  // dict (same {itemId: count} shape as consumables/herbs, unlimited, no capacity slots of
+  // its own -- bags GRANT capacity, they don't consume it) that an unequipped bag now lands
+  // in, so it's still owned and re-equippable, never lost.
+  bags:{},
   consumables:{}, materials:0, herbs:{}, pending_scroll_bonus:0,
   xp_buff_multiplier:1.0, xp_buff_encounters_left:0, stamina_shrine_buff:0.0,
   highest_tier_reached:1, season_won:false, kill_streak:0, hardcore:false, current_slot:-1,
@@ -1498,6 +1591,12 @@ const PS = {
   // pre-v0.12 saves and brand new characters both start every type at 0/0.
   weapon_skills:{},
 
+  // Herbalism proficiency (v0.17.1 #7). A single permanent point counter, unlike weapon
+  // skills there's only one herbalism track (not per-herb-type) -- see
+  // Balance.herbalismLevelForPoints/herbalismCumulativePointsForLevel and
+  // registerHerbalismStrike() (called once per Gather-button click in screenHerbEncounter).
+  herbalism_points:0,
+
   getClassData(){return DL.getClass(this.class_id);},
   ensureWeaponSkills(){
     for(const t of IF.WEAPON_TYPE_LIST) if(!this.weapon_skills[t]) this.weapon_skills[t]={hits:0};
@@ -1522,6 +1621,29 @@ const PS = {
     const before=Balance.weaponSkillLevelForHits(this.weapon_skills[weaponType].hits);
     this.weapon_skills[weaponType].hits++;
     const after=Balance.weaponSkillLevelForHits(this.weapon_skills[weaponType].hits);
+    return {leveledUp:after>before, newLevel:after};
+  },
+  getHerbalismPoints(){ return this.herbalism_points||0; },
+  getHerbalismLevel(){ return Balance.herbalismLevelForPoints(this.getHerbalismPoints()); },
+  // Progress toward the NEXT level, for progress-bar display -- same shape/naming
+  // convention as getWeaponSkillProgress() above, just "points" instead of "hits".
+  getHerbalismProgress(){
+    const points=this.getHerbalismPoints();
+    const level=Balance.herbalismLevelForPoints(points);
+    const pointsAtLevelStart=Balance.herbalismCumulativePointsForLevel(level);
+    const pointsForNextLevel=Balance.herbalismCumulativePointsForLevel(level+1)-pointsAtLevelStart;
+    const pointsIntoLevel=points-pointsAtLevelStart;
+    return {level, points, pointsIntoLevel, pointsForNextLevel};
+  },
+  // v0.17.1 (#7): called once per Gather-button click in screenHerbEncounter (one point per
+  // "strike", matching Gwen's spec literally -- a herb requiring 4 strikes to fully gather
+  // nets 4 total points over the course of gathering it, 1 per click, even if the player
+  // abandons the node partway through via "Leave it"). Returns whether this strike pushed
+  // herbalism to a new level, same {leveledUp, newLevel} shape as registerWeaponHit().
+  registerHerbalismStrike(){
+    const before=this.getHerbalismLevel();
+    this.herbalism_points=(this.herbalism_points||0)+1;
+    const after=this.getHerbalismLevel();
     return {leveledUp:after>before, newLevel:after};
   },
   getTotalAttr(key){
@@ -1604,6 +1726,31 @@ const PS = {
   // (100% = fully immune). Purely gear-driven for now (see AFFIX_POOL/AFFIX_TIER1_MAX's
   // poison_resist entry) -- no class innately has any.
   getPoisonResistance(){return clampf(this.gearBonus("poison_resist"),0,100);},
+  // v0.17.1 (#12): Magic Find -- gear affix total (see AFFIX_POOL's magic_find entry) plus
+  // the temporary Magic Find shrine buff (see applyMagicFindShrineBuff()/getActiveTempBuff),
+  // combined additively. Feeds Balance.rollRarity()'s mfPct param via IF.generate().
+  getMagicFind(){return clampf(this.gearBonus("magic_find")+this.getActiveTempBuff("magic_find"),0,500);},
+  // v0.17.1 (#12): Magic Find shrine -- reuses the existing wall-clock temp-buff system
+  // (see applyTempBuff/getActiveTempBuff, the same mechanism the Alchemist's stat potions
+  // use), since Magic Find affects loot rolls (chests, kills) rather than anything
+  // combat-round-scoped.
+  applyMagicFindShrineBuff(){ this.applyTempBuff("magic_find", Balance.SHRINE_MAGIC_FIND_PCT, Balance.SHRINE_MAGIC_FIND_DURATION_MS); },
+  // v0.17.1 (#12): Invulnerability ("Touch of Unicorn") and Quad Damage shrines are both
+  // scoped to COMBAT ROUNDS, not wall-clock time, per Gwen's exact spec -- see
+  // tickCombatRoundBuffs(), called once per round in screenCombat()'s playerTurn(). Stacks
+  // additively if re-triggered while already active (same precedent as the Bonfire's
+  // per-log regen bonus), rather than just refreshing to a flat 15.
+  applyInvulnShrineBuff(){ this.invuln_rounds_left=(this.invuln_rounds_left||0)+Balance.SHRINE_INVULN_ROUNDS; },
+  isInvulnerable(){ return (this.invuln_rounds_left||0)>0; },
+  applyQuadDamageShrineBuff(){ this.quad_dmg_rounds_left=(this.quad_dmg_rounds_left||0)+Balance.SHRINE_QUAD_DAMAGE_ROUNDS; },
+  hasQuadDamage(){ return (this.quad_dmg_rounds_left||0)>0; },
+  getQuadDamageMult(){ return this.hasQuadDamage()?4:1; },
+  // Ticks both round-based shrine buffs down by one combat round. Deliberately does NOT
+  // touch anything if a buff isn't active (no negative counters).
+  tickCombatRoundBuffs(){
+    if(this.invuln_rounds_left>0) this.invuln_rounds_left--;
+    if(this.quad_dmg_rounds_left>0) this.quad_dmg_rounds_left--;
+  },
   getRegen(){const c=this.getClassData(); return (c.regen||0.0)+this.gearBonus("regen");},
   getMaxStamina(){return Balance.STAMINA_MAX_BASE+this.gearBonus("stamina_max")+this.bonus_stamina_from_attributes;},
   getGoldFindMult(){return 1.0+this.gearBonus("gold_find")/100.0;},
@@ -1672,6 +1819,14 @@ const PS = {
     if(success){
       this.highest_tier_reached=Math.max(this.highest_tier_reached,currentTier+1);
       if(nextId!=="") this.class_id=nextId; else this.season_won=true;
+      // v0.17.1 BUG FIX: last_bridge_steps ("how far you got on your last Broken Bridge
+      // Trial attempt") used to only get overwritten by a FUTURE failed attempt (see
+      // attemptStep()'s fail branch) -- a freshly promoted character kept showing the
+      // step count from the tier they just cleared until their next trial attempt in the
+      // new tier corrected it. A successful crossing means you made it all the way across,
+      // so it resets to 0 here immediately, same as everything else about the character
+      // sheet that a promotion resets.
+      this.last_bridge_steps=0;
     }
     // failure: class_id unchanged, no demotion, per v0.7 fix
     this.level=1; this.xp=0; this.xp_to_next=Balance.xpRequiredForLevel(this.level);
@@ -1737,20 +1892,35 @@ const PS = {
   // draining even if you change screens or close the tab and come back. Re-triggering
   // (biting another trap while already poisoned) just refreshes the window back to the
   // full duration rather than stacking multiple simultaneous poison timers -- there's only
-  // ever one DPS number (a flat 1 HP/sec, see Balance.POISON_DPS), so there's nothing
-  // meaningful to add together the way the Bonfire's per-log bonus stacks.
-  applyPoison(){
+  // ever one active rate at a time, so there's nothing meaningful to add together the way
+  // the Bonfire's per-log bonus stacks.
+  // v0.17.1 (#10): `areaLevel` is the area level of the trap that inflicted this poison --
+  // its mob-tier-scaled %-of-max-HP/sec drain rate (see Balance.poisonPctPerSecForAreaLevel)
+  // is snapshotted into poison_pct_per_sec right now, same reasoning as the Bonfire's fixed
+  // regen bonus: wandering to a different area level afterward doesn't retroactively change
+  // an already-active poison's severity, and re-triggering just refreshes the timer/rate to
+  // whatever the new trap's tier calls for.
+  applyPoison(areaLevel){
     this.poison_expires_at=Date.now()+Balance.POISON_DURATION_MS;
+    this.poison_pct_per_sec=Balance.poisonPctPerSecForAreaLevel(areaLevel||1);
   },
   isPoisoned(){
     return !!(this.poison_expires_at && Date.now()<this.poison_expires_at);
   },
   // Cures the Poison effect outright (see the Antidote potion / useConsumable()).
   curePoison(){
-    this.poison_expires_at=0;
+    this.poison_expires_at=0; this.poison_pct_per_sec=0;
   },
   getPoisonMsLeft(){
     return this.isPoisoned() ? Math.max(0,this.poison_expires_at-Date.now()) : 0;
+  },
+  // v0.17.1 (#10): the actual effective HP/sec this character's active Poison drains right
+  // now, after Poison Resistance -- the single source of truth every UI tooltip and the
+  // drain tick itself should read, so they can never drift out of sync with each other.
+  getPoisonHpPerSec(){
+    if(!this.isPoisoned()) return 0;
+    const pct=this.poison_pct_per_sec||Balance.POISON_PCT_PER_SEC_PER_TIER;
+    return this.getMaxHp()*pct*(1-this.getPoisonResistance()/100);
   },
   // v0.14: apply/read a temporary stat-buff potion's effect. `type` is one of
   // "intelligence"/"strength"/"dexterity"/"block_chance"/"regen" (see ITEMS' buff_type
@@ -1931,9 +2101,20 @@ const PS = {
     const capacityWithout=this.getInventoryCapacity()-(DL.getItem(itemId).capacity||0);
     return this.getInventoryUsed()>capacityWithout;
   },
+  // v0.17.1 (#8) BUG FIX: this used to just splice the bag out of equipped_bags and stop --
+  // the bag itself was never actually given anywhere to go, so it was silently destroyed
+  // the instant you unequipped it. It now lands in this.bags (see that field's declaration
+  // above), same stackable-dict pattern as consumables/herbs, so it's still yours and can be
+  // re-equipped later (see the "Bags" section of the Character Sheet). The existing gear-
+  // capacity check (wouldOverflowWithoutBag) is untouched and still blocks the unequip
+  // outright -- with a feedback message, not silent failure -- if your currently-carried
+  // GEAR alone wouldn't fit in the reduced capacity; the bag itself never competes for gear
+  // capacity (bags grant capacity, they don't consume it), so no separate check is needed
+  // for the returning bag.
   unequipBag(itemId){
     if(this.wouldOverflowWithoutBag(itemId)) return false;
-    const idx=this.equipped_bags.indexOf(itemId); if(idx!==-1) this.equipped_bags.splice(idx,1);
+    const idx=this.equipped_bags.indexOf(itemId); if(idx!==-1) this.equipped_bags.splice(idx,1); else return false;
+    this.bags[itemId]=(this.bags[itemId]||0)+1;
     return true;
   },
   buyBag(itemId){
@@ -2044,6 +2225,9 @@ const PS = {
     // gold) still effectively starts at 0 since that's what Net.accountGold defaults to,
     // but an account that already has gold correctly keeps it for the new character too.
     this.herbs={}; this.consumables={}; this.gear_instances=[]; this.equipped={};
+    // v0.17.1 (#8): same reused-singleton leak class as herbs/consumables above -- a fresh
+    // character must not inherit the previous character's stored-but-unequipped bags.
+    this.bags={};
     for(const s of IF.EQUIPPED_SLOT_KEYS) this.equipped[s]=null;
     this.equipped_bags=[]; this.pending_scroll_bonus=0; this.xp_buff_multiplier=1.0;
     this.xp_buff_encounters_left=0; this.stamina_shrine_buff=0.0; this.highest_tier_reached=1;
@@ -2061,6 +2245,9 @@ const PS = {
     // PS is one shared object across character creations in a session, so anything not
     // explicitly reset here would otherwise leak from whatever was played last).
     this.weapon_skills={}; this.ensureWeaponSkills();
+    // v0.17.1 (#7): same reused-singleton leak class -- a fresh character starts herbalism
+    // proficiency at 0, not wherever the previously-played character left off.
+    this.herbalism_points=0;
     // v0.13: same reused-singleton leak class as weapon_skills above -- a fresh character
     // must not inherit the previous character's Broken Bridge memory or bonfire kindling.
     this.trial_progress={}; this.bonfire_bonus_regen=0; this.bonfire_bonus_expires_at=0;
@@ -2069,7 +2256,10 @@ const PS = {
     this.temp_buffs={};
     // v0.16: same reused-singleton leak class -- a fresh character must not inherit the
     // previous character's active Poison effect.
-    this.poison_expires_at=0;
+    this.poison_expires_at=0; this.poison_pct_per_sec=0;
+    // v0.17.1 (#12): same reused-singleton leak class -- a fresh character must not
+    // inherit the previous character's active shrine buffs.
+    this.invuln_rounds_left=0; this.quad_dmg_rounds_left=0;
     // Bug fix (v0.12): this MUST run before getMaxHp()/getMaxStamina() below. PS is a
     // reused singleton across character creations in the same session, so bonus_hp_from_
     // attributes/bonus_stamina_from_attributes/attributes still held whatever the last-
@@ -2079,12 +2269,22 @@ const PS = {
     // ~418 Stamina level-1 Thornguard report).
     this._resetAttributesToClassBase();
     this.current_hp=this.getMaxHp(); this.current_stamina=this.getMaxStamina();
+    // v0.17.1 BUG FIX: GF.overworld_snapshot (the live maze -- fog-of-war, cleared chests/
+    // shrines/guardians, player position) is a GF-singleton keyed only by area depth, not by
+    // character. Without this reset, a brand new Lv1 character venturing into area level 1
+    // would land in whatever area-level-1 maze the PREVIOUSLY PLAYED character had already
+    // explored, discovered tiles and all -- maze state was never meant to carry over between
+    // characters at all (it isn't even saved to the server). Force a fresh maze on the next
+    // Venture for every new character.
+    GF.overworld_snapshot=null;
   },
   saveGame(){
     if(this.current_slot<0) return;
     const data={class_id:this.class_id,class_display_name:this.getClassData().display_name||this.class_id,
       character_name:this.character_name,hardcore:this.hardcore,level:this.level,
       xp:this.xp,xp_to_next:this.xp_to_next,gold:this.gold,materials:this.materials,herbs:this.herbs,
+      // v0.17.1 (#8): unequipped-but-owned bags, see this.unequipBag()/the field's declaration.
+      bags:this.bags||{},
       current_hp:this.current_hp,current_stamina:this.current_stamina,consumables:this.consumables,
       gear_instances:this.gear_instances,equipped:this.equipped,equipped_bags:this.equipped_bags,
       highest_tier_reached:this.highest_tier_reached,season_won:this.season_won,lifetime_xp:this.lifetime_xp,
@@ -2098,6 +2298,7 @@ const PS = {
       attributes:this.attributes,unspent_stat_points:this.unspent_stat_points,
       bonus_hp_from_attributes:this.bonus_hp_from_attributes,bonus_stamina_from_attributes:this.bonus_stamina_from_attributes,
       weapon_skills:this.weapon_skills,
+      herbalism_points:this.herbalism_points||0,
       // v0.13: Broken Bridge Trial progress (which planks are already known-safe per
       // step, and which have already been tried-and-failed at the current step) must
       // survive a save/reload, otherwise the "remembers the faulty plank" guarantee only
@@ -2110,6 +2311,11 @@ const PS = {
       // v0.16: the Poison effect (see PS.applyPoison()) is real-time and must keep
       // draining even across a save/reload, same wall-clock-expiry pattern as above.
       poison_expires_at:this.poison_expires_at||0,
+      // v0.17.1 (#10): the mob-tier-scaled %/sec rate snapshotted when poison was inflicted.
+      poison_pct_per_sec:this.poison_pct_per_sec||0,
+      // v0.17.1 (#12): round-based shrine buffs (Invulnerability/Quad Damage) survive a
+      // save/reload mid-fight, same as everything else here.
+      invuln_rounds_left:this.invuln_rounds_left||0, quad_dmg_rounds_left:this.quad_dmg_rounds_left||0,
       // v0.15.1: see _nextSaveSeq() above -- lets the server (and Net.saveCharacter's own
       // client-side coalescing) tell an old save from a new one regardless of arrival order.
       _save_seq:this._nextSaveSeq()};
@@ -2122,6 +2328,8 @@ const PS = {
     this.hardcore=!!parsed.hardcore; this.kill_streak=0; this.level=parsed.level||1; this.xp=parsed.xp||0;
     this.xp_to_next=parsed.xp_to_next||Balance.xpRequiredForLevel(this.level); this.gold=parsed.gold||0;
     this.materials=parsed.materials||0; this.herbs=parsed.herbs||{}; this.consumables=parsed.consumables||{};
+    // v0.17.1 (#8): a save from before this fix shipped just won't have any stored bags yet.
+    this.bags=parsed.bags||{};
     this.gear_instances=(parsed.gear_instances||[]).filter(g=>g&&g.instance_id);
     const loadedEquipped=parsed.equipped||{}; this.equipped={};
     for(const s of IF.EQUIPPED_SLOT_KEYS) this.equipped[s]=loadedEquipped[s]||null;
@@ -2147,6 +2355,9 @@ const PS = {
     // anything -- a save with no weapon_skills yet (pre-v0.12) just starts everyone at 0.
     this.weapon_skills=parsed.weapon_skills||{};
     this.ensureWeaponSkills();
+    // v0.17.1 (#7): herbalism proficiency is permanent and per-character, never reset by
+    // anything -- a save with no herbalism_points yet (pre-v0.17.1) just starts at 0.
+    this.herbalism_points=parsed.herbalism_points||0;
     // v0.13: Broken Bridge Trial memory and bonfire kindling state, both must survive
     // a save/reload -- see getTrialProgress()/screenMasterTrial() and the Kindle the
     // Bonfire button in screenTown().
@@ -2157,6 +2368,11 @@ const PS = {
     this.temp_buffs=parsed.temp_buffs||{};
     // v0.16: Poison effect timer (see saveGame()/applyPoison()).
     this.poison_expires_at=parsed.poison_expires_at||0;
+    // v0.17.1 (#10): a save from before this fix won't have this yet -- getPoisonHpPerSec()
+    // falls back to the T1 rate in that case, which is fine (harmless if not even poisoned).
+    this.poison_pct_per_sec=parsed.poison_pct_per_sec||0;
+    // v0.17.1 (#12): round-based shrine buffs (see saveGame()).
+    this.invuln_rounds_left=parsed.invuln_rounds_left||0; this.quad_dmg_rounds_left=parsed.quad_dmg_rounds_left||0;
     // v0.15.1: guard against a skewed local clock producing a lower _nextSaveSeq() than
     // what's already stored server-side for this character (see saveGame()/_nextSaveSeq())
     // -- if that ever happened, every future save from this device would be silently
@@ -2164,6 +2380,12 @@ const PS = {
     // at the loaded save's own sequence number keeps this session's saves strictly above
     // it regardless of local clock drift.
     if(parsed._save_seq) this._saveSeqFloor=Math.max(this._saveSeqFloor, parsed._save_seq);
+    // v0.17.1 BUG FIX: same reused-GF-singleton leak as startNewCharacter() -- switching INTO
+    // this character (a fresh login, or picking a different slot) must not keep showing
+    // whichever maze the previously active character last had loaded. The maze itself was
+    // never persisted server-side to begin with, so there's nothing lost by resetting it
+    // here; the next Venture simply generates this character's own fresh maze at their depth.
+    GF.overworld_snapshot=null;
     return true;
   },
   // v0.17 (#6): the local-storage "offline" fallback here was dead code -- see the Save
@@ -2339,7 +2561,7 @@ function refreshStatHeaderInPlace(){
   const poisonIcon=document.getElementById("stat-poison-icon");
   if(poisonIcon){
     poisonIcon.style.opacity=poisoned?"1":"0";
-    if(poisoned) poisonIcon.setAttribute("title",`Poisoned: draining ${(Balance.POISON_DPS*(1-PS.getPoisonResistance()/100)).toFixed(1)} HP/sec for ${formatMsAsMinSec(PS.getPoisonMsLeft())} more (won't drop you below 1 HP on its own).`);
+    if(poisoned) poisonIcon.setAttribute("title",`Poisoned: draining ${PS.getPoisonHpPerSec().toFixed(1)} HP/sec for ${formatMsAsMinSec(PS.getPoisonMsLeft())} more (won't drop you below 1 HP on its own).`);
   }
   return true;
 }
@@ -2666,7 +2888,10 @@ function statHeader(opts={}){
         // CSS transition once poison ends, instead of staying stuck on screen -- see
         // refreshStatHeaderInPlace()/the poison drain tick for how the opacity actually
         // gets toggled on the tick poison expires.
-        h("div",{},[h("span",{id:"stat-hp-text",class:PS.isPoisoned()?"hp-text hp-text-poisoned":"hp-text"},[`HP ${Math.round(PS.current_hp)}/${Math.round(PS.getMaxHp())}`]), PS.isPoisoned()?h("span",{id:"stat-poison-icon",class:"poison-icon",title:`Poisoned: draining ${(Balance.POISON_DPS*(1-PS.getPoisonResistance()/100)).toFixed(1)} HP/sec for ${formatMsAsMinSec(PS.getPoisonMsLeft())} more (won't drop you below 1 HP on its own).`,style:{marginLeft:"4px",opacity:"1"}},["🤢"]):null]),
+        h("div",{},[h("span",{id:"stat-hp-text",class:PS.isPoisoned()?"hp-text hp-text-poisoned":"hp-text"},[`HP ${Math.round(PS.current_hp)}/${Math.round(PS.getMaxHp())}`]), PS.isPoisoned()?h("span",{id:"stat-poison-icon",class:"poison-icon",title:`Poisoned: draining ${PS.getPoisonHpPerSec().toFixed(1)} HP/sec for ${formatMsAsMinSec(PS.getPoisonMsLeft())} more (won't drop you below 1 HP on its own).`,style:{marginLeft:"4px",opacity:"1"}},["🤢"]):null,
+        // v0.17.1 (#12): Touch of Unicorn (Invulnerability shrine) indicator right at the HP
+        // status, per Gwen's exact spec -- a unicorn icon with the remaining round count.
+        PS.isInvulnerable()?h("span",{title:`Touch of Unicorn: immune to damage for ${PS.invuln_rounds_left} more combat round(s).`,style:{marginLeft:"4px"}},["🦄"]):null]),
         bar(PS.current_hp/PS.getMaxHp()*100,PS.isPoisoned()?"bar-hp-poisoned":"bar-hp",compact,"stat-hp-bar-fill"),
         h("div",{},[h("span",{id:"stat-stamina-text",class:"stamina-text"},[`Stamina ${Math.round(PS.current_stamina)}/${Math.round(PS.getMaxStamina())}`]), PS.stamina_shrine_buff>0?h("span",{title:`Stamina shrine active: ${Math.round(PS.stamina_shrine_buff)} bonus stamina in reserve.`,style:{marginLeft:"4px"}},["✨"]):null]),
         bar(PS.current_stamina/PS.getMaxStamina()*100,"bar-stamina",compact,"stat-stamina-bar-fill"),
@@ -3115,11 +3340,20 @@ function screenLeaderboard(){
     const isMine=e.player===Net.username;
     const isDead=!!e.is_dead;
     const style={marginBottom:"6px",justifyContent:"space-between"};
-    // v0.15: dropped the gold border box around hardcore rows -- the gold [Hardcore] text
-    // itself is enough of a signal, the border was extra visual noise.
     if(isMine){ style.background="#20304a"; }
     if(isDead){ style.opacity="0.6"; }
+    // v0.17.1 (#5): the gold border is back, but only as a prestige indicator on the #1
+    // overall record (idx is the absolute rank across all pages, 0-indexed) -- not on every
+    // hardcore row like the pre-v0.15 version, which read as noise once most of the board
+    // was hardcore players.
+    if(idx===0){ style.border="2px solid #d4af37"; }
     const nameStyle={fontWeight:"bold"};
+    // v0.17.1 (#4): the bridge-step footstep icon + count now sits INSIDE the "(Tier N ...)"
+    // parenthetical instead of off on the far right of the row, since it's a tier-progress
+    // stat, not a separate top-level figure like XP/Gold.
+    const tierNode=(e.last_bridge_steps>0)
+      ? h("span",{},[`(Tier ${e.highest_tier_reached} `, inlineIcon(FOOTSTEP_SVG,13), ` ${e.last_bridge_steps})`])
+      : h("span",{},[`(Tier ${e.highest_tier_reached})`]);
     root.appendChild(h("div",{class:"tile row",style},[
       h("div",{},[
         h("span",{class:"muted"},[`#${idx+1} `]),
@@ -3132,14 +3366,8 @@ function screenLeaderboard(){
         e.hardcore?h("span",{style:{color:"#e07a7a",fontWeight:"bold"}},[" [Hardcore]"]):null,
         isDead?h("span",{style:{color:"#e07a7a",fontWeight:"bold"}},[" [Dead]"]):null,
       ]),
-      h("div",{class:"muted row",style:{alignItems:"center",gap:"4px",flexWrap:"wrap"}},[
-        h("span",{},[`Lv ${e.level} ${e.class_name} (Tier ${e.highest_tier_reached}), ${e.lifetime_xp||0} Experience, ${e.gold} Gold`]),
-        // v0.17 (#1): footstep icon + "steps completed before your most recent Broken Bridge
-        // Trial failure" -- the new leaderboard tiebreaker between tier and level. Omitted
-        // entirely at 0 (never failed a trial yet) rather than showing a misleading "0 steps".
-        (e.last_bridge_steps>0)?h("span",{class:"row",style:{alignItems:"center",gap:"2px"},title:"Bridge steps completed before their most recent Broken Bridge Trial failure"},[
-          inlineIcon(FOOTSTEP_SVG,13), h("span",{},[String(e.last_bridge_steps)]),
-        ]):null,
+      h("div",{class:"muted row",style:{alignItems:"center",gap:"4px",flexWrap:"wrap"},title:e.last_bridge_steps>0?"Bridge steps completed before their most recent Broken Bridge Trial failure":undefined},[
+        h("span",{},[`Lv ${e.level} ${e.class_name} `]), tierNode, h("span",{},[`, ${e.lifetime_xp||0} Experience, ${e.gold} Gold`]),
       ]),
     ]));
   });
@@ -3645,11 +3873,23 @@ function onStepMaze(maze,targetIdx){
   }
   if(cell.type==="trap" && !cell.cleared){
     cell.cleared=true; cell.type=cell.baseTerrain;
+    PS.spendStamina(Balance.TRAP_STAMINA_LOSS);
+    // v0.17.1 (#11) BUG FIX: a trap used to ALWAYS deal its instant damage AND, on top of
+    // that, roll a chance (see Balance.trapShouldPoison()) to ALSO inflict Poison from the
+    // very same trigger -- player reports called this an unfair double-punish. A trap is now
+    // EITHER an instant-damage strike OR a (no-initial-damage) poison bite, never both.
+    // trapShouldPoison() still gates whether poison is even possible at this area level
+    // (impossible below area level 6) and rolls the chance; the roll now decides the trap's
+    // whole TYPE rather than an extra effect layered onto a damage trap.
+    if(Balance.trapShouldPoison(maze.depth)){
+      PS.applyPoison(maze.depth);
+      setToast(`Something bites at your ankle! No wound, but you feel a poison take hold.`);
+      autosave(); render(); return;
+    }
     // v0.13: scales with area level now (Gwen's report: a flat 4-12 damage trap was a
     // non-event at area level 13 with 357 HP) and can be outright lethal -- it no longer
     // floors at 1 HP the way the trapdoor's fall damage still does.
     const dmg=Balance.trapDamage(maze.depth);
-    PS.spendStamina(Balance.TRAP_STAMINA_LOSS);
     if(dmg>=PS.current_hp){
       PS.current_hp=0;
       autosave();
@@ -3657,25 +3897,19 @@ function onStepMaze(maze,targetIdx){
       return;
     }
     PS.current_hp-=dmg;
-    // v0.16: the ankle-bite trap can also inflict the Poison effect (see
-    // PS.applyPoison()/the dedicated poison-drain setInterval near the bottom of the
-    // file) -- a real-time, non-lethal-by-itself HP drain that keeps ticking even
-    // outside of combat, reduced by the player's Poison Resistance.
-    // v0.17 (#27): no longer unconditional -- see Balance.trapShouldPoison(), it's now
-    // impossible below area level 6 and only a chance from there on, per player reports
-    // that poison felt oppressive right from the start of the game.
-    if(Balance.trapShouldPoison(maze.depth)){
-      PS.applyPoison();
-      setToast(`Something bites at your ankle! You take ${Math.round(dmg)} damage and feel a poison take hold.`);
-    } else {
-      setToast(`Something bites at your ankle! You take ${Math.round(dmg)} damage.`);
-    }
+    setToast(`Something bites at your ankle! You take ${Math.round(dmg)} damage.`);
     autosave(); render(); return;
   }
   if(cell.type==="shrine" && !cell.cleared){
     cell.cleared=true;
-    if(Math.random()<0.5){ PS.addStaminaShrineBuff(Balance.STAMINA_MAX_BASE*Balance.SHRINE_STAMINA_BUFF_PCT); setToast("A quiet shrine restores your stamina and grants a lasting reserve!"); }
-    else { PS.applyXpShrineBuff(); setToast("A quiet shrine blesses you, bonus experience for a while!"); }
+    // v0.17.1 (#12): 5 even outcomes now instead of 2 -- Stamina, XP, and the 3 new shrines
+    // (Invulnerability/"Touch of Unicorn", Quad Damage, Magic Find).
+    const roll=Math.floor(Math.random()*5);
+    if(roll===0){ PS.addStaminaShrineBuff(Balance.STAMINA_MAX_BASE*Balance.SHRINE_STAMINA_BUFF_PCT); setToast("A quiet shrine restores your stamina and grants a lasting reserve!"); }
+    else if(roll===1){ PS.applyXpShrineBuff(); setToast("A quiet shrine blesses you, bonus experience for a while!"); }
+    else if(roll===2){ PS.applyInvulnShrineBuff(); setToast(`A radiant shrine grants you the Touch of Unicorn -- you are immune to damage for ${Balance.SHRINE_INVULN_ROUNDS} combat rounds!`); }
+    else if(roll===3){ PS.applyQuadDamageShrineBuff(); setToast(`A furious shrine quadruples your damage output for ${Balance.SHRINE_QUAD_DAMAGE_ROUNDS} combat rounds!`); }
+    else { PS.applyMagicFindShrineBuff(); setToast(`A glimmering shrine sharpens your eye for treasure -- +${Balance.SHRINE_MAGIC_FIND_PCT}% Magic Find for a while!`); }
     autosave(); render(); return;
   }
   if(cell.type==="herb" && !cell.cleared){
@@ -3882,12 +4116,16 @@ function screenCombat(){
     h("div",{style:{textAlign:"center"}},[`HP ${Math.round(Math.max(0,cb.hp))}/${Math.round(cb.maxHp)}`]),
     bar(Math.max(0,cb.hp)/cb.maxHp*100,"bar-hp"),
   ]);
-  // v0.17 (#10): doubled from ~70px (fit ~5 lines) to ~140px (fits ~10 lines) so it
-  // actually matches the monster panel's height instead of leaving a visibly shorter
-  // box next to it -- overflowY:auto so a longer combat still scrolls instead of growing
-  // past the monster panel again.
-  const logDiv=h("div",{class:"muted panel",style:{flex:"1",minWidth:"0",minHeight:"140px",maxHeight:"140px",overflowY:"auto"}},cb.log.map(l=>h("div",{},[l])));
-  root.appendChild(h("div",{class:"row",style:{alignItems:"flex-start",gap:"14px"}},[mobPanel,logDiv]));
+  // v0.17.1 BUG FIX: a fixed 140px cap on the log panel meant that once the monster panel's
+  // OWN natural height (portrait + name + HP text + bar, with padding) grew past 140px, the
+  // log box ended up visibly shorter than the monster panel next to it -- room to spare
+  // below, forcing a scrollbar for a big fight that didn't actually need one yet. Dropping
+  // the fixed height and switching the row to align-items:stretch (the flex default -- the
+  // old explicit flex-start override was what broke this) makes the log panel's height
+  // always match whichever sibling is taller (in practice, the monster panel), with
+  // overflowY:auto still scrolling once combat history genuinely exceeds that height.
+  const logDiv=h("div",{class:"muted panel",style:{flex:"1",minWidth:"0",minHeight:"0",overflowY:"auto"}},cb.log.map(l=>h("div",{},[l])));
+  root.appendChild(h("div",{class:"row",style:{alignItems:"stretch",gap:"14px"}},[mobPanel,logDiv]));
 
   if(cb.defeated){
     root.appendChild(h("div",{class:"panel",style:{background:"#2a3a20",borderColor:"#5a7a3a",margin:"12px 0"}},[cb.result_text]));
@@ -3898,6 +4136,13 @@ function screenCombat(){
   }
 
   function playerTurn(){
+    // v0.17.1 (#12): capture whether the two combat-round-scoped shrine buffs (Invuln/Quad
+    // Damage) are active BEFORE ticking them down -- so the round that brings a counter from
+    // 1 to 0 still actually gets the benefit it was granted for (ticking first, then
+    // checking, would silently shortchange the buff's very last round every time).
+    const quadActiveThisRound=PS.hasQuadDamage();
+    const invulnActiveThisRound=PS.isInvulnerable();
+    PS.tickCombatRoundBuffs();
     // v0.17 (#11): monster block chance -- scales with area level, see
     // Balance.mobBlockChance(). A blocked swing deals no damage and doesn't count toward
     // weapon-skill proficiency (nothing actually landed), but the monster still gets its
@@ -3911,8 +4156,10 @@ function screenCombat(){
       let dmg=randRange(lo,hi);
       const crit=Math.random()<PS.getCritChance();
       if(crit) dmg*=Balance.CRIT_MULTIPLIER;
+      // v0.17.1 (#12): Quad Damage shrine -- x4 total damage output while active.
+      if(quadActiveThisRound) dmg*=4;
       cb.hp-=dmg;
-      combatLog(cb,`You hit the ${cb.name} for ${Math.round(dmg)} damage${crit?" (Critical!)":""}.`);
+      combatLog(cb,`You hit the ${cb.name} for ${Math.round(dmg)} damage${crit?" (Critical!)":""}${quadActiveThisRound?" (Quad Damage!)":""}.`);
       // v0.12: every attack with a recognized weapon type equipped counts toward that
       // type's permanent proficiency (see PS.registerWeaponHit/getEquippedWeaponType).
       const weaponType=PS.getEquippedWeaponType();
@@ -3959,6 +4206,13 @@ function screenCombat(){
       return;
     }
     // monster turn
+    // v0.17.1 (#12): Touch of Unicorn (Invulnerability shrine) -- full damage immunity,
+    // checked before the block-chance roll so an invulnerable round never even risks a
+    // "block" log line implying the hit could otherwise have landed.
+    if(invulnActiveThisRound){
+      combatLog(cb,`The ${cb.name}'s attack passes through you harmlessly -- you are untouchable!`);
+      autosave(); render(); return;
+    }
     if(Math.random()<PS.getBlockChance()){
       combatLog(cb,`You block the ${cb.name}'s attack entirely!`);
       autosave(); render(); return;
@@ -4096,7 +4350,7 @@ function screenStrongholdChest(){
       PS.addGold(goldFound); msgs.push(`${goldFound} gold`);
 
       const herbTotal=randIntRange(Balance.STRONGHOLD_CHEST_HERBS_MIN,Balance.STRONGHOLD_CHEST_HERBS_MAX);
-      for(let i=0;i<herbTotal;i++) PS.addHerb(DL.pickHerbForNode(),1);
+      for(let i=0;i<herbTotal;i++) PS.addHerb(DL.pickHerbForNode(GF.maze_depth),1);
       msgs.push(`${herbTotal} herbs`);
 
       // v0.12.1: Stronghold loot hands out the top of the potion ladder (Greater/Supreme),
@@ -4143,7 +4397,7 @@ function screenStrongholdChest(){
 
 function ensureHerbNode(){
   if(!GF.herbNode || GF.herbNode.cell_idx!==GF.herb_cell_idx){
-    GF.herbNode={cell_idx:GF.herb_cell_idx, herb_id:DL.pickHerbForNode(), ticks_required:randIntRange(2,4), ticks_done:0};
+    GF.herbNode={cell_idx:GF.herb_cell_idx, herb_id:DL.pickHerbForNode(GF.maze_depth), ticks_required:randIntRange(2,4), ticks_done:0};
   }
   return GF.herbNode;
 }
@@ -4162,6 +4416,11 @@ function screenHerbEncounter(){
   root.appendChild(h("div",{class:"row"},[
     h("button",{onClick:()=>{
       node.ticks_done++;
+      // v0.17.1 (#7): every Gather click is one herbalism "strike" and grants exactly 1
+      // permanent herbalism point, regardless of whether this click happens to finish the
+      // node -- so a 2-strike herb nets 2 points total, a 4-strike herb nets 4, matching
+      // Gwen's spec literally. A level-up shows its own toast on top of the gather result.
+      const skillResult=PS.registerHerbalismStrike();
       if(node.ticks_done>=node.ticks_required){
         // v0.12: herb nodes are rarer than they used to be and cost a few clicks to work,
         // so the payout was bumped from a flat 1 up to a healthy 1-12 per node to make the
@@ -4170,10 +4429,11 @@ function screenHerbEncounter(){
         PS.addHerb(node.herb_id,qty);
         if(GF.overworld_snapshot) GF.overworld_snapshot.cells[node.cell_idx].cleared=true;
         GF.herbNode=null; autosave();
-        setToast(`You gather ${qty}x ${herb.name}.`);
+        setToast(`You gather ${qty}x ${herb.name}.`+(skillResult.leveledUp?` Your Herbalism proficiency reaches level ${skillResult.newLevel}!`:""));
         GF.goto("maze",{maze_depth:GF.maze_depth});
         return;
       }
+      if(skillResult.leveledUp) setToast(`Your Herbalism proficiency reaches level ${skillResult.newLevel}!`);
       render();
     }},["Gather"]),
     h("button",{onClick:()=>{ GF.herbNode=null; GF.goto("maze",{maze_depth:GF.maze_depth}); }},["Leave it"]),
@@ -4283,10 +4543,21 @@ function skillsBonusPanel(){
       h("div",{class:"muted",style:{minWidth:"160px",textAlign:"right"}},[`Lv ${p.level} (${p.hitsIntoLevel}/${p.hitsForNextLevel})`, dmgBonus>0?h("span",{style:{color:"var(--gold)"}},[` +${dmgBonus} dmg`]):null]),
     ]);
   });
+  // v0.17.1 (#7): Herbalism proficiency gets its own row here too, same progress-bar
+  // treatment as a weapon type -- it's a single unified track (not per-herb), gained by
+  // clicking Gather in the herb-gathering encounter (see PS.registerHerbalismStrike()).
+  const hp=PS.getHerbalismProgress();
+  const herbPct=hp.pointsForNextLevel>0?(hp.pointsIntoLevel/hp.pointsForNextLevel*100):100;
+  const herbalismRow=h("div",{class:"row",style:{justifyContent:"space-between",alignItems:"center",marginBottom:"6px",gap:"10px"}},[
+    h("div",{style:{minWidth:"70px"}},["Herbalism"]),
+    h("div",{style:{flex:"1"}},[bar(herbPct,"bar-xp",true)]),
+    h("div",{class:"muted",style:{minWidth:"160px",textAlign:"right"}},[`Lv ${hp.level} (${hp.pointsIntoLevel}/${hp.pointsForNextLevel})`]),
+  ]);
   return h("div",{class:"panel",style:{marginTop:"12px",marginBottom:"12px"}},[
     h("div",{style:{fontWeight:"bold",marginBottom:"8px"}},["Skill Bonuses"]),
     ...rows,
-    h("div",{class:"muted",style:{marginTop:"8px",fontStyle:"italic"}},["Permanent. You can only get better -- weapon skill progress survives Broken Bridge promotions and season resets."]),
+    herbalismRow,
+    h("div",{class:"muted",style:{marginTop:"8px",fontStyle:"italic"}},["Permanent. You can only get better -- weapon/herbalism skill progress survives Broken Bridge promotions and season resets."]),
   ]);
 }
 
@@ -4339,22 +4610,59 @@ const RARITY_BORDER_COLORS={Common:"#9a9686",Uncommon:"#e8e4d8",Rare:"#5a9ae0",E
 // list. Capacity varies with equipped bags (PS.getInventoryCapacity()), so the grid
 // simply grows/shrinks slot count to match -- gaining a bag adds empty slots at the end,
 // unequipping one removes them (see PS.unequipBag's new capacity guard below).
+// v0.17.1 (#13, credit: Marudok): swaps two backpack slots' array positions, or moves a
+// single item to an empty tile. Unlike the Vault (a true fixed 0..199 slot grid, so an
+// empty vault slot has its own persistent identity), the backpack's gear_instances array
+// is compact -- getInventoryUsed()/hasInventorySpace()/every render loop that iterates it
+// assume no holes. So an empty tile has no identity of its own beyond "past the packed
+// length" -- every empty tile is interchangeable, and "drop here" just means "move to the
+// end of the packed list." Swapping two OCCUPIED tiles, by contrast, never changes the
+// array's length or introduces holes, so that case is a plain in-place element swap.
+function backpackSwapSlots(idxA,idxB){
+  if(idxA===idxB) return;
+  const arr=PS.gear_instances;
+  const a=arr[idxA];
+  if(!a) return;
+  if(idxB>=arr.length){
+    arr.splice(idxA,1);
+    arr.push(a);
+  } else {
+    const b=arr[idxB];
+    arr[idxA]=b; arr[idxB]=a;
+  }
+  PS.saveGame(); render();
+}
+
 function backpackGearGrid(){
   const capacity=PS.getInventoryCapacity();
   const grid=h("div",{style:{display:"grid",gridTemplateColumns:"repeat(8,1fr)",gap:"4px",marginBottom:"10px",maxWidth:"360px"}});
   for(let i=0;i<capacity;i++){
     const inst=PS.gear_instances[i];
+    const isReorderSrc=GF._bagReorderMode&&GF._bagReorderSrcIdx===i;
     if(!inst){
-      grid.appendChild(h("div",{class:"tile",style:{width:"38px",height:"38px",padding:"0"}}));
+      grid.appendChild(h("div",{
+        class:"tile",
+        style:{width:"38px",height:"38px",padding:"0",cursor:GF._bagReorderMode?"pointer":"default"},
+        onClick:GF._bagReorderMode?()=>{
+          if(GF._bagReorderSrcIdx!=null){ const src=GF._bagReorderSrcIdx; GF._bagReorderSrcIdx=null; backpackSwapSlots(src,i); }
+        }:null,
+      }));
       continue;
     }
     const canEquip=PS.canEquipGear(inst);
-    const borderColor=RARITY_BORDER_COLORS[inst.rarity]||"var(--border)";
+    const borderColor=isReorderSrc?"#4ac6ff":(RARITY_BORDER_COLORS[inst.rarity]||"var(--border)");
     grid.appendChild(h("div",{
       class:"tile tooltip",
       style:{width:"38px",height:"38px",padding:"0",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",border:`2px solid ${borderColor}`},
       "data-tip":`${IF.tooltipText(inst)}\n${IF.categoryLabel(inst)}`,
-      onClick:()=>{
+      onClick:GF._bagReorderMode?()=>{
+        // v0.17.1 (#13): in reorder mode, clicking gear picks it up (or cancels if it's
+        // already selected) instead of equipping it -- equip-on-click only applies outside
+        // reorder mode, matching the Vault's same mode split.
+        if(GF._bagReorderSrcIdx==null){ GF._bagReorderSrcIdx=i; render(); }
+        else if(GF._bagReorderSrcIdx===i){ GF._bagReorderSrcIdx=null; render(); }
+        else { const src=GF._bagReorderSrcIdx; GF._bagReorderSrcIdx=null; backpackSwapSlots(src,i); }
+      }:()=>{
         if(!canEquip){ setToast(`Requires Level ${Balance.tierLevelRequirement(inst.tier)} to equip this (you are Lv ${PS.level}).`); render(); return; }
         const label=PS.wouldSwap(inst)?"Swap":"Equip";
         askConfirm(`${label} ${IF.displayName(inst)}?`,()=>{ PS.equipGear(inst.instance_id); autosave(); render(); },{confirmLabel:label,danger:false});
@@ -4397,6 +4705,12 @@ function screenInventory(){
 
   root.appendChild(h("h3",{},[`Backpack (${PS.getInventoryUsed()}/${PS.getInventoryCapacity()})`]));
   root.appendChild(h("div",{class:"muted",style:{marginBottom:"6px"}},["Click a slot to equip or swap. Visit the Blacksmith to salvage gear, or the Merchant to sell it."]));
+  // v0.17.1 (#13, credit: Marudok for suggesting manual item repositioning): lets a player
+  // custom-sort their backpack into their own groupings instead of always equip-on-click.
+  root.appendChild(h("div",{class:"row gap",style:{marginBottom:"6px",alignItems:"center"}},[
+    h("button",{onClick:()=>{ GF._bagReorderMode=!GF._bagReorderMode; GF._bagReorderSrcIdx=null; render(); }},[GF._bagReorderMode?"Done Reordering":"Reorder Items"]),
+    GF._bagReorderMode?h("div",{class:"muted"},[GF._bagReorderSrcIdx!=null?"Now click the slot you want to move it to (or click it again to cancel)." : "Click an item to pick it up, then click a slot to place it there."]):null,
+  ]));
   root.appendChild(backpackGearGrid());
 
   root.appendChild(h("h3",{},["Bags"]));
@@ -4414,6 +4728,29 @@ function screenInventory(){
         },
       },["Unequip"]),
     ]));
+  }
+  // v0.17.1 (#8): bags you own but currently have unequipped (see PS.unequipBag()) -- these
+  // used to just vanish the moment you unequipped them. Listed here with an Equip button so
+  // they're visibly still yours and can go back on whenever you have a free bag-rack slot.
+  const storedBagIds=Object.keys(PS.bags||{}).filter(id=>(PS.bags[id]||0)>0);
+  if(storedBagIds.length>0){
+    root.appendChild(h("div",{class:"muted",style:{marginTop:"6px"}},["In storage (unequipped):"]));
+    for(const bagId of storedBagIds){
+      const rackFull=PS.equipped_bags.length>=Balance.MAX_BAG_SLOTS;
+      root.appendChild(h("div",{class:"row",style:{marginBottom:"4px"}},[
+        `${DL.getItem(bagId).name} x${PS.bags[bagId]}`,
+        h("button",{
+          disabled:rackFull,
+          title:rackFull?`Your bag rack is full (${PS.equipped_bags.length}/${Balance.MAX_BAG_SLOTS}), unequip a bag first.`:"",
+          onClick:()=>{
+            const result=PS.equipBag(bagId);
+            if(!result.success){ setToast(result.reason); render(); return; }
+            PS.bags[bagId]--; if(PS.bags[bagId]<=0) delete PS.bags[bagId];
+            PS.saveGame(); render();
+          },
+        },["Equip"]),
+      ]));
+    }
   }
 
   root.appendChild(h("h3",{},["Consumables"]));
@@ -4647,6 +4984,45 @@ function vaultWithdraw(slotIndex){
   Net.vaultCache.splice(idx,1);
   PS.saveGame(); vaultSync(restoreFn); render();
 }
+// v0.17.1 (#14): withdraw only PART of a stackable vault entry (consumable/herb), leaving
+// the remainder behind in the same vault slot -- e.g. stash 40 potions, but only withdraw
+// 10 for this trip. Gear entries aren't stackable (always qty-of-1 conceptually) so this
+// only ever applies to consumable/herb kinds; qty must be a whole number strictly between
+// 0 and the entry's current stack (a qty equal to the whole stack should just use the
+// existing full-withdraw flow instead).
+function vaultWithdrawPartial(slotIndex,qty){
+  const idx=(Net.vaultCache||[]).findIndex(e=>e.slot===slotIndex);
+  if(idx===-1) return;
+  const entry=Net.vaultCache[idx];
+  if(entry.kind!=="consumable"&&entry.kind!=="herb") return;
+  qty=Math.floor(qty);
+  if(!qty||qty<=0||qty>=entry.qty) return;
+  entry.qty-=qty;
+  let restoreFn=null;
+  if(entry.kind==="consumable"){
+    PS.addConsumable(entry.item_id,qty);
+    restoreFn=()=>{ entry.qty+=qty; PS.consumables[entry.item_id]=Math.max(0,(PS.consumables[entry.item_id]||0)-qty); if(PS.consumables[entry.item_id]<=0) delete PS.consumables[entry.item_id]; };
+  } else {
+    PS.addHerb(entry.herb_id,qty);
+    restoreFn=()=>{ entry.qty+=qty; PS.herbs[entry.herb_id]=Math.max(0,(PS.herbs[entry.herb_id]||0)-qty); if(PS.herbs[entry.herb_id]<=0) delete PS.herbs[entry.herb_id]; };
+  }
+  PS.saveGame(); vaultSync(restoreFn); render();
+}
+// v0.17.1 (#13, credit: Marudok): lets a player manually reposition a vault item into a
+// different (empty or occupied) slot, so they can custom-sort their stash into groups
+// instead of always living wherever they happened to land. Swaps two occupied slots'
+// positions, or just moves a single item into an empty one -- either way it's a pure
+// position change, nothing is added, removed, or altered about the items themselves.
+function vaultSwapSlots(slotA,slotB){
+  if(slotA===slotB) return;
+  const items=Net.vaultCache||[];
+  const entryA=items.find(e=>e.slot===slotA), entryB=items.find(e=>e.slot===slotB);
+  if(!entryA && !entryB) return;
+  if(entryA) entryA.slot=slotB;
+  if(entryB) entryB.slot=slotA;
+  vaultSync(()=>{ if(entryA) entryA.slot=slotA; if(entryB) entryB.slot=slotB; });
+  render();
+}
 
 function screenVault(){
   const root=h("div",{});
@@ -4665,6 +5041,16 @@ function screenVault(){
   const capacity=Net.vaultCapacity||200;
   root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},[`${Net.vaultCache.length}/${capacity} slots used, 20x10, shared across every character on this account.`]));
 
+  // v0.17.1 (#13, credit: Marudok for suggesting manual item repositioning): a toggle that
+  // switches the grid's click behavior from "click = withdraw" to "click = pick up / drop
+  // here", letting players custom-sort their vault into their own groupings. Turning it on
+  // clears any stray split-panel selection so the two modes never fight over what a click
+  // on the grid means.
+  root.appendChild(h("div",{class:"row gap",style:{marginBottom:"8px",alignItems:"center"}},[
+    h("button",{onClick:()=>{ GF._vaultReorderMode=!GF._vaultReorderMode; GF._vaultReorderSrc=null; GF._vaultSplitSlot=null; render(); }},[GF._vaultReorderMode?"Done Reordering":"Reorder Items"]),
+    GF._vaultReorderMode?h("div",{class:"muted"},[GF._vaultReorderSrc!=null?"Now click the slot you want to move it to (or click it again to cancel)." : "Click an item to pick it up, then click an empty or occupied slot to place it there."]):null,
+  ]));
+
   const grid=h("div",{style:{display:"grid",gridTemplateColumns:"repeat(20,1fr)",gap:"3px",marginBottom:"14px",maxWidth:"760px"}});
   for(let i=0;i<capacity;i++){
     const entry=Net.vaultCache.find(e=>e.slot===i);
@@ -4680,14 +5066,69 @@ function screenVault(){
       else if(entry.kind==="consumable"){ label=`${DL.getItem(entry.item_id).name} x${entry.qty}`; icon=itemIcon(entry.item_id,24); tip=`${label}\n${DL.itemCategoryLabel(entry.item_id)}`; }
       else if(entry.kind==="herb"){ label=`${DL.getHerb(entry.herb_id).name} x${entry.qty}`; icon=herbIcon(entry.herb_id,24); tip=label; }
     }
+    // v0.17.1 (#14): a stackable entry (qty > 1) opens the split-quantity panel below the
+    // grid instead of immediately confirming a withdraw-everything -- see that panel's
+    // render block just after the grid for the actual quantity input. A single-item stack
+    // (qty===1) or a gear entry has nothing to split, so it keeps the old one-click-confirm
+    // withdraw-the-whole-thing behavior.
+    const isSplittable=entry&&(entry.kind==="consumable"||entry.kind==="herb")&&entry.qty>1;
+    const isReorderSrc=GF._vaultReorderMode&&GF._vaultReorderSrc===i;
+    let onClickFn=null;
+    if(GF._vaultReorderMode){
+      // v0.17.1 (#13): reorder mode ignores withdraw/split entirely -- first click on an
+      // occupied slot picks it up (or cancels if it's already the selected source), second
+      // click on ANY slot (empty or occupied, and yes even the same slot as a no-op) drops
+      // it there via vaultSwapSlots, which swaps positions if the target is occupied too.
+      onClickFn=()=>{
+        if(GF._vaultReorderSrc==null){
+          if(entry) { GF._vaultReorderSrc=i; render(); }
+        } else if(GF._vaultReorderSrc===i){
+          GF._vaultReorderSrc=null; render();
+        } else {
+          const src=GF._vaultReorderSrc; GF._vaultReorderSrc=null;
+          vaultSwapSlots(src,i);
+        }
+      };
+    } else if(entry){
+      onClickFn=()=>{
+        if(isSplittable){ GF._vaultSplitSlot=i; render(); }
+        else { askConfirm(`Withdraw ${label} back to your backpack?`,()=>vaultWithdraw(i),{confirmLabel:"Withdraw",danger:false}); }
+      };
+    }
     grid.appendChild(h("div",{
       class:"tile"+(entry?" tooltip":"")+(entry&&entry.kind==="gear"?" rarity-"+entry.inst.rarity:""),
-      style:{width:"32px",height:"32px",padding:"0",display:"flex",alignItems:"center",justifyContent:"center",cursor:entry?"pointer":"default"},
+      style:{width:"32px",height:"32px",padding:"0",display:"flex",alignItems:"center",justifyContent:"center",cursor:(entry||GF._vaultReorderMode)?"pointer":"default",
+        border:isReorderSrc?"2px solid #4ac6ff":undefined, boxSizing:"border-box"},
       "data-tip":tip||undefined,
-      onClick:entry?()=>{ askConfirm(`Withdraw ${label} back to your backpack?`,()=>vaultWithdraw(i),{confirmLabel:"Withdraw",danger:false}); }:null,
+      onClick:onClickFn,
     },[icon]));
   }
   root.appendChild(grid);
+
+  // v0.17.1 (#14): the split-withdraw panel -- appears once a stackable vault slot is
+  // clicked, lets the player type exactly how many to pull out, leaving the rest stashed.
+  if(GF._vaultSplitSlot!=null){
+    const entry=(Net.vaultCache||[]).find(e=>e.slot===GF._vaultSplitSlot);
+    if(!entry || (entry.kind!=="consumable"&&entry.kind!=="herb")){ GF._vaultSplitSlot=null; }
+    else {
+      const name=entry.kind==="consumable"?DL.getItem(entry.item_id).name:DL.getHerb(entry.herb_id).name;
+      const qtyInput=h("input",{type:"number",min:"1",max:String(entry.qty-1),value:String(Math.min(entry.qty-1,10)),style:{width:"70px"}});
+      root.appendChild(h("div",{class:"panel",style:{marginBottom:"14px"}},[
+        h("div",{style:{marginBottom:"6px"}},[`Withdraw how many of ${name} (have ${entry.qty} stashed)? You can also just withdraw the whole stack from the grid above.`]),
+        h("div",{class:"row gap",style:{alignItems:"center"}},[
+          qtyInput,
+          h("button",{onClick:()=>{
+            const qty=parseInt(qtyInput.value,10);
+            if(!qty||qty<=0||qty>=entry.qty){ setToast(`Enter a quantity between 1 and ${entry.qty-1} (use the grid above to withdraw the entire stack).`); render(); return; }
+            GF._vaultSplitSlot=null;
+            vaultWithdrawPartial(entry.slot,qty);
+          }},["Withdraw"]),
+          h("button",{onClick:()=>{ GF._vaultSplitSlot=null; render(); }},["Cancel"]),
+          h("button",{onClick:()=>{ GF._vaultSplitSlot=null; askConfirm(`Withdraw all ${entry.qty} ${name} back to your backpack?`,()=>vaultWithdraw(entry.slot),{confirmLabel:"Withdraw All",danger:false}); }},["Withdraw All"]),
+        ]),
+      ]));
+    }
+  }
 
   root.appendChild(h("h3",{},["Deposit from Backpack"]));
   if(PS.gear_instances.length===0) root.appendChild(h("div",{class:"muted"},["Nothing in your backpack to store."]));
@@ -4834,9 +5275,14 @@ function screenAuctionHouse(){
   // 1g per 100g bracket of the asking price.
   root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px",fontSize:".9em"}},["Listing fee: 1g for a 1-99g price, 2g for 100-199g, 3g for 200-299g, and so on -- charged upfront when you list."]));
   const gearOptions=[h("option",{value:""},["-- choose gear to sell --"])].concat(
-    PS.gear_instances.map(inst=>h("option",{value:inst.instance_id},[`${IF.displayName(inst)} (T${inst.tier})`]))
+    PS.gear_instances.map(inst=>h("option",{value:inst.instance_id,selected:GF._auctionSellPreviewId===inst.instance_id},[`${IF.displayName(inst)} (T${inst.tier})`]))
   );
-  const gearSelect=h("select",{},gearOptions);
+  // v0.17.1 (#9): a native <select> can only ever show plain text per option, so it used
+  // to be impossible to see an item's actual rolled stats before choosing a price for it --
+  // you had to already know (or go check Character Sheet) what you were selling. Selecting
+  // an option now also renders a full gearRow() preview below (same icon/tooltip/affix
+  // summary as the Vault and Character Sheet use), so the real stats are right there.
+  const gearSelect=h("select",{onChange:(e)=>{ GF._auctionSellPreviewId=e.target?e.target.value:gearSelect.value; render(); }},gearOptions);
   const gearPriceInput=h("input",{type:"number",min:"1",value:"10",style:{width:"90px"}});
   root.appendChild(h("div",{class:"row gap",style:{marginBottom:"10px"}},[
     gearSelect, h("span",{},["Price:"]), gearPriceInput,
@@ -4864,6 +5310,12 @@ function screenAuctionHouse(){
       render();
     }},["List Gear"]),
   ]));
+  // v0.17.1 (#9): live preview of whichever gear item is currently picked in the dropdown
+  // above -- full icon/rarity/category/affix breakdown, exactly like Vault/Character Sheet.
+  if(GF._auctionSellPreviewId){
+    const previewInst=PS.gear_instances.find(g=>g.instance_id===GF._auctionSellPreviewId);
+    if(previewInst) root.appendChild(gearRow(previewInst,[]));
+  }
 
   const stackables=[];
   for(const id of Object.keys(PS.consumables)) if(PS.consumables[id]>0) stackables.push({kind:"consumable", id, name:DL.getItem(id).name, have:PS.consumables[id]});
@@ -5245,6 +5697,23 @@ function screenAdminPanel(){
 // Kept brief on purpose -- players don't need the internal blow-by-blow, just the
 // highlights per version, most recent first.
 const CHANGELOG=[
+  { version:"v0.17.1", notes:[
+    "SEVERE BUG FIX: unequipping a bag used to just destroy it outright. It now returns to your backpack storage (shown under Bags as \"In storage\") with an Equip button, and unequipping is blocked entirely if it would leave you over your remaining carry capacity.",
+    "Fixed a bug where creating a new character could inherit the maze you were just exploring on a completely different character -- every new (or freshly loaded) character now always starts a brand new, undiscovered maze.",
+    "Fixed a bug where a freshly-promoted character kept showing their previous tier's Broken Bridge Trial step count on the leaderboard until their next trial attempt corrected it -- a successful crossing now resets it immediately.",
+    "New Herbalism proficiency: gathering herbs now builds a permanent skill, gaining 1 point per Gather click (so a herb needing 4 strikes nets 4 points). Herbalism starts at Lv 0 (0/100), reaching each further level takes 100 more points than the last. Shown on the Character Sheet's Skill Bonuses card and explained on the Herbalism & Alchemy Guide page.",
+    "The 5 newest rare herbs (feeding the Might/Swiftness/Intellect/Wardveil/Renewal potions) are now only found in herb nodes at area level 5 and above -- below that, only Starveil Petal can turn up as a rare find. Documented in their tooltips and on the guide page.",
+    "You can now manually reposition items in the Storage Vault and your Backpack via a new \"Reorder Items\" mode -- click an item to pick it up, then click another slot to place it there, letting you sort your stash into your own groupings. Thanks to Marudok for suggesting this.",
+    "You can now split a stack of consumables or herbs when withdrawing from the Storage Vault -- pick exactly how many to pull out instead of always withdrawing the whole stack.",
+    "Poison damage now scales as a percentage of your max HP based on monster tier (1% for Tier 1 mobs, +1% per tier thereafter) instead of a flat amount, so it stays meaningful at every area level.",
+    "Traps now deal EITHER instant damage OR a gradual poison bite, never both from the same trigger -- previously a trap could hit you for damage and also poison you at once.",
+    "Three new maze shrines, with a slightly higher overall shrine spawn rate so they're easier to run into: Touch of Unicorn (a unicorn icon appears by your HP while active) grants full damage immunity for 15 combat rounds; a Quad Damage shrine quadruples your damage output for 15 combat rounds; and a Magic Find shrine temporarily boosts your odds of finding more, and better, loot. Magic Find is also now a rollable item stat (up to +10/20/30/40/50% across item tiers 1-5), documented in the Itemization Guide.",
+    "Equipping gear you don't meet the level requirement for now shows a clear message explaining why, instead of silently doing nothing.",
+    "The Auction House's \"choose gear to sell\" dropdown now shows a full stat/rarity preview of the selected item, just like the Vault and Character Sheet, so you can see exactly what you're about to list.",
+    "Leaderboard: your Broken Bridge Trial step count now appears inside the \"(Tier N ...)\" line instead of off on its own at the far right, and the gold prestige border is now reserved for the #1 ranked character only (not every hardcore character).",
+    "Stronghold guardians now tolerate you being exactly 1 character level above the guardian's area level for key-drop purposes (since killing one guardian can level you up mid-run) -- 2 or more levels above still means no key chance.",
+    "Deleting a character now immediately removes it from the public leaderboard, instead of leaving a stale entry behind until an admin cleaned it up by hand.",
+  ]},
   { version:"v0.17", notes:[
     "MAJOR: Gold is now shared across every character on your account instead of being locked to one character. It's shown at the top of the screen next to \"Playing as\" / \"Log out\", visible everywhere. Existing players: your characters' gold was automatically summed together into this shared total the moment this update went live -- nobody lost anything. This also fixes a real bug where an Auction House sale could silently fail to pay out if the selling character (usually a fallen Hardcore hero) no longer existed; that's now impossible, since the gold belongs to the account, which is never deleted. Because gold is shared and safer to lose, the softcore death gold-loss penalty has been reduced from 30-60% down to 10-20%.",
     "New Merchant: instead of a fixed shop list, the Merchant now stocks 6 random gear items priced by rarity and roll quality, refreshed each time you attempt a Broken Bridge Trial.",
@@ -5456,25 +5925,37 @@ function screenHerbalismGuide(){
   root.appendChild(h("button",{style:{marginBottom:"10px"},onClick:()=>{ GF.goto(GF._preHerbalismScreen||"town"); }},["← Back"]));
 
   root.appendChild(h("h3",{},["Herbs"]));
-  // Honesty note: herb availability is deliberately NOT gated by area/depth level -- every
-  // maze, from area level 1 up, rolls gathering nodes and rare-herb odds identically (see
-  // Balance.MAZE_HERB_CHANCE_PER_TILE/RARE_HERB_CHANCE and DL.pickHerbForNode()). Rather
-  // than inventing per-herb "area levels found" numbers that don't correspond to anything
-  // the game actually does (the exact kind of misleading text Gwen asked us to strip out
-  // of the Stronghold chest loot text elsewhere in this patch), this page says so plainly.
-  root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},["Herbs are NOT gated by area level -- a Common herb is exactly as likely to turn up in a level 1 maze as a level 50 one, gathered from herb nodes you'll spot while exploring. Rare herbs are drawn from the same pool everywhere too, just at low odds regardless of depth. \"Rarity\" below refers to that drop-odds tier, not item rarity."]));
-  const herbPanel=h("div",{class:"panel",style:{marginBottom:"16px"}});
-  herbPanel.appendChild(gridRow(["Herb","Rarity","Where to Find"],{cols:"1fr .6fr 2fr",header:true}));
+  // Honesty note: herb availability is NOT gated by area/depth level for the ORIGINAL herb
+  // roster -- every maze, from area level 1 up, rolls gathering nodes and rare-herb odds
+  // identically for those (see Balance.MAZE_HERB_CHANCE_PER_TILE/RARE_HERB_CHANCE and
+  // DL.pickHerbForNode()). v0.17.1 (#7) is the one deliberate exception: the 5 newest rare
+  // herbs (feeding the Might/Swiftness/Intellect/Wardveil/Renewal potions) only enter the
+  // rare-herb pool once you're gathering at area level 5+ (Balance.NEW_HERB_MIN_AREA_LEVEL),
+  // so below that only Starveil Petal can turn up as a rare find. The Min Area Lvl column
+  // below makes that exception explicit rather than leaving it as an undocumented surprise.
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},["Most herbs are NOT gated by area level -- a Common herb is exactly as likely to turn up in a level 1 maze as a level 50 one. Rare herbs are drawn from the same pool everywhere too, EXCEPT the 5 newest ones (Ironbark Sap, Swiftfern Frond, Mindroot Tuber, Stoneshell Moss, Vitalbloom Petal), which only start appearing once you're gathering at area level 5+. \"Rarity\" below refers to that drop-odds tier, not item rarity."]));
+  const herbPanel=h("div",{class:"panel",style:{marginBottom:"16px",overflowX:"auto"}});
+  herbPanel.appendChild(gridRow(["Herb","Rarity","Min Area Lvl","Where to Find"],{cols:"1fr .6fr .8fr 2fr",header:true}));
   const herbIds=Object.keys(HERBS);
   herbIds.forEach((id,i)=>{
     const herb=HERBS[id];
     herbPanel.appendChild(gridRow([
       herb.name,
       herb.rare?h("span",{style:{color:"var(--gold)"}},["Rare"]):"Common",
+      herb.min_area_level?`${herb.min_area_level}+`:"Any",
       herb.found_in||"",
-    ],{cols:"1fr .6fr 2fr",noBorder:i===herbIds.length-1}));
+    ],{cols:"1fr .6fr .8fr 2fr",noBorder:i===herbIds.length-1}));
   });
   root.appendChild(herbPanel);
+
+  // v0.17.1 (#7): explains the new Herbalism proficiency track right on this guide page,
+  // same spot a player would already be looking to understand herb mechanics. The actual
+  // progress bar lives on the Character Sheet's Skill Bonuses card (see skillsBonusPanel()).
+  root.appendChild(h("h3",{},["Herbalism Proficiency"]));
+  root.appendChild(h("div",{class:"panel",style:{marginBottom:"16px"}},[
+    h("div",{},[`You are currently Herbalism Lv ${PS.getHerbalismLevel()}.`]),
+    h("div",{class:"muted",style:{marginTop:"6px"}},[`Every time you click Gather while working a herb node, you earn 1 permanent Herbalism point -- so a herb that takes 2 strikes to gather nets 2 points, one that takes 4 strikes nets 4, whether or not you finish gathering it. Herbalism starts at Lv 0 (0/${Balance.HERBALISM_POINT_STEP} points); reaching Lv 1 takes ${Balance.herbalismCumulativePointsForLevel(1)} points, Lv 2 takes ${Balance.herbalismCumulativePointsForLevel(2)} total, Lv 3 takes ${Balance.herbalismCumulativePointsForLevel(3)} total, and so on, ${Balance.HERBALISM_POINT_STEP} more per level. Progress is permanent and shown on your Character Sheet's Skill Bonuses card.`]),
+  ]));
 
   root.appendChild(h("h3",{},["Potion Recipes"]));
   root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},["Every brewable potion, cross-referenced against the herb table above. Recipes needing a gold payment on top of herbs are noted."]));
@@ -5589,7 +6070,9 @@ setInterval(()=>{
   if(PS.current_slot<0) return;
   const poisoned=PS.isPoisoned();
   if(poisoned && PS.current_hp>1){
-    const dps=Balance.POISON_DPS*(1-PS.getPoisonResistance()/100);
+    // v0.17.1 (#10): PS.getPoisonHpPerSec() is now the single source of truth (% of max HP,
+    // scaled by the mob tier that inflicted this poison) -- see its declaration for why.
+    const dps=PS.getPoisonHpPerSec();
     if(dps>0){ PS.current_hp=Math.max(1,PS.current_hp-dps); PS.saveGame(); }
   }
   const justExpired=poisonWasActive && !poisoned;
