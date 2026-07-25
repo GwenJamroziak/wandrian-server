@@ -150,8 +150,77 @@ for (const stmt of [
   "ALTER TABLE leaderboard_bests ADD COLUMN is_dead INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE accounts ADD COLUMN email TEXT",
   "ALTER TABLE vaults ADD COLUMN version INTEGER NOT NULL DEFAULT 0",
+  // v0.17 (#1): new leaderboard sort tiebreakers -- "Class rank (highest_tier_reached) >
+  // bridge steps > level > current-level XP". last_bridge_steps and xp are both CURRENT
+  // (non-monotonic) snapshots, same semantics as `level`, not lifetime maxes like
+  // highest_tier_reached/lifetime_xp -- see the ON CONFLICT clause below.
+  "ALTER TABLE leaderboard_bests ADD COLUMN last_bridge_steps INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE leaderboard_bests ADD COLUMN xp INTEGER NOT NULL DEFAULT 0",
+  // v0.17 (#29): gold moves from being a field inside each character's own `data` JSON
+  // blob to a single ACCOUNT-BOUND column, shared by every character on the account. See
+  // the one-time migration block right after this ALTER TABLE loop, which sums each
+  // existing account's characters' gold into this column exactly once (gold_migrated
+  // guards against re-summing on every server restart).
+  "ALTER TABLE accounts ADD COLUMN gold INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE accounts ADD COLUMN gold_migrated INTEGER NOT NULL DEFAULT 0",
 ]) {
   try { db.exec(stmt); } catch (e) { /* column already exists, fine */ }
+}
+
+// v0.17 (#29) ONE-TIME MIGRATION: gold used to live per-character (inside each row's own
+// `data` JSON blob); it's now account-bound and shared. For every account that hasn't been
+// migrated yet, sum the `gold` field out of every one of its existing characters and store
+// that total as the account's new single gold balance -- "keeping it fair for players with
+// current progression" per Gwen's explicit instruction, and critically, LOSSLESS: the sum
+// of the parts becomes the whole, nothing is discarded. Guarded by `gold_migrated` so this
+// only ever runs once per account, no matter how many times the server restarts (a brand
+// new account created after this code shipped just has zero characters to sum, so it's a
+// harmless no-op that immediately marks itself migrated).
+(function migrateAccountGold() {
+  const unmigrated = db.prepare("SELECT id FROM accounts WHERE gold_migrated = 0").all();
+  if (unmigrated.length === 0) return;
+  const sumStmt = db.prepare("SELECT data FROM characters WHERE account_id = ?");
+  const applyStmt = db.prepare("UPDATE accounts SET gold = ?, gold_migrated = 1 WHERE id = ?");
+  // NOTE: this project uses node's built-in node:sqlite (DatabaseSync), not better-sqlite3 --
+  // DatabaseSync has no higher-order transaction-wrapper method, so atomicity is done by hand
+  // with a raw BEGIN/COMMIT (and ROLLBACK on failure) around the whole batch instead.
+  db.exec("BEGIN");
+  try {
+    for (const acc of unmigrated) {
+      let total = 0;
+      for (const row of sumStmt.all(acc.id)) {
+        try {
+          const d = JSON.parse(row.data);
+          total += Number(d.gold) || 0;
+        } catch (e) {
+          /* a corrupt row contributes 0 rather than aborting the whole account's migration */
+        }
+      }
+      applyStmt.run(total, acc.id);
+    }
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+  console.log(`[migration] account gold: migrated ${unmigrated.length} account(s) to the shared account-level gold column.`);
+})();
+
+// v0.17 (#29): small helpers so every gold-touching route (character save, Auction House
+// listing fee, Auction House buy/sell credit) reads and writes the same single source of
+// truth the same way.
+function getAccountGold(accountId) {
+  const row = db.prepare("SELECT gold FROM accounts WHERE id = ?").get(accountId);
+  return row ? row.gold : 0;
+}
+function setAccountGold(accountId, newGold) {
+  db.prepare("UPDATE accounts SET gold = ? WHERE id = ?").run(Math.max(0, Math.round(newGold)), accountId);
+}
+function creditAccountGold(accountId, amount) {
+  const current = getAccountGold(accountId);
+  const next = Math.max(0, Math.round(current + amount));
+  setAccountGold(accountId, next);
+  return next;
 }
 
 /* ---------------- auth helpers ---------------- */
@@ -303,11 +372,21 @@ app.post("/api/login", (req, res) => {
 
 app.get("/api/characters", requireAuth, (req, res) => {
   const rows = db.prepare("SELECT slot, data, updated_at FROM characters WHERE account_id = ?").all(req.account.id);
+  const accountGold = getAccountGold(req.account.id);
   const bySlot = {};
-  for (const row of rows) bySlot[row.slot] = { data: JSON.parse(row.data), updated_at: row.updated_at };
+  for (const row of rows) {
+    const data = JSON.parse(row.data);
+    // v0.17 (#29): gold is account-bound now -- always hand back the CURRENT authoritative
+    // account total here, regardless of whatever (now-stale) gold figure happens to be
+    // sitting in this character's own stored JSON blob. This is what lets a player catch
+    // up on gold credited by an Auction House sale that completed while they were offline
+    // or playing a different character -- see Net.refreshCharacters() client-side.
+    data.gold = accountGold;
+    bySlot[row.slot] = { data, updated_at: row.updated_at };
+  }
   const slots = [];
   for (let i = 0; i < MAX_CHARACTER_SLOTS; i++) slots.push(bySlot[i] ? { slot: i, ...bySlot[i] } : { slot: i, empty: true });
-  res.json({ slots });
+  res.json({ slots, account_gold: accountGold });
 });
 
 app.put("/api/characters/:slot", requireAuth, (req, res) => {
@@ -349,8 +428,23 @@ app.put("/api/characters/:slot", requireAuth, (req, res) => {
   if (result.changes === 0) {
     // A newer (or equal-sequence) save is already stored -- tell the caller so a future
     // client could react to it, without treating this as an error (autosave doesn't need
-    // conflict-resolution UX the way the Vault's user-facing deposit/withdraw does).
-    return res.json({ ok: true, ignored: true });
+    // conflict-resolution UX the way the Vault's user-facing deposit/withdraw does). Gold
+    // is deliberately NOT synced here either -- a stale save's gold figure is just as
+    // untrustworthy as the rest of its (rejected) payload.
+    return res.json({ ok: true, ignored: true, account_gold: getAccountGold(req.account.id) });
+  }
+
+  // v0.17 (#29): gold is account-bound now -- mirror whatever this (accepted, non-stale)
+  // save reports as the account's shared total. Same last-write-wins trust model this
+  // route already uses for level/xp/tier/etc. (see the top-of-file note on server-side
+  // validation being future work, tracked separately), just repointed at a shared column
+  // instead of a per-character one. Known limitation: two DIFFERENT character slots on the
+  // same account, actively played in two different tabs/sessions at once, could still race
+  // each other here (there's no per-account sequence number the way _save_seq guards a
+  // single slot) -- an accepted, low-likelihood gap for now, not a silent-loss guarantee
+  // like the bug this feature fixes (a sale crediting a deleted hardcore character's row).
+  if (typeof data.gold === "number" && Number.isFinite(data.gold)) {
+    setAccountGold(req.account.id, data.gold);
   }
 
   // Track this character on the leaderboard. `level` and `gold` reflect the character's
@@ -359,11 +453,15 @@ app.put("/api/characters/:slot", requireAuth, (req, res) => {
   // bug report: a demoted-and-reground level 2 character was still showing as level 12 /
   // rank 1). `highest_tier_reached` and `lifetime_xp` are genuinely monotonic lifetime
   // stats (tier never decreases, lifetime_xp only ever accumulates), so those two keep
-  // their MAX() semantics.
+  // their MAX() semantics. v0.17 (#1): `last_bridge_steps` and `xp` (current in-level XP,
+  // distinct from lifetime_xp) are new leaderboard-sort tiebreakers and are CURRENT
+  // snapshots like level/gold, not maxed -- last_bridge_steps only changes client-side on a
+  // trial failure (see attemptStep() in index.html), and xp resets every level-up, so
+  // MAX()-ing either here would just freeze them at a stale high point.
   if (data.character_name && data.class_display_name) {
     db.prepare(
-      `INSERT INTO leaderboard_bests (account_id, character_name, class_name, level, highest_tier_reached, gold, updated_at, hardcore, lifetime_xp, is_dead)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+      `INSERT INTO leaderboard_bests (account_id, character_name, class_name, level, highest_tier_reached, gold, updated_at, hardcore, lifetime_xp, is_dead, last_bridge_steps, xp)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
        ON CONFLICT(account_id, character_name) DO UPDATE SET
          class_name=excluded.class_name,
          level=excluded.level,
@@ -372,7 +470,9 @@ app.put("/api/characters/:slot", requireAuth, (req, res) => {
          updated_at=excluded.updated_at,
          hardcore=excluded.hardcore,
          lifetime_xp=MAX(leaderboard_bests.lifetime_xp, excluded.lifetime_xp),
-         is_dead=0`
+         is_dead=0,
+         last_bridge_steps=excluded.last_bridge_steps,
+         xp=excluded.xp`
     ).run(
       req.account.id,
       data.character_name,
@@ -382,10 +482,12 @@ app.put("/api/characters/:slot", requireAuth, (req, res) => {
       data.gold || 0,
       nowIso(),
       data.hardcore ? 1 : 0,
-      data.lifetime_xp || 0
+      data.lifetime_xp || 0,
+      data.last_bridge_steps || 0,
+      data.xp || 0
     );
   }
-  res.json({ ok: true });
+  res.json({ ok: true, account_gold: getAccountGold(req.account.id) });
 });
 
 app.delete("/api/characters/:slot", requireAuth, (req, res) => {
@@ -538,10 +640,14 @@ app.post("/api/graveyard/:id/tribute", requireAuth, (req, res) => {
 });
 
 app.get("/api/leaderboard", (req, res) => {
+  // v0.17 (#1): sort order is now Class rank (highest_tier_reached) > bridge steps
+  // (last_bridge_steps) > level > current-level XP (xp), per Gwen's spec -- gold dropped
+  // out of the tiebreaker chain entirely (it's account-bound as of v0.17 anyway, see the
+  // account-gold migration, so it's no longer a meaningful per-character skill signal).
   const rows = db
     .prepare(
-      `SELECT account_id, character_name, class_name, level, highest_tier_reached, gold, lifetime_xp, hardcore, is_dead
-       FROM leaderboard_bests ORDER BY highest_tier_reached DESC, level DESC, lifetime_xp DESC, gold DESC LIMIT 50`
+      `SELECT account_id, character_name, class_name, level, highest_tier_reached, gold, lifetime_xp, hardcore, is_dead, last_bridge_steps, xp
+       FROM leaderboard_bests ORDER BY highest_tier_reached DESC, last_bridge_steps DESC, level DESC, xp DESC LIMIT 50`
     )
     .all();
   // join usernames without leaking passcode data
@@ -557,6 +663,8 @@ app.get("/api/leaderboard", (req, res) => {
       lifetime_xp: r.lifetime_xp || 0,
       hardcore: !!r.hardcore,
       is_dead: !!r.is_dead,
+      last_bridge_steps: r.last_bridge_steps || 0,
+      xp: r.xp || 0,
     };
   });
   res.json({ entries: withNames });
@@ -578,8 +686,8 @@ app.get("/api/admin/verify", requireAuth, requireAdmin, (req, res) => {
 app.get("/api/admin/leaderboard", requireAuth, requireAdmin, (req, res) => {
   const rows = db
     .prepare(
-      `SELECT account_id, character_name, class_name, level, highest_tier_reached, gold, lifetime_xp, hardcore, is_dead, updated_at
-       FROM leaderboard_bests ORDER BY highest_tier_reached DESC, level DESC, lifetime_xp DESC, gold DESC`
+      `SELECT account_id, character_name, class_name, level, highest_tier_reached, gold, lifetime_xp, hardcore, is_dead, updated_at, last_bridge_steps, xp
+       FROM leaderboard_bests ORDER BY highest_tier_reached DESC, last_bridge_steps DESC, level DESC, xp DESC`
     )
     .all();
   const withNames = rows.map((r) => {
@@ -596,6 +704,8 @@ app.get("/api/admin/leaderboard", requireAuth, requireAdmin, (req, res) => {
       hardcore: !!r.hardcore,
       is_dead: !!r.is_dead,
       updated_at: r.updated_at,
+      last_bridge_steps: r.last_bridge_steps || 0,
+      xp: r.xp || 0,
     };
   });
   res.json({ entries: withNames });
@@ -662,12 +772,17 @@ app.post("/api/announce/created", requireAuth, (req, res) => {
 
 /* ---------------- private mailbox (auction sale notifications) ---------------- */
 
-function sendPrivateMessage(accountId, message) {
+// v0.17 (#29): `extra` optionally rides along on the LIVE WebSocket push only (never
+// persisted to mailbox_messages, which is just plain notification text) -- used by the
+// Auction House sale credit below to also carry a live gold_sync figure to a seller who
+// happens to be connected at the moment of the sale. See index.html's ensureChat() handler
+// for the client side of this.
+function sendPrivateMessage(accountId, message, extra) {
   const created_at = nowIso();
   let delivered = 0;
   for (const client of chatClients) {
     if (client.accountId === accountId && client.readyState === client.OPEN) {
-      client.send(JSON.stringify({ type: "private", message, created_at }));
+      client.send(JSON.stringify(Object.assign({ type: "private", message, created_at }, extra || {})));
       delivered = 1;
     }
   }
@@ -707,36 +822,22 @@ app.post("/api/auction", requireAuth, (req, res) => {
   const itemJson = type === "gear" ? JSON.stringify(item || {}) : null;
   const roundedPrice = Math.round(numPrice);
 
-  // v0.16: charge the listing fee against the SELLER'S OWN stored character row before
-  // creating the listing, exactly like the auction buy route already credits the seller's
-  // stored row directly (see /api/auction/:id/buy above) rather than trusting whatever gold
-  // figure the client's request happens to carry. This is the actual security boundary --
-  // the client-side check in index.html is just a convenience/early-exit for the player.
+  // v0.16: charge the listing fee against the seller's OWN stored gold, server-side, rather
+  // than trusting whatever gold figure the client's request happens to carry -- the
+  // client-side check in index.html is just a convenience/early-exit for the player.
+  // v0.17 (#29): gold is account-bound now, so this charges accounts.gold directly instead
+  // of a specific character row's own (now-vestigial for gold purposes) data blob. Still
+  // requires a real, existing character row at `seller_slot` -- that's just proving the
+  // requester actually owns a character to sell as, not where the gold itself lives.
   const slot = Number.isInteger(seller_slot) ? seller_slot : -1;
   if (slot < 0) return res.status(400).json({ error: "Missing seller character slot." });
-  const charRow = db.prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?").get(req.account.id, slot);
+  const charRow = db.prepare("SELECT 1 FROM characters WHERE account_id = ? AND slot = ?").get(req.account.id, slot);
   if (!charRow) return res.status(400).json({ error: "Character not found." });
-  let charData;
-  try {
-    charData = JSON.parse(charRow.data);
-  } catch (e) {
-    return res.status(400).json({ error: "Corrupt character data." });
-  }
   const fee = auctionListingFee(roundedPrice);
-  if ((charData.gold || 0) < fee) {
+  if (getAccountGold(req.account.id) < fee) {
     return res.status(400).json({ error: `Not enough gold for the ${fee}g listing fee.` });
   }
-  charData.gold = (charData.gold || 0) - fee;
-  // Same _save_seq bump pattern as the v0.15.1 stale-write guard, so this direct write
-  // can't be silently clobbered by a slightly-stale autosave already in flight from the
-  // seller's own client (see PS._nextSaveSeq()/saveGame() in index.html).
-  charData._save_seq = Math.max(Date.now(), (charData._save_seq || 0) + 1);
-  db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(
-    JSON.stringify(charData),
-    nowIso(),
-    req.account.id,
-    slot
-  );
+  const goldAfterFee = creditAccountGold(req.account.id, -fee);
 
   const info = db
     .prepare(
@@ -757,7 +858,7 @@ app.post("/api/auction", requireAuth, (req, res) => {
       roundedPrice,
       nowIso()
     );
-  res.json({ ok: true, id: Number(info.lastInsertRowid), fee });
+  res.json({ ok: true, id: Number(info.lastInsertRowid), fee, account_gold: goldAfterFee });
 });
 
 app.delete("/api/auction/:id", requireAuth, (req, res) => {
@@ -776,54 +877,36 @@ app.post("/api/auction/:id/buy", requireAuth, (req, res) => {
   if (!listing) return res.status(404).json({ error: "That listing is no longer available." });
   if (listing.seller_account_id === req.account.id) return res.status(400).json({ error: "You can't buy your own listing." });
 
-  // Best-effort gold check against the buyer's own persisted characters (defense in depth --
-  // the client is still trusted for its own post-purchase save, per this phase's model).
-  const buyerChars = db.prepare("SELECT data FROM characters WHERE account_id = ?").all(req.account.id);
-  const hasEnoughGold = buyerChars.some((row) => {
-    try {
-      const d = JSON.parse(row.data);
-      return (d.gold || 0) >= listing.price;
-    } catch (e) {
-      return false;
-    }
-  });
-  if (!hasEnoughGold) return res.status(400).json({ error: "Not enough gold." });
+  // v0.17 (#29): gold is account-bound now -- a single, authoritative check against the
+  // buyer's own account gold, replacing the old best-effort scan across their character
+  // rows (which was really just working around gold being scattered per-character in the
+  // first place; that whole problem no longer exists).
+  if (getAccountGold(req.account.id) < listing.price) return res.status(400).json({ error: "Not enough gold." });
 
   // Remove the listing first (best-effort race protection against double-buy).
   const del = db.prepare("DELETE FROM auction_listings WHERE id = ?").run(id);
   if (del.changes === 0) return res.status(409).json({ error: "Someone already bought that." });
 
-  // Credit the seller directly, since the seller's own client isn't present for this request.
-  if (listing.seller_slot >= 0) {
-    const sellerRow = db
-      .prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?")
-      .get(listing.seller_account_id, listing.seller_slot);
-    if (sellerRow) {
-      try {
-        const d = JSON.parse(sellerRow.data);
-        d.gold = (d.gold || 0) + listing.price;
-        // v0.15.1: this credit is written directly to the DB, bypassing the seller's own
-        // client entirely (they aren't present for this request). Bump _save_seq past
-        // whatever's currently stored (see the same field's use in PUT /api/characters/:slot)
-        // so that an older autosave from the seller's client -- one that had already been
-        // queued up before this sale landed, carrying gold data from before the sale --
-        // can't silently overwrite this credit the moment it arrives.
-        d._save_seq = Math.max(Date.now(), (d._save_seq || 0) + 1);
-        db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(
-          JSON.stringify(d),
-          nowIso(),
-          listing.seller_account_id,
-          listing.seller_slot
-        );
-      } catch (e) {
-        /* if the seller's save is somehow malformed, skip the credit rather than crash the sale */
-      }
-    }
-  }
+  const buyerGoldAfter = creditAccountGold(req.account.id, -listing.price);
+  // v0.17 (#29) BUG FIX: this used to credit the seller's OWN CHARACTER ROW directly, which
+  // silently failed to grant any gold at all if that specific character row no longer
+  // existed -- e.g. a Hardcore character that had since died (its row is deleted on death,
+  // see DELETE /api/characters/:slot) still had listings that could sell, but the payout
+  // vanished into thin air the moment the guarded `if (sellerRow)` check failed. Gold is now
+  // account-bound, and accounts are never deleted, so crediting the account directly (no
+  // guard needed) fixes this completely -- the seller gets paid no matter what happened to
+  // the specific character that originally listed the item.
+  const sellerGoldAfter = creditAccountGold(listing.seller_account_id, listing.price);
 
   const label = listing.quantity > 1 ? `${listing.display_name} x${listing.quantity}` : listing.display_name;
-  sendPrivateMessage(req.account.id, `You bought ${label} for ${listing.price} gold from ${listing.seller_character_name}.`);
-  sendPrivateMessage(listing.seller_account_id, `Your ${label} has been sold to ${character_name || req.account.username} for ${listing.price} gold.`);
+  sendPrivateMessage(req.account.id, `You bought ${label} for ${listing.price} gold from ${listing.seller_character_name}.`, { gold: buyerGoldAfter });
+  // The chat notification itself was already sent unconditionally regardless of the
+  // seller's active character (sendPrivateMessage is keyed by account, not character slot)
+  // -- what was actually broken was the gold credit above, now fixed. The `gold` field here
+  // additionally gives the seller a live gold_sync if they happen to be connected right now
+  // (see index.html's ensureChat() WS handler); if not, they'll pick up the fresh total the
+  // next time GET /api/characters runs, at login (see that route's own comment).
+  sendPrivateMessage(listing.seller_account_id, `Your ${label} has been sold to ${character_name || req.account.username} for ${listing.price} gold.`, { gold: sellerGoldAfter });
 
   res.json({
     ok: true,
@@ -831,6 +914,7 @@ app.post("/api/auction/:id/buy", requireAuth, (req, res) => {
     item_key: listing.item_key,
     item: listing.item_json ? JSON.parse(listing.item_json) : null,
     quantity: listing.quantity,
+    account_gold: buyerGoldAfter,
   });
 });
 
