@@ -587,8 +587,13 @@ const Balance = {
   // can never go negative or eat into an already-earned level. Waking up at 1 HP (not a
   // full heal) is also new this version, matching Gwen's "knocked out, not rested" note.
   DEATH_XP_LOSS_PCT:0.10, DEATH_WAKE_HP:1,
-  ENCOUNTER_CHANCE_PER_STEP:0.12, TRAP_CHANCE_PER_TILE:0.05,
-  OBSTACLE_DENSITY:0.25, GRASS_PATCH_COUNT:18,
+  // v0.17.2 (#3) HOTFIX: more grass (more places monster encounters can actually trigger,
+  // since encounters only ever fire on grass -- see onStepMaze()'s cell.type==="grass"
+  // gate), plus a slightly higher per-step chance on those grass tiles. GRASS_PATCH_COUNT
+  // 18->26 (each patch is still 3-6 tiles, see the patch-growing loop below) and
+  // ENCOUNTER_CHANCE_PER_STEP 0.12->0.15.
+  ENCOUNTER_CHANCE_PER_STEP:0.15, TRAP_CHANCE_PER_TILE:0.05,
+  OBSTACLE_DENSITY:0.25, GRASS_PATCH_COUNT:26,
   // Independent per-tile roll chances (a 20x10 maze = 200 tiles), replacing the old
   // fixed-count-per-maze model: chest 0.05% (~1 chest per 10 mazes), herb 0.20%
   // (~1 per 2.5 mazes), shrine 0.10% (~1 per 5 mazes), trapdoor 0.5% (~1 per maze).
@@ -646,8 +651,16 @@ const Balance = {
   // monster HP curve; guardian damage is left at the normal per-area rate on purpose.
   // v0.17 (#18): guardians used to grant the same XP as an ordinary monster of that area
   // level despite being 3x the HP and meaningfully tougher to actually kill -- now worth
-  // 4x normal XP, applied directly on the combat object's `xp` field in ensureCombat().
-  STRONGHOLD_GUARDIAN_HP_MULT:3.0, STRONGHOLD_GUARDIAN_XP_MULT:4.0, STRONGHOLD_KEY_DROP_CHANCE:0.05,
+  // extra XP, applied directly on the combat object's `xp` field in ensureCombat().
+  // v0.17.2 (#1) HOTFIX: v0.17's 4x guardian XP multiplier was overtuned -- a quick balance
+  // check from ImpulseBE found it handed out way more XP than intended relative to the
+  // fight's actual difficulty. Reverted down to 1.5x (still a real reward over an ordinary
+  // monster of the same area level, just not the runaway 4x).
+  // v0.17.2 (#2) HOTFIX: a Stronghold used to be a 100% guaranteed spawn on EVERY maze,
+  // which made them feel routine rather than a special find. Reduced to a 40% chance per
+  // maze -- see generateMaze()'s roll before calling placeStronghold().
+  STRONGHOLD_SPAWN_CHANCE:0.40,
+  STRONGHOLD_GUARDIAN_HP_MULT:3.0, STRONGHOLD_GUARDIAN_XP_MULT:1.5, STRONGHOLD_KEY_DROP_CHANCE:0.05,
   // v0.12.1: items the Merchant will never stock, no matter their type -- currently just
   // the Stronghold Key, which is meant to be an achievement drop (kill a guardian, get
   // lucky) rather than something gold can shortcut. Still fully tradable on the Auction
@@ -672,7 +685,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.17.1-web",
+  GAME_VERSION:"v0.17.2-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   NPC_BLACKSMITH_NAME:"Grondar Emberhand", NPC_ALCHEMIST_NAME:"Maren Thistlebrew", NPC_MERCHANT_NAME:"Cassius Wraithcoin",
@@ -701,8 +714,12 @@ const Balance = {
   // v0.16: Poison Resistance's T1 max is 5, which -- run through the SAME max(tier) =
   // tier * max(T1) formula above -- lands exactly on Gwen's spec (5/10/15/20/25% across
   // T1-T5) with no special-casing needed.
+  // v0.17.2 (#4) HOTFIX: xp_find's T1 max was 10 (scaling to 50% at T5 via the same
+  // max(tier)=tier*T1max formula everything else here uses) -- way too strong an XP
+  // multiplier for a passive gear roll. Reduced to a T1 max of 1, so it now scales
+  // 1/2/3/4/5% across T1-T5 instead of 10/20/30/40/50%.
   AFFIX_TIER1_MAX:{
-    damage:5, hp:15, crit:5, armor:20, regen:5, gold_find:10, xp_find:10,
+    damage:5, hp:15, crit:5, armor:20, regen:5, gold_find:10, xp_find:1,
     stamina_max:15, strength:5, dexterity:5, vitality:5, intelligence:5, poison_resist:5,
     magic_find:10,
   },
@@ -3567,12 +3584,17 @@ function generateMaze(depth){
   for(let i=0;i<cells.length;i++) if(dist[i]>best){ best=dist[i]; exitIdx=i; }
   cells[exitIdx].type="exit";
 
-  // Stronghold: one guaranteed 3x3 structure per maze (see placeStronghold), placed before
-  // the ordinary per-tile content rolls below so its 9 cells are already spoken for -- the
-  // chest/guardian cells get non-grass/dirt types so the `candidates` filter skips them
-  // naturally, and the fence corners get their own type too so they can't be re-rolled
-  // into a chest/shrine/trap on top of the stronghold.
-  const stronghold=placeStronghold({size,sizeH,cells,depth}, dist, exitIdx);
+  // Stronghold: a 3x3 structure (see placeStronghold), placed before the ordinary per-tile
+  // content rolls below so its 9 cells are already spoken for -- the chest/guardian cells
+  // get non-grass/dirt types so the `candidates` filter skips them naturally, and the fence
+  // corners get their own type too so they can't be re-rolled into a chest/shrine/trap on
+  // top of the stronghold.
+  // v0.17.2 (#2) HOTFIX: this used to be a guaranteed spawn on every single maze -- now
+  // only STRONGHOLD_SPAWN_CHANCE (40%) of mazes get one at all, so finding one feels like
+  // an actual event again rather than routine. A maze that doesn't roll a stronghold at
+  // all skips placeStronghold() entirely, leaving `stronghold` null (same as the existing
+  // "no valid anchor found in 80 tries" fallback already handled everywhere else).
+  const stronghold=Math.random()<Balance.STRONGHOLD_SPAWN_CHANCE ? placeStronghold({size,sizeH,cells,depth}, dist, exitIdx) : null;
 
   // Content only ever lands on reachable, plain (grass/dirt) tiles. Trapdoors and traps
   // stay visually indistinguishable from ordinary terrain (see TILE_GLYPH/TILE_COLOR),
@@ -3754,7 +3776,14 @@ function screenMaze(){
         const isPlayer=maze.playerIdx===i;
         const chestLocked=cell.type==="stronghold_chest" && !strongholdChestUnlocked(maze);
         const isWalkable=!isPlayer && cell.type!=="boulder" && !chestLocked && isAdjacent4(x,y,px,py);
-        const isKnown=cell.discovered || cell.type==="exit" || cell.type==="start";
+        // v0.17.2 (#6) HOTFIX (credit: Fragbunny): the exit tile used to be permanently
+        // visible through the fog of war regardless of whether the player had actually
+        // found it yet, which spoiled the "wander and discover" feel a maze is supposed to
+        // have and made reaching it (area advancement) feel less earned. It's now hidden
+        // like any other tile until fog-of-war reveal (revealAround(), see onStepMaze())
+        // actually uncovers it. The start tile stays exempt -- that's the player's own
+        // known starting position, already revealed at generation time regardless.
+        const isKnown=cell.discovered || cell.type==="start";
         const hidden=!!cell.wasHidden || HIDDEN_TILE_TYPES.includes(cell.type);
         const displayType=HIDDEN_TILE_TYPES.includes(cell.type)?cell.baseTerrain:cell.type;
         let bg="#050505", label="", border="1px solid #222", opacity="1";
@@ -4001,9 +4030,10 @@ function ensureCombat(){
     const isGuardian=guardianCellIdx!=null;
     const hpMult=(isGuardian?Balance.STRONGHOLD_GUARDIAN_HP_MULT:1)*streakMult;
     const maxHp=Balance.monsterHp(base.base_hp,GF.maze_depth)*hpMult;
-    // v0.17 (#18): guardians are worth 4x normal XP (see STRONGHOLD_GUARDIAN_XP_MULT) --
-    // they already cost 3x the HP and a real fight to bring down, but used to hand out the
-    // same XP as an ordinary mob of that area level.
+    // v0.17 (#18): guardians are worth extra XP (see STRONGHOLD_GUARDIAN_XP_MULT) -- they
+    // already cost 3x the HP and a real fight to bring down, but used to hand out the same
+    // XP as an ordinary mob of that area level. v0.17.2 (#1) HOTFIX: this was 4x, reverted
+    // to 1.5x per ImpulseBE's balance check -- 4x was overtuned relative to the fight.
     const xpMult=isGuardian?Balance.STRONGHOLD_GUARDIAN_XP_MULT:1;
     GF.combat={monster_id:base.id, name:isGuardian?`Guardian ${base.name}`:base.name, hp:maxHp, maxHp, dmgMin:Balance.monsterDamage(base.base_damage_min,GF.maze_depth)*streakMult, dmgMax:Balance.monsterDamage(base.base_damage_max,GF.maze_depth)*streakMult, xp:Balance.monsterXpReward(base.base_xp,GF.maze_depth)*xpMult, goldMin:base.gold_min, goldMax:base.gold_max, loot_table:base.loot_table, log:[], isGuardian, guardianCellIdx};
     // v0.17 (#16): 50% chance the monster gets an unavoidable first strike the instant this
@@ -4688,7 +4718,14 @@ function screenInventory(){
   // Backpack/Bags/Consumables/Herbs stack -- this is one of the longest screens in the
   // game, no one should have to scroll past all of that just to leave.
   root.appendChild(h("button",{style:{marginTop:"8px",marginBottom:"4px"},onClick:()=>GF.goto(GF.inventory_return_to||"town")},["← Back"]));
-  const t=toastBox(); if(t) root.appendChild(t);
+  // v0.17.2 (#5) HOTFIX: toastBox() must be called exactly once per render (reading it
+  // clears GF.toast), but WHERE its returned node gets appended is independent of that --
+  // captured here, appended further down right above the Backpack grid instead of all the
+  // way up here. The equip-under-level message (by far the most common toast on this
+  // screen) fires from a click way down in the Backpack grid; showing it up here, above
+  // Skills/Attributes/Gear Bonuses/Equipped, meant players often never scrolled up far
+  // enough to notice it appeared at all.
+  const t=toastBox();
   root.appendChild(statHeader());
   root.appendChild(skillsBonusPanel());
   root.appendChild(h("div",{class:"row",style:{alignItems:"stretch",gap:"14px"}},[
@@ -4703,6 +4740,7 @@ function screenInventory(){
   }
   root.appendChild(eqDoll);
 
+  if(t) root.appendChild(t);
   root.appendChild(h("h3",{},[`Backpack (${PS.getInventoryUsed()}/${PS.getInventoryCapacity()})`]));
   root.appendChild(h("div",{class:"muted",style:{marginBottom:"6px"}},["Click a slot to equip or swap. Visit the Blacksmith to salvage gear, or the Merchant to sell it."]));
   // v0.17.1 (#13, credit: Marudok for suggesting manual item repositioning): lets a player
@@ -5697,6 +5735,14 @@ function screenAdminPanel(){
 // Kept brief on purpose -- players don't need the internal blow-by-blow, just the
 // highlights per version, most recent first.
 const CHANGELOG=[
+  { version:"v0.17.2", notes:[
+    "Stronghold guardians' XP bonus reverted from 4x down to 1.5x -- a quick balance check from ImpulseBE found 4x was handing out way more XP than the fight's actual difficulty warranted.",
+    "Strongholds are no longer a guaranteed find in every single maze -- they now spawn on roughly 40% of mazes, making a find feel more special.",
+    "Mazes now grow noticeably more grass, with a slightly higher chance of a monster encounter per step on it -- more chances to find a fight without wandering an empty maze.",
+    "The Experience Gained gear affix's maximum roll was drastically overtuned (up to +50% at tier 5) -- reduced down to a much more modest +1/2/3/4/5% across tiers 1-5.",
+    "Fixed the \"requires level X to equip\" message appearing all the way up near the top Back button, far from the Backpack grid where the equip attempt actually happened -- it now shows immediately above the Backpack section instead.",
+    "The maze exit tile is now hidden behind the fog of war just like every other tile, instead of always being visible from the moment a maze is generated -- discovering it now feels like an actual find. Thanks to Fragbunny for the suggestion.",
+  ]},
   { version:"v0.17.1", notes:[
     "SEVERE BUG FIX: unequipping a bag used to just destroy it outright. It now returns to your backpack storage (shown under Bags as \"In storage\") with an Equip button, and unequipping is blocked entirely if it would leave you over your remaining carry capacity.",
     "Fixed a bug where creating a new character could inherit the maze you were just exploring on a completely different character -- every new (or freshly loaded) character now always starts a brand new, undiscovered maze.",
