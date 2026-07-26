@@ -80,12 +80,52 @@ input[type=checkbox]:checked::after{content:"✓";position:absolute;top:-3px;lef
 .modal-box{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:20px 22px;max-width:420px;box-shadow:0 8px 30px rgba(0,0,0,.6);}
 .modal-box .row{justify-content:flex-end;margin-top:16px;}
 .social-login-btn{display:flex;align-items:center;justify-content:center;gap:8px;}
-.bar-bg{background:#000;border-radius:4px;overflow:hidden;height:16px;border:1px solid rgba(255,255,255,.08);}
+/* v0.18 (#8): position:relative so the heal-preview overlay (see hpBar()/.bar-hp-heal-preview
+   below) can be absolutely positioned underneath the real HP fill, both anchored to the same
+   box. Every other bar (XP/stamina/gold/brew) still only ever has a single .bar-fill child, so
+   this has no visible effect on them. */
+.bar-bg{background:#000;border-radius:4px;overflow:hidden;height:16px;border:1px solid rgba(255,255,255,.08);position:relative;}
 /* v0.17.3 (#8): linear (not the default ease) so a bar fed by frequent small width updates
    (see the Health Potion heal-over-time sub-tick interval) reads as one continuous smooth
-   climb instead of a series of tiny decelerate-then-stop motions. */
-.bar-fill{height:100%;transition:width .25s linear;}
+   climb instead of a series of tiny decelerate-then-stop motions. v0.18 (#8): absolutely
+   positioned (rather than relying on normal flow) so a second, wider .bar-fill sibling (the
+   heal-preview overlay) can sit underneath it in the same box instead of pushing it aside. */
+.bar-fill{position:absolute;top:0;left:0;height:100%;transition:width .25s linear;}
+/* v0.18 (#8): the potion heal-preview overlay -- a lighter, more washed-out red than the
+   normal HP fill, always rendered as a sibling underneath the real .bar-hp/.bar-hp-poisoned
+   fill (source order: this div comes FIRST in hpBar()'s markup, the real fill LAST, so the
+   real fill visually covers it everywhere except the "pending heal" band beyond its edge).
+   Its width comes from PS.getPendingHealAmount() -- see that function's own comment for why
+   it automatically shrinks the instant the player takes damage mid-heal, with no extra
+   bookkeeping needed here. */
+.bar-hp-heal-preview{background:#a85a5a;}
+/* v0.18 (#6): the once-a-second town HP/Stamina regen tick used to just jump the bar to its
+   new width every 1000ms with the fast .25s transition above -- the bar would ease for a
+   quarter-second then sit dead still for the other three-quarters, reading as a visible
+   "tick" rather than a steady climb. Applied ONLY to that tick (via refreshStatHeaderInPlace's
+   `smooth` param) so a transition exactly as long as the tick interval keeps the bar
+   perpetually mid-motion; combat/poison/heal-over-time updates keep the snappier default. */
+.bar-fill-slow-tick{transition:width 1s linear;}
+/* v0.18 (#7): the XP bar always carries this slower, ease-out transition -- combined with
+   animateXpBarGrowth()'s old-value/new-value two-step (see its own comment), a kill's XP
+   gain now visibly climbs into place over about a second instead of snapping there the
+   instant render() rebuilds the bar. */
+.bar-fill-xp-grow{transition:width 1s ease-out;}
 .bar-hp{background:var(--hp);} .bar-stamina{background:var(--stamina);} .bar-xp{background:var(--xp);} .bar-gold{background:var(--gold);} .bar-brew{background:#c9a04a;}
+/* v0.18 (#9): floating combat text -- damage/heal/XP/gold/CRIT/blocked/loot numbers that pop
+   up briefly and fade over ~2s. See spawnFloat()/spawnFloatItem()/floatLayer() for the JS side
+   (a `now - spawnTime` negative animation-delay trick lets a freshly re-rendered node -- every
+   render() tears down and rebuilds the whole DOM -- resume this animation exactly where an
+   OLDER node would have been, instead of restarting the fade from 0 on every unrelated
+   re-render). `animation-fill-mode:forwards` (implied by the shorthand's trailing `forwards`)
+   holds the final (opacity:0) frame afterward, so an entry that's aged out just sits invisible
+   until floatLayer()'s own per-render pruning drops it from GF.floatingTexts entirely. */
+.float-text-layer{position:absolute;top:-6px;left:0;width:100%;height:0;overflow:visible;pointer-events:none;z-index:5;}
+.float-text{position:absolute;left:50%;transform:translateX(-50%);font-weight:bold;font-size:1.05em;white-space:nowrap;animation:floatUpFade 2s ease-out forwards;text-shadow:0 1px 3px rgba(0,0,0,.85);}
+.float-text-item{position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:4px;font-weight:bold;white-space:nowrap;animation:floatUpFade 2s ease-out forwards;text-shadow:0 1px 3px rgba(0,0,0,.85);}
+@keyframes floatUpFade{0%{transform:translate(-50%,0);opacity:1;}100%{transform:translate(-50%,-30px);opacity:0;}}
+.float-text-dmg{color:#ff5c5c;} .float-text-heal{color:#6cff6c;} .float-text-xp{color:#b46cff;}
+.float-text-gold{color:var(--gold);} .float-text-crit{color:#ffb400;font-size:1.2em;} .float-text-block{color:#9fb0c3;}
 .hp-text{color:var(--hp);} .stamina-text{color:var(--stamina);} .xp-text{color:var(--xp);} .gold-text{color:var(--gold);}
 /* v0.17 (#3/#8): Poisoned HP variants + the status icon's fade-out transition. */
 .bar-hp-poisoned{background:var(--poison);}
@@ -94,6 +134,10 @@ input[type=checkbox]:checked::after{content:"✓";position:absolute;top:-3px;lef
 a.back-link,.linklike{color:#cbd9a0;cursor:pointer;text-decoration:underline;}
 .icon-badge{width:56px;height:56px;border-radius:50%;overflow:hidden;flex:none;background:#000;display:flex;align-items:center;justify-content:center;}
 .icon-badge svg{width:100%;height:100%;}
+/* v0.18 (#13): Roman-numeral (I-V) tier badge, upper-left corner of a gear icon -- see
+   gearIcon()/tierRomanNumeral(). Deliberately tiny + high-contrast so it reads at a glance
+   without competing with the item's own rarity-colored art underneath it. */
+.gear-tier-badge{position:absolute;top:-3px;left:-3px;min-width:13px;padding:0 2px;font-size:9px;line-height:13px;text-align:center;font-weight:bold;color:#fff;background:rgba(0,0,0,.8);border:1px solid rgba(255,255,255,.35);border-radius:3px;pointer-events:none;z-index:2;}
 .services{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:14px 0;}
 .maze-wrap{display:flex;gap:20px;align-items:flex-start;}
 .maze-grid{display:grid;gap:1px;background:#000;border:2px solid #333;}
@@ -111,10 +155,23 @@ a.back-link,.linklike{color:#cbd9a0;cursor:pointer;text-decoration:underline;}
     display:grid;grid-template-columns:repeat(3,44px);grid-template-rows:repeat(3,44px);gap:4px;margin-top:6px;
   }
   .maze-mobile-arrows button{width:44px;height:44px;font-size:1.2em;padding:0;}
+  /* v0.18 (#15): sitewide minimum comfortable tap-target size on narrow/touch screens --
+     the desktop button padding (10px 14px, ~38px tall with this font) is a bit tight for a
+     fingertip. min-height only (not a fixed height) so multi-line/wide buttons still grow
+     normally; box-sizing:border-box so the min-height includes the existing padding instead
+     of adding on top of it. Doesn't touch anything at desktop widths. */
+  button{min-height:44px;box-sizing:border-box;}
+  .linklike,.chat-toggle{display:inline-block;padding:8px 4px;min-height:44px;box-sizing:border-box;}
+  input[type=checkbox]{width:24px;height:24px;}
 }
 hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 .tooltip{position:relative;cursor:help;border-bottom:1px dotted var(--muted);}
-.tooltip:hover::after{
+/* v0.18 (#15): mobile UX -- touch devices have no :hover state at all, so a tooltip that
+   only ever opened via :hover was completely unreachable on phones/tablets. The .tooltip-open
+   class (toggled by a single delegated tap handler near the bottom of the script, see
+   closestWithClass()/the document "click" listener) makes tap-to-open work identically to
+   hover, on every .tooltip in the game, from this one shared rule. */
+.tooltip:hover::after,.tooltip.tooltip-open::after{
   content:attr(data-tip);position:absolute;bottom:120%;left:0;background:#000;color:#fff;
   padding:6px 8px;border-radius:4px;font-size:.8em;white-space:pre-line;width:220px;z-index:10;
   box-shadow:0 2px 8px rgba(0,0,0,.6);
@@ -131,7 +188,8 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
   padding:6px 8px;border-radius:4px;font-size:.8em;width:220px;z-index:11;
   box-shadow:0 2px 8px rgba(0,0,0,.6);border:1px solid var(--border);
 }
-.gear-compare-wrap:hover .compare-box{display:block;}
+/* v0.18 (#15): same tap-to-open mobile fix as .tooltip above, same shared handler. */
+.gear-compare-wrap:hover .compare-box,.gear-compare-wrap.compare-open .compare-box{display:block;}
 .plank-row{display:flex;gap:8px;margin:6px 0;}
 .plank-row button.locked-safe{background:#254a25;color:#9fe89f;border-color:#3a7a3a;}
 .plank-row button.locked-fail{background:#4a2020;color:#e89f9f;border-color:#7a3a3a;}
@@ -334,7 +392,18 @@ const ITEMS = {
   // so it rides the existing stackable-item plumbing (inventory, vault, auction house)
   // for free, it just never satisfies canUseConsumable() since it has no heal/stamina/
   // eyesight field, so the maze's quick-use buttons never touch it by accident.
-  stronghold_key:{name:"Stronghold Key",type:"consumable",sell_value:150},
+  // v0.18 (#5): Stronghold Keys are now tiered (T1-T5), matching the area level the
+  // guardian that dropped them was fought in, and can only open a chest of the SAME tier
+  // -- see Balance.strongholdKeyTierForAreaLevel()/strongholdKeyItemIdForTier() and
+  // screenStrongholdChest() for the matching gate. This existing item id is kept as the
+  // literal Tier 1 key rather than introduced as a new "stronghold_key_t1" -- any keys a
+  // player already had stashed before this patch shipped are automatically, correctly
+  // Tier 1 keys with zero migration needed and zero risk of silently vanishing.
+  stronghold_key:{name:"Stronghold Key (Tier 1)",type:"consumable",sell_value:150},
+  stronghold_key_t2:{name:"Stronghold Key (Tier 2)",type:"consumable",sell_value:300},
+  stronghold_key_t3:{name:"Stronghold Key (Tier 3)",type:"consumable",sell_value:450},
+  stronghold_key_t4:{name:"Stronghold Key (Tier 4)",type:"consumable",sell_value:600},
+  stronghold_key_t5:{name:"Stronghold Key (Tier 5)",type:"consumable",sell_value:750},
   // v0.13: fuel for "Kindle the Bonfire" in town (see PS.kindleBonfire) -- each log fed
   // in adds Balance.DRY_LOG_REGEN_PER_UNIT to both HP and Stamina regen for 10 minutes.
   // Same plain "consumable" pattern as stronghold_key: rides the stackable-item plumbing
@@ -555,7 +624,20 @@ function gearIconSvg(inst){
   const body=shapes[inst.slot]||`<circle cx="20" cy="20" r="14" fill="${color}"/>`;
   return `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">${body}</svg>`;
 }
-function gearIcon(inst,size=30){ return iconBadge(gearIconSvg(inst),size); }
+// v0.18 (#13): I-V Roman-numeral tier badges, tucked in the upper-left corner of every
+// gear icon (and therefore every square gear tile that renders one -- Vault, Backpack,
+// Equipped doll, Merchant/Blacksmith stock rows, Auction House listings, the item-drop
+// floating overlay, the Gambling Goblin reveal, etc.), so a tier is readable at a glance
+// without needing to hover the tooltip.
+const TIER_ROMAN_NUMERALS=["","I","II","III","IV","V"];
+function tierRomanNumeral(tier){ return TIER_ROMAN_NUMERALS[tier]||String(tier); }
+function gearIcon(inst,size=30){
+  const badge=iconBadge(gearIconSvg(inst),size);
+  return h("div",{class:"gear-icon-wrap",style:{position:"relative",width:size+"px",height:size+"px",flex:"none"}},[
+    badge,
+    h("div",{class:"gear-tier-badge"},[tierRomanNumeral(inst.tier)]),
+  ]);
+}
 
 /* ---------- BALANCE ---------- */
 
@@ -702,11 +784,42 @@ const Balance = {
   // maze -- see generateMaze()'s roll before calling placeStronghold().
   STRONGHOLD_SPAWN_CHANCE:0.40,
   STRONGHOLD_GUARDIAN_HP_MULT:3.0, STRONGHOLD_GUARDIAN_XP_MULT:1.5, STRONGHOLD_KEY_DROP_CHANCE:0.05,
+  // v0.18 (#2): roaming mobs -- unlike a Stronghold guardian (fixed tile, only engages if
+  // you walk up to it) or an ordinary grass encounter (random roll, no visible identity on
+  // the map at all), a roaming mob is a persistent, visible monster that actively wanders
+  // the maze -- see generateMaze()'s roamer spawn and tickRoamingMobs() (called once per
+  // player step, right alongside everything else "a player moving a grid" triggers) for the
+  // movement rules: 4-directional, blocked by boulders, confined to grass/dirt tiles (never
+  // wanders onto a chest/shrine/trap/stronghold/start/exit tile), and can never step onto a
+  // tile another live roamer already occupies. Per Gwen's spec they're tougher than a
+  // Stronghold guardian in every way that matters (more HP AND more damage, whereas a
+  // guardian's damage is deliberately left at the normal per-area rate) -- named with a
+  // "Roaming " prefix in combat, mirroring how a guardian gets "Guardian " prepended.
+  ROAMING_MOB_COUNT_PER_MAZE:3, ROAMING_MOB_HP_MULT:4.0, ROAMING_MOB_DAMAGE_MULT:1.5, ROAMING_MOB_XP_MULT:2.0,
   // v0.12.1: items the Merchant will never stock, no matter their type -- currently just
   // the Stronghold Key, which is meant to be an achievement drop (kill a guardian, get
   // lucky) rather than something gold can shortcut. Still fully tradable on the Auction
   // House between players, that path is untouched.
-  MERCHANT_EXCLUDED_ITEMS:["stronghold_key","dry_branch","potion_of_might","potion_of_swiftness","potion_of_intellect","potion_of_wardveil","potion_of_renewal","antidote"],
+  MERCHANT_EXCLUDED_ITEMS:["stronghold_key","stronghold_key_t2","stronghold_key_t3","stronghold_key_t4","stronghold_key_t5","dry_branch","potion_of_might","potion_of_swiftness","potion_of_intellect","potion_of_wardveil","potion_of_renewal","antidote"],
+  // v0.18 (#5): Stronghold Key tiering -- "guardians in area level 1 to 4 are Tier 1,
+  // 5 to 9 drop Tier 2, 10-14 = Tier 3, and so on until Tier 5" (Gwen's exact spec). The
+  // first bracket is only 4 levels wide (1-4) and every bracket after that is 5 levels
+  // wide (5-9, 10-14, 15-19, 20+) -- deliberately NOT a uniform ceil(level/5), which would
+  // put level 5 in Tier 1 instead of the requested Tier 2. Capped at ITEM_TIER_MAX(5) for
+  // any area level 20 and up. See strongholdKeyItemIdForTier() for the matching item id,
+  // and screenStrongholdChest() for where a chest gates on the CURRENT area's own tier via
+  // this same function -- this is exactly what prevents farming keys at a low level and
+  // saving them up to open high-level chests later, per Gwen's stated reason for asking.
+  strongholdKeyTierForAreaLevel(level){
+    if(level<=4) return 1;
+    return clampi(2+Math.floor((level-5)/5), 1, this.ITEM_TIER_MAX);
+  },
+  // v0.18 (#5): the item id for a given key tier -- Tier 1 deliberately reuses the
+  // pre-existing "stronghold_key" id (see that item's declaration for why), Tiers 2-5 are
+  // the new "stronghold_key_tN" ids.
+  strongholdKeyItemIdForTier(tier){
+    return tier<=1 ? "stronghold_key" : `stronghold_key_t${tier}`;
+  },
   STRONGHOLD_CHEST_GOLD_MIN:500, STRONGHOLD_CHEST_GOLD_MAX:1500,
   STRONGHOLD_CHEST_HERBS_MIN:5, STRONGHOLD_CHEST_HERBS_MAX:15,
   STRONGHOLD_CHEST_GEAR_COUNT_MIN:2, STRONGHOLD_CHEST_GEAR_COUNT_MAX:4,
@@ -734,7 +847,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.17.3-web",
+  GAME_VERSION:"v0.18-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   NPC_BLACKSMITH_NAME:"Grondar Emberhand", NPC_ALCHEMIST_NAME:"Maren Thistlebrew", NPC_MERCHANT_NAME:"Cassius Wraithcoin",
@@ -1068,7 +1181,9 @@ const DL = {
     const item=this.getItem(id); if(!item||!item.name) return "";
     if(item.type==="bag") return "Bag";
     if(item.type==="scroll") return "Scroll";
-    if(id==="stronghold_key") return "Key";
+    // v0.18 (#5): recognize all 5 tiered Stronghold Key ids ("stronghold_key" itself is
+    // Tier 1, "stronghold_key_t2".."_t5" the rest), not just the original untiered id.
+    if(id.indexOf("stronghold_key")===0) return "Key";
     if(id==="dry_branch") return "Kindling";
     // v0.17 (#24) BUG FIX: this used to give the Antidote its own one-off "Antidote"
     // category label, which showed up in the Auction House (and anywhere else this
@@ -1342,6 +1457,8 @@ const Net = {
   // tabs, plus a single-entry cache for whichever character the Inspect Player view is
   // currently showing. Cleared on logout just like the other caches below.
   leaderboardSkillsCache:null, leaderboardGoldCache:null, inspectPlayerCache:null,
+  // v0.18 (#14): "Currently playing" list under Global Chat -- see fetchActivePlayers().
+  activePlayersCache:null,
   auctionCache:null,
   vaultCache:null, vaultCapacity:200, vaultVersion:0,
   chatMessages:[], privateMessages:[], chatSocket:null,
@@ -1397,6 +1514,7 @@ const Net = {
     this.online=false; this.token=null; this.username=null; this.cache=null;
     this.graveyardCache=null; this.leaderboardCache=null; this.leaderboardCacheHardcore=null;
     this.leaderboardSkillsCache=null; this.leaderboardGoldCache=null; this.inspectPlayerCache=null;
+    this.activePlayersCache=null;
     this.auctionCache=null; this.vaultCache=null; this.vaultVersion=0; this.chatMessages=[]; this.privateMessages=[];
     this._saveInFlight={};
     if(this.chatSocket){ try{this.chatSocket.close();}catch(e){} this.chatSocket=null; }
@@ -1503,6 +1621,15 @@ const Net = {
     const res=await fetch(this.apiBase()+"/api/leaderboard/gold");
     const json=await res.json().catch(()=>({entries:[]}));
     this.leaderboardGoldCache=json.entries||[];
+  },
+  // v0.18 (#14/#17): character name + last-active timestamp for every account whose most
+  // recently-updated character saved within the last 5 minutes (server-computed off the
+  // same `characters.updated_at` column autosave already stamps -- see /api/active-players'
+  // comment). Public, no auth needed, same sensitivity level as the public leaderboard.
+  async fetchActivePlayers(){
+    const res=await fetch(this.apiBase()+"/api/active-players");
+    const json=await res.json().catch(()=>({entries:[]}));
+    this.activePlayersCache=json.entries||[];
   },
   // v0.17.3 (#15): read-only snapshot of another player's equipped gear/attributes/skills
   // for the "Inspect Player" view -- see the server route's comment for the security
@@ -1663,17 +1790,43 @@ function appendGraveyard(entry){ /* server records this when deleteSave() sends 
 const PS = {
   // v0.15.1: every save gets a strictly-increasing sequence number (see saveGame() and
   // Net.saveCharacter()) so the server can tell which of two saves is actually newer, even
-  // if their network requests arrive out of order. This is a simple monotonic clock: it
-  // normally just tracks Date.now() in milliseconds, but if two saves happen to fire
-  // within the same millisecond (common -- a maze step can both spend stamina AND trigger
-  // a shrine in one go), it still counts up by at least 1 from whatever it last returned,
-  // so no two saves in the same session ever produce the same or a decreasing number.
-  // _applyLoadedData() below also floors this against whatever sequence was already
-  // stored for the loaded character, so a skewed local clock can never produce a number
+  // if their network requests arrive out of order. _applyLoadedData() below floors this
+  // against whatever sequence was already stored for the loaded character (see the
+  // Math.max() there), so a skewed local clock -- or simply picking up a character that's
+  // already been saved further ahead by another session -- can never produce a number
   // lower than what the server already has (which would otherwise get every future save
   // from that device rejected as "stale" forever).
+  //
+  // v0.18 BUG FIX (#1): this used to be `Math.max(Date.now(), this._saveSeqFloor+1)` --
+  // letting the wall clock dominate every single call, not just the initial seed. That's
+  // exactly what let a player's Broken Bridge Trial failure get silently rolled back:
+  // reported as "failed the Tier 2 trial, got reset to level 16 instead of level 1".
+  // Sequence: open the game in one tab, grind for a while (an autosave lands with, say,
+  // seq=Date.now()~=1000000). Leave that tab open (or idle in the background, e.g. a
+  // laptop lid closed mid-session) without reloading it, and open the game again in a
+  // second tab/device to keep playing the SAME character -- that second tab correctly
+  // syncs its floor to >=1000000 on load, keeps playing, fails the trial, and saves the
+  // correct level=1 with seq=1000050. Minutes later the FIRST, stale tab -- still sitting
+  // on its old level-16 in-memory state from before the trial even started -- fires an
+  // unrelated periodic autosave (e.g. a town HP/stamina regen tick). Because real wall-
+  // clock time has advanced, `Date.now()` alone is now comfortably above 1000050 even
+  // though that tab's floor was never bumped past ~1000000 -- so its save's seq (still
+  // Date.now()-dominated) beats the fresher tab's 1000050, passes the server's "strictly
+  // greater" guard, and silently overwrites the correct level-1 reset with the stale
+  // level-16 snapshot. No error on either end, exactly matching the report.
+  //
+  // The fix: once a floor is established (either a fresh Date.now() seed for a session
+  // that has never saved before, or synced from the server's own last-known value on
+  // load), every SUBSEQUENT sequence number is a pure +1 increment of that floor -- never
+  // re-anchored to the wall clock. This makes the counter a purely LOGICAL "how many saves
+  // has this session seen" token instead of a wall-clock timestamp, so a stale tab that
+  // hasn't reloaded can never leapfrog a fresher tab just because real time has passed --
+  // it can only ever count up from the point it personally last saw, which a fresher tab
+  // (having synced past that point on its own load) is always guaranteed to already be
+  // ahead of. See bridge_trial_test.js for a regression test simulating exactly this
+  // stale-tab-vs-fresh-tab race.
   _saveSeqFloor:0,
-  _nextSaveSeq(){ this._saveSeqFloor=Math.max(Date.now(), this._saveSeqFloor+1); return this._saveSeqFloor; },
+  _nextSaveSeq(){ this._saveSeqFloor=this._saveSeqFloor?this._saveSeqFloor+1:Date.now(); return this._saveSeqFloor; },
   class_id:"", character_name:"Hero", level:1, xp:0, xp_to_next:0,
   // v0.17 (#29): gold is now ACCOUNT-BOUND, not per-character -- every character on the
   // same account shares one pool. Rather than duplicate that pool as a separate field on
@@ -2265,6 +2418,17 @@ const PS = {
     const ticksPerSecond=1000/Balance.POTION_HEAL_TICK_MS;
     return this.active_heals.reduce((sum,heal)=>sum+heal.perTick*ticksPerSecond,0);
   },
+  // v0.18 (#8): total HP the currently in-flight heal(s) still have left to deliver, clamped
+  // to however much headroom is actually left below max HP. This is the ENTIRE mechanism
+  // behind the heal-preview overlay's "shrinks if the player takes damage mid-heal" behavior
+  // (see hpBar()) -- it's computed fresh from PS.current_hp every time it's called, so a hit
+  // that lowers current_hp automatically narrows the preview on the very next render/refresh,
+  // with no separate bookkeeping needed to track "damage taken during a heal".
+  getPendingHealAmount(){
+    if(!this.active_heals || !this.active_heals.length) return 0;
+    const total=this.active_heals.reduce((sum,heal)=>sum+heal.perTick*heal.ticksLeft,0);
+    return Math.min(total, Math.max(0,this.getMaxHp()-this.current_hp));
+  },
   bestAvailableConsumable(kind){
     const field=kind==="health"?"heal_amount":"stamina_amount";
     let bestId="", bestAmt=-1;
@@ -2660,6 +2824,18 @@ const GF = {
   // stale target is always overwritten before the screen is reachable (see the magnifying-
   // glass button's onClick in screenLeaderboard()).
   leaderboardTab:null, inspectPlayerTarget:null,
+  // v0.18 (#9): floating combat text queue -- session-only, never persisted (a page reload
+  // mid-fade is a perfectly fine place for these to just vanish). See spawnFloat()/
+  // spawnFloatItem()/floatLayer() for the read/write side.
+  floatingTexts:[],
+  // v0.18 (#12): maze-event messages (exhaustion/trap/shrine) used to go through the same
+  // GF.toast banner as everything else -- fine for a one-off confirmation on a static
+  // screen, but jarring while actively exploring: the banner popping in and out above the
+  // grid on almost every step shoved the whole maze view up and down. These now append to
+  // a small fixed-height, always-rendered log (see mazeLog()/mazeLogBox()) instead, so nothing
+  // else on the maze screen ever moves. Session-only, never persisted -- same rationale as
+  // floatingTexts above.
+  mazeLog:[],
   goto(screen, extra={}){
     Object.assign(this, extra);
     this.screen=screen; render();
@@ -2689,7 +2865,72 @@ function h(tag, attrs={}, children=[]){
 // grab just the inner fill div later for an in-place width update, without touching
 // anything else in the DOM -- see the regen tick's dropdown-closing bug fix below.
 function bar(pct, cls, compact, fillId){ return h("div",{class:"bar-bg"+(compact?" compact":"")},[h("div",{id:fillId||undefined,class:"bar-fill "+cls, style:{width:clampf(pct,0,100)+"%"}})]); }
+// v0.18 (#8): the player's own HP bar specifically -- everywhere else still just calls
+// bar() directly. Renders an extra .bar-hp-heal-preview sibling UNDER the real HP fill
+// (source order: preview first, real fill last -- see the .bar-fill-slow-tick/.bar-bg CSS
+// comments for why absolute positioning makes that stack correctly instead of the second
+// child just being pushed to the right of the first). The preview's right edge sits at
+// PS.current_hp+PS.getPendingHealAmount(), so it visibly shows "how much MORE this heal
+// will add" the INSTANT a potion is drunk (that pending amount is added synchronously,
+// before the first heal sub-tick even runs), and shrinks on its own the moment current_hp
+// drops (see getPendingHealAmount()'s own comment for why no extra plumbing is needed for
+// that "shrinks if you take damage mid-heal" behavior).
+function hpBar(compact){
+  const maxHp=PS.getMaxHp();
+  const curPct=clampf(PS.current_hp/maxHp*100,0,100);
+  const pendingHeal=PS.getPendingHealAmount();
+  const previewPct=clampf((PS.current_hp+pendingHeal)/maxHp*100,0,100);
+  const poisoned=PS.isPoisoned();
+  // The preview div is ALWAYS rendered (even at pendingHeal===0, where its width just equals
+  // curPct and it's fully covered by the real fill on top, i.e. invisible) rather than being
+  // conditionally added/removed -- that lets refreshStatHeaderInPlace() below patch its width
+  // on every tick with a plain style mutation, with no DOM node creation/removal required for
+  // an id-based incremental refresh to keep working.
+  return h("div",{class:"bar-bg"+(compact?" compact":"")},[
+    h("div",{id:"stat-hp-heal-preview",class:"bar-fill bar-hp-heal-preview",style:{width:previewPct+"%"}}),
+    h("div",{id:"stat-hp-bar-fill",class:"bar-fill "+(poisoned?"bar-hp-poisoned":"bar-hp"),style:{width:curPct+"%"}}),
+    floatLayer("player"),
+  ]);
+}
 function iconBadge(svg, size){ const d=h("div",{class:"icon-badge",style:size?{width:size+"px",height:size+"px"}:{}}); d.innerHTML=svg; return d; }
+
+// v0.18 (#9): floating combat text -- push a briefly-shown, colored, fading number/word onto
+// GF.floatingTexts. `anchor` is just a grouping key ("player" or "monster"); floatLayer(anchor)
+// below is what actually renders entries back out near the matching HP bar. Not persisted,
+// not gated to any particular screen -- entries simply age out (see floatLayer()'s pruning)
+// if nothing ever renders their anchor again.
+let _floatSeq=0;
+function spawnFloat(anchor,text,cls){
+  GF.floatingTexts.push({id:++_floatSeq,anchor,kind:"text",text,cls,t:Date.now()});
+}
+// Same idea, but for a gear drop: shows the item's own SVG icon (gearIcon()) next to its name,
+// colored by the same .rarity-* class used everywhere else gear names are shown.
+function spawnFloatItem(anchor,inst){
+  GF.floatingTexts.push({id:++_floatSeq,anchor,kind:"item",inst,t:Date.now()});
+}
+// Renders every still-live entry queued for `anchor` as an absolutely-positioned, upward-
+// fading span/row. Called from inside an already position:relative container (hpBar()'s
+// bar-bg for "player"; the monster HP bar's wrapper for "monster") so entries visually hover
+// right at that bar. Each entry's animation-delay is set to NEGATIVE its own elapsed age --
+// a standard CSS trick that makes a brand-new DOM node (render() rebuilds everything from
+// scratch every call, so there's never an "old" node to keep animating) immediately resume
+// the 2s floatUpFade keyframe at the correct in-progress frame instead of restarting it, so
+// the fade reads as continuous across however many unrelated re-renders happen while it's up.
+// Also does the ONLY pruning GF.floatingTexts ever gets: entries older than the animation's
+// own duration are dropped from the array right here, so the queue can't grow unbounded over
+// a long session even though there's no separate cleanup interval anywhere.
+function floatLayer(anchor){
+  const now=Date.now();
+  GF.floatingTexts=GF.floatingTexts.filter(e=>now-e.t<2200);
+  const mine=GF.floatingTexts.filter(e=>e.anchor===anchor);
+  return h("div",{class:"float-text-layer"},mine.map((e,i)=>{
+    const style={animationDelay:(-(now-e.t))+"ms",top:(-(i*20))+"px"};
+    if(e.kind==="item"){
+      return h("div",{class:"float-text-item",style},[gearIcon(e.inst,18),h("span",{class:"rarity-"+e.inst.rarity},[IF.displayName(e.inst)])]);
+    }
+    return h("div",{class:"float-text "+e.cls,style},[e.text]);
+  }));
+}
 
 /* ---------- App root + render ---------- */
 
@@ -2703,7 +2944,30 @@ document.getElementById("changelogLink").addEventListener("click",()=>{
 
 const NO_TOPBAR_SCREENS=["authGate","login","register","changelog"];
 
-function toggleChat(){ GF.chatOpen=!GF.chatOpen; if(GF.chatOpen) Net.ensureChat(); render(); }
+function toggleChat(){
+  GF.chatOpen=!GF.chatOpen;
+  if(GF.chatOpen){
+    Net.ensureChat();
+    // v0.18 (#14): kick off a fresh fetch every time the panel opens (not just once ever)
+    // so "Currently playing" doesn't go stale across a long session.
+    Net.fetchActivePlayers().then(render).catch(()=>{});
+  }
+  render();
+}
+
+// v0.18 (#14): "Currently playing: Name1, Name2, Name3" line under Global Chat -- server
+// already filters to the last 5 minutes of activity (see /api/active-players' comment) and
+// sorts most-recent-first; this just handles the client-side "5 most recent, then an
+// 'and N others' tail" truncation Gwen's spec calls for.
+function activePlayersLine(){
+  const entries=Net.activePlayersCache;
+  if(entries===null||entries===undefined) return h("div",{class:"muted",style:{fontSize:".85em",marginBottom:"6px"}},["Currently playing: loading..."]);
+  if(entries.length===0) return h("div",{class:"muted",style:{fontSize:".85em",marginBottom:"6px"}},["Currently playing: no one else right now."]);
+  const shown=entries.slice(0,5).map(e=>e.character_name);
+  const others=entries.length-shown.length;
+  const text="Currently playing: "+shown.join(", ")+(others>0?`, and ${others} other${others===1?"":"s"}`:"");
+  return h("div",{class:"muted",style:{fontSize:".85em",marginBottom:"6px"}},[text]);
+}
 
 function topBar(){
   // Wandrian is online-only now (see screenAuthGate), every screen that shows this
@@ -2716,6 +2980,10 @@ function topBar(){
     // render it. See Net.accountGold's declaration for how this stays in sync.
     h("span",{class:"row",style:{alignItems:"center",gap:"3px"},title:"Account Gold (shared across all your characters)"},["💰", `${Net.accountGold||0}`]),
     h("span",{class:"linklike",onClick:()=>{ Net.logout(); GF.goto("authGate"); }},["Log out"]),
+    // v0.18 (#16): Settings link, placed here between Log out and Global Chat per Gwen's
+    // spec -- currently just the maze movement keybind picker, but a natural home for any
+    // future local display preference too.
+    h("span",{class:"linklike",onClick:()=>{ GF._preSettingsScreen=GF.screen; GF.goto("settings"); }},["Settings"]),
     h("span",{class:"chat-toggle",onClick:toggleChat},[inlineIcon(CHAT_BUBBLE_SVG,18),"Global Chat"]),
   ];
   return h("div",{class:"top-bar"},right);
@@ -2741,6 +3009,7 @@ function chatBody(closeBtn){
   input.addEventListener("keydown",(e)=>{ if(e.key==="Enter") send(); });
   const root=h("div",{style:{display:"flex",flexDirection:"column",height:"100%"}},[
     h("div",{class:"row",style:{justifyContent:"space-between",marginBottom:"8px"}},[h("h2",{style:{margin:0}},["Global Chat"]), closeBtn?h("span",{class:"linklike",onClick:closeBtn},["Close ✕"]):null]),
+    activePlayersLine(),
     log,
     h("div",{class:"row"},[input, h("button",{onClick:send},["Send"])]),
   ]);
@@ -2764,7 +3033,10 @@ function chatPanel(){
 // never has that button yanked out from under them by a periodic full re-render. Returns
 // false if the panel isn't found (e.g. current screen doesn't render one), so the caller
 // can fall back to a full render() instead of silently doing nothing.
-function refreshStatHeaderInPlace(){
+// v0.18 (#6): optional `smooth` flag -- see the .bar-fill-slow-tick CSS class above. Only
+// the once-a-second town regen tick passes true; the poison-drain and heal-over-time ticks
+// (which already look right at the fast default fill speed) call this with no argument.
+function refreshStatHeaderInPlace(smooth){
   const el=document.getElementById("stat-header-panel");
   if(!el || !el.parentNode) return false;
   // v0.16 BUG FIX: this used to call el.parentNode.replaceChild(statHeader(), el) -- rebuild
@@ -2784,13 +3056,21 @@ function refreshStatHeaderInPlace(){
   hpFill.style.width=clampf(PS.current_hp/PS.getMaxHp()*100,0,100)+"%";
   stText.textContent=`Stamina ${Math.round(PS.current_stamina)}/${Math.round(PS.getMaxStamina())}`;
   stFill.style.width=clampf(PS.current_stamina/PS.getMaxStamina()*100,0,100)+"%";
+  // v0.18 (#8): the heal-preview overlay always exists (see hpBar()'s own comment on why
+  // it's never conditionally added/removed), so every refresh -- including the poison and
+  // regen ticks, not just the heal-over-time sub-tick -- can just patch its width the same
+  // plain way as the two bars above. This is also exactly why a hit that lowers current_hp
+  // mid-heal shrinks the preview on the very next tick of ANY of these three intervals.
+  const healPreviewFill=document.getElementById("stat-hp-heal-preview");
+  if(healPreviewFill) healPreviewFill.style.width=clampf((PS.current_hp+PS.getPendingHealAmount())/PS.getMaxHp()*100,0,100)+"%";
   // v0.17 (#3/#8): keep the Poisoned-vs-normal HP text/bar color and the status icon's
   // visibility in sync on every targeted (non-full) refresh too, not just on a full
   // render() -- see statHeader() for the matching source-of-truth markup and the poison
   // drain tick below for why this needed to run even on the tick poison expires.
   const poisoned=PS.isPoisoned();
   hpText.className=poisoned?"hp-text hp-text-poisoned":"hp-text";
-  hpFill.className="bar-fill "+(poisoned?"bar-hp-poisoned":"bar-hp");
+  hpFill.className="bar-fill "+(poisoned?"bar-hp-poisoned":"bar-hp")+(smooth?" bar-fill-slow-tick":"");
+  stFill.className="bar-fill bar-stamina"+(smooth?" bar-fill-slow-tick":"");
   const poisonIcon=document.getElementById("stat-poison-icon");
   if(poisonIcon){
     poisonIcon.style.opacity=poisoned?"1":"0";
@@ -2806,6 +3086,32 @@ function refreshStatHeaderInPlace(){
     healingText.textContent=`(healing +${healPerSec.toFixed(1)}/sec)`;
   }
   return true;
+}
+
+// v0.18 (#7): grows the XP bar from its PRE-kill width up to the width render() already
+// wrote into the DOM, over the 1s ease-out transition declared on .bar-fill-xp-grow. render()
+// tears down and rebuilds #app from scratch every call (see render() above), so a freshly
+// created bar node has no "old" width to animate from -- painting it, unanimated, straight at
+// its final value. The standard trick: immediately after render(), force the node back to the
+// OLD width with transitions disabled, then (after a short setTimeout so the browser actually
+// paints that frame) restore the transition and set it to the real target width -- the CSS
+// transition then animates the visible change same as if it had happened gradually to begin
+// with. Call this AFTER render(), passing the pre-kill xp/xp_to_next fraction (0..1).
+// Deliberately skipped by its only caller when the kill also leveled the character up: the
+// bar's denominator (PS.xp_to_next) changes on a level-up, so the old fraction and the new
+// fraction aren't on the same visual scale -- the level-up gets its own clear combat-log
+// announcement already, so just showing the new bar at its correct post-level-up width (no
+// animation) reads fine there.
+function animateXpBarGrowth(oldFraction){
+  const el=document.getElementById("stat-xp-bar-fill");
+  if(!el) return;
+  const targetWidth=el.style.width;
+  el.style.transition="none";
+  el.style.width=clampf(oldFraction*100,0,100)+"%";
+  setTimeout(()=>{
+    el.style.transition="";
+    el.style.width=targetWidth;
+  },20);
 }
 
 // v0.16 (#331): same reasoning/pattern as refreshStatHeaderInPlace() above -- Gwen asked
@@ -3124,7 +3430,11 @@ function statHeader(opts={}){
     h("div",{class:"row",style:{marginTop:"8px",alignItems:"flex-start",gap:"14px"}},[
       h("div",{class:"col",style:{gap:compact?"3px":"8px",flex:"0 0 33%",maxWidth:"33%",minWidth:"0"}},[
         h("div",{},[h("span",{class:"xp-text"},[`XP ${PS.xp}/${PS.xp_to_next}`]), PS.xp_buff_encounters_left>0?h("span",{title:`Experience shrine active: bonus XP for ${PS.xp_buff_encounters_left} more battle${PS.xp_buff_encounters_left===1?"":"s"}.`,style:{marginLeft:"4px"}},["✨"]):null]),
-        bar(PS.xp/PS.xp_to_next*100,"bar-xp",compact),
+        // v0.18 (#7): fillId + the bar-fill-xp-grow modifier class let animateXpBarGrowth()
+        // (called right after a kill's render()) find this exact node and ease it up to its
+        // new width over ~1s instead of the width just snapping to place. See that function's
+        // own comment for how it triggers a CSS transition on a node render() just rebuilt.
+        bar(PS.xp/PS.xp_to_next*100,"bar-xp bar-fill-xp-grow",compact,"stat-xp-bar-fill"),
         // v0.17 (#3): the HP text + bar render in a distinct poison-green (not the usual
         // HP-red) for the duration of the Poison effect, reverting the instant it ends --
         // see the .hp-text-poisoned/.bar-hp-poisoned CSS rules. v0.17 (#8): the status icon
@@ -3151,7 +3461,7 @@ function statHeader(opts={}){
         // sync on every fast heal sub-tick by refreshStatHeaderInPlace() below, same
         // pattern as the poison/regen indicators above.
         h("span",{id:"stat-healing-text",class:"muted",style:{marginLeft:"4px",display:PS.getHealPerSecond()>0?"inline":"none"}},[`(healing +${PS.getHealPerSecond().toFixed(1)}/sec)`])]),
-        bar(PS.current_hp/PS.getMaxHp()*100,PS.isPoisoned()?"bar-hp-poisoned":"bar-hp",compact,"stat-hp-bar-fill"),
+        hpBar(compact),
         h("div",{},[h("span",{id:"stat-stamina-text",class:"stamina-text"},[`Stamina ${Math.round(PS.current_stamina)}/${Math.round(PS.getMaxStamina())}`]), PS.stamina_shrine_buff>0?h("span",{title:`Stamina shrine active: ${Math.round(PS.stamina_shrine_buff)} bonus stamina in reserve.`,style:{marginLeft:"4px"}},["✨"]):null]),
         bar(PS.current_stamina/PS.getMaxStamina()*100,"bar-stamina",compact,"stat-stamina-bar-fill"),
       ]),
@@ -3635,6 +3945,27 @@ function screenLeaderboard(){
   return root;
 }
 
+// v0.18 (#17): renders leaderboard_bests.updated_at (exposed by the server as
+// last_active_at -- see server.js's /api/leaderboard handler) as a human-readable "Last
+// seen" string. Mirrors the 5-minute "currently playing" window from #14/#427's
+// /api/active-players so a character within that window reads "Online now" instead of
+// "0m ago", but this is purely a display nicety -- no shared state with that feature.
+function formatLastSeen(iso){
+  if(!iso) return "Unknown";
+  const then=new Date(iso).getTime();
+  if(isNaN(then)) return "Unknown";
+  const diffMs=Date.now()-then;
+  if(diffMs<0) return "Online now";
+  const mins=Math.floor(diffMs/60000);
+  if(mins<5) return "Online now";
+  if(mins<60) return `${mins}m ago`;
+  const hours=Math.floor(mins/60);
+  if(hours<24) return `${hours}h ago`;
+  const days=Math.floor(hours/24);
+  if(days<30) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
 function leaderboardLadderTab(){
   const root=h("div",{});
   if(Net.leaderboardCache===null||Net.leaderboardCache===undefined){
@@ -3691,6 +4022,10 @@ function leaderboardLadderTab(){
       h("div",{class:"muted row",style:{alignItems:"center",gap:"4px",flexWrap:"wrap"},title:e.last_bridge_steps>0?"Bridge steps completed before their most recent Broken Bridge Trial failure":undefined},[
         h("span",{},[`Lv ${e.level} ${e.class_name} `]), tierNode, h("span",{},[`, ${e.lifetime_xp||0} Experience`]),
       ]),
+      // v0.18 (#17): "Last seen" -- reads leaderboard_bests.updated_at (already stamped
+      // fresh on every character save, same signal #14's "Currently playing" line uses),
+      // exposed by the server as `last_active_at`.
+      h("div",{class:"muted",style:{fontSize:".85em",marginTop:"2px"}},[`Last seen: ${formatLastSeen(e.last_active_at)}`]),
     ]));
   });
 
@@ -4108,9 +4443,56 @@ function generateMaze(depth){
     if(roll<Balance.MAZE_CHEST_CHANCE_PER_TILE+Balance.MAZE_SHRINE_CHANCE_PER_TILE+Balance.MAZE_HERB_CHANCE_PER_TILE+Balance.MAZE_TRAPDOOR_CHANCE_PER_TILE+Balance.TRAP_CHANCE_PER_TILE){ c.type="trap"; }
   }
 
-  const maze={size, sizeH, cells, depth, playerIdx:0, stronghold};
+  // v0.18 (#2): roaming mobs spawn AFTER the per-tile content rolls above, on whatever
+  // grass/dirt tiles are still plain (a tile that just rolled a chest/shrine/herb/trap/
+  // trapdoor is no longer type grass/dirt, so it's naturally excluded here -- no roamer
+  // ever shares a tile with another piece of content). Each gets a fixed monster identity
+  // for this maze's lifetime (same convention as a Stronghold guardian), but -- unlike a
+  // guardian -- its tile position changes every player step (see tickRoamingMobs()), so it
+  // needs its own stable `roamerId` rather than being addressed by cell index the way a
+  // guardian is by its fixed cell.
+  const openTiles=cells.filter((c,i)=>dist[i]>0 && (c.type==="grass"||c.type==="dirt"));
+  shuffle(openTiles);
+  const roamers=[];
+  for(let r=0;r<Math.min(Balance.ROAMING_MOB_COUNT_PER_MAZE, openTiles.length);r++){
+    const tile=openTiles[r];
+    roamers.push({roamerId:r, idx:idx(tile.x,tile.y), monsterId:DL.pickRandomMonsterForArea(depth).id, defeated:false});
+  }
+
+  const maze={size, sizeH, cells, depth, playerIdx:0, stronghold, roamers};
   revealAround(maze,0,PS.getEyesightRadius()); // see your own starting neighborhood immediately
   return maze;
+}
+
+// v0.18 (#2): moves every still-living roaming mob exactly one tile in a random valid
+// direction (4-directional, like the player). "Valid" means: in bounds, not a boulder,
+// still a plain grass/dirt tile (so a roamer can never wander onto a chest/shrine/trap/
+// stronghold/start/exit tile), and not already occupied by another still-living roamer --
+  // deliberately does NOT exclude the player's own tile, so a roamer wandering into the
+// player is just as valid a way to trigger a fight as the player walking into it (see
+// onStepMaze()'s post-tick collision check). A roamer with no valid direction available
+// this turn simply stays put rather than being forced to move.
+function tickRoamingMobs(maze){
+  if(!maze.roamers || !maze.roamers.length) return;
+  const dirs4=[[1,0],[-1,0],[0,1],[0,-1]];
+  const occupied=new Set(maze.roamers.filter(r=>!r.defeated).map(r=>r.idx));
+  for(const r of maze.roamers){
+    if(r.defeated) continue;
+    occupied.delete(r.idx);
+    const shuffled=dirs4.slice(); shuffle(shuffled);
+    let moved=false;
+    for(const [dx,dy] of shuffled){
+      const x=r.idx%maze.size, y=Math.floor(r.idx/maze.size);
+      const nx=x+dx, ny=y+dy;
+      if(nx<0||nx>=maze.size||ny<0||ny>=maze.sizeH) continue;
+      const ni=ny*maze.size+nx;
+      const cell=maze.cells[ni];
+      if(cell.type!=="grass" && cell.type!=="dirt") continue;
+      if(occupied.has(ni)) continue;
+      r.idx=ni; moved=true; break;
+    }
+    occupied.add(r.idx);
+  }
 }
 
 // Picks a 3x3 anchor point whose all 9 cells are reachable, not the start tile, and not
@@ -4206,6 +4588,12 @@ const TILE_GLYPH={start:"🏕",exit:"⬇",chest:"🎁",shrine:"✨",herb:"🌿",
 const TILE_COLOR={start:"#2a4a2a",exit:"#3a3a6a",chest:"#5a4a1a",shrine:"#3a5a5a",herb:"#2a4a2a",boulder:"#3a3a34",grass:"#274a1e",dirt:"#4a3a26",trap:"#5a2a1a",
   stronghold_chest:"#5a4a1a",stronghold_guardian:"#6a1e1e",stronghold_fence:"#4a3a26"};
 const HIDDEN_TILE_TYPES=["trapdoor"];
+// v0.18 (#2): roaming mobs aren't a cell type (their tile changes every step -- see
+// tickRoamingMobs()), so they're not part of TILE_GLYPH/TILE_COLOR above -- screenMaze()'s
+// render loop overlays this glyph/color on top of whatever plain grass/dirt tile a live
+// roamer currently occupies, same fog-of-war rules (only shown once `cell.discovered`) as
+// every other piece of map content.
+const ROAMING_MOB_GLYPH="👹", ROAMING_MOB_COLOR="#3a1e4a";
 
 // v0.16 (#333): pure hex-color lerp used to fade a trampled grass tile's background
 // toward the dirt color in 3 gradient steps (see screenMaze()'s tile-rendering loop and
@@ -4244,8 +4632,11 @@ function screenMaze(){
   const root=h("div",{});
   root.appendChild(h("h2",{},[`The Woods, Area Level ${depth}`]));
   root.appendChild(h("div",{class:"lore"},["Overgrown paths wind between the trees. Move with the arrow keys or by clicking an adjacent tile."]));
-  const t=toastBox(); if(t) root.appendChild(t);
   root.appendChild(statHeader());
+  // v0.18 (#12): maze-event messages (exhaustion/trap/shrine) render into this fixed-height
+  // log instead of the page-shifting toast banner (the old toastBox call) that used to sit
+  // here -- see mazeLog()/mazeLogBox().
+  root.appendChild(mazeLogBox());
 
   // Grid pixel size (tiles + 1px gaps + 2px border on each side), the dramatic
   // Advanced!/Trapdoor! overlay is sized to exactly cover this box, not the full
@@ -4288,6 +4679,11 @@ function screenMaze(){
             bg=interpolateHexColor(TILE_COLOR.grass, TILE_COLOR.dirt, Math.min(3,cell.trampleCount)/3);
           }
           if(cell.cleared && !hidden) opacity="0.4"; // hidden tiles never visually change, even once triggered
+          // v0.18 (#2): a live roaming mob overlays whatever plain grass/dirt tile it's
+          // currently standing on -- checked last so it visually takes priority over the
+          // (otherwise empty) grass/dirt glyph/color underneath it.
+          const roamerHere=maze.roamers && maze.roamers.find(r=>!r.defeated && r.idx===i);
+          if(roamerHere){ bg=ROAMING_MOB_COLOR; label=ROAMING_MOB_GLYPH; }
         }
         const inner=h("span",{style:{opacity}},[label]);
         const tile=h("div",{class:"maze-tile",style:{background:bg,display:"flex",alignItems:"center",justifyContent:"center",cursor:isWalkable?"pointer":"default",fontSize:"16px",border}},[inner]);
@@ -4301,7 +4697,7 @@ function screenMaze(){
   root.appendChild(h("div",{class:"maze-wrap"},[gridArea,
     h("div",{class:"side-panel"},[
       h("div",{class:"col",style:{gap:"2px"}},[
-        h("div",{class:"muted",style:{lineHeight:"1.5em"}},["Use the arrow keys to explore the wilderness. Wild creatures lure at you from the tall grass, reach the exit (⬇) before your stamina runs out. Every area hides a Stronghold too: a locked chest (🔒) guarded on 4 sides by tough guardians (💀), beat one to reach the chest, but you'll need a Stronghold Key to actually open it."]),
+        h("div",{class:"muted",style:{lineHeight:"1.5em"}},["Use the arrow keys to explore the wilderness. Wild creatures lure at you from the tall grass, reach the exit (⬇) before your stamina runs out. Every area hides a Stronghold too: a locked chest (🔒) guarded on 4 sides by tough guardians (💀), beat one to reach the chest, but you'll need a Stronghold Key to actually open it. Watch for Roaming mobs (👹) too, they wander the whole area on their own and hit harder than a Stronghold guardian."]),
       ]),
       // v0.16 (#332): on-screen D-pad, CSS-hidden on desktop-width screens (see the
       // .maze-mobile-arrows rule) -- brought back specifically so touch/mobile players
@@ -4350,7 +4746,7 @@ function onStepMaze(maze,targetIdx){
   // player simply can't take another step once truly out of stamina, and has to
   // either use a potion or walk themselves back with "Retreat to Town".
   if(PS.current_stamina<=0){
-    setToast("You're exhausted and can't go any further. Use a Stamina Potion, or retreat to town to rest.");
+    mazeLog("You're exhausted and can't go any further. Use a Stamina Potion, or retreat to town to rest.");
     render();
     return;
   }
@@ -4367,7 +4763,34 @@ function onStepMaze(maze,targetIdx){
   tickEyesightPotion();
   revealAround(maze,targetIdx,PS.getEyesightRadius());
   if(PS.current_stamina<=0){
-    setToast("You're exhausted. Use a Stamina Potion, or retreat to town to rest, before you can move again.");
+    mazeLog("You're exhausted. Use a Stamina Potion, or retreat to town to rest, before you can move again.");
+  }
+
+  // v0.18 (#2): roaming mobs -- checked BEFORE they get their own move this turn, so a
+  // player walking directly onto a roamer's tile always fights THAT roamer, with no chance
+  // for it to dodge away first (see the post-tick check further below for the other
+  // direction: a roamer wandering into the player).
+  const roamerAlreadyHere=maze.roamers && maze.roamers.find(r=>!r.defeated && r.idx===maze.playerIdx);
+  if(roamerAlreadyHere){
+    PS.tickXpBuff();
+    GF.goto("combat",{maze_depth:maze.depth, pending_monster_id:roamerAlreadyHere.monsterId, pending_roamer_id:roamerAlreadyHere.roamerId, pending_guardian_cell_idx:null});
+    return;
+  }
+  // Roaming mobs take their own move every time the player takes one, exactly like the
+  // request specifies ("whenever a player moves a grid, these mobs also move") -- this
+  // fires unconditionally here (the player didn't just walk onto one, per the check just
+  // above), before any of the per-tile-type branches below, so it always happens exactly
+  // once per successful grid step regardless of what the destination tile turns out to be.
+  // The post-tick check right after covers the other direction a fight can start: a
+  // roamer's own random move landing it on the player's (new) tile -- takes priority over
+  // the ordinary per-tile handling below (a roaming mob wandering up to you is a bigger
+  // deal than whatever mundane tile you're currently standing on).
+  tickRoamingMobs(maze);
+  const roamerWanderedIn=maze.roamers && maze.roamers.find(r=>!r.defeated && r.idx===maze.playerIdx);
+  if(roamerWanderedIn){
+    PS.tickXpBuff();
+    GF.goto("combat",{maze_depth:maze.depth, pending_monster_id:roamerWanderedIn.monsterId, pending_roamer_id:roamerWanderedIn.roamerId, pending_guardian_cell_idx:null});
+    return;
   }
 
   if(cell.type==="exit" && !cell.cleared){
@@ -4402,7 +4825,7 @@ function onStepMaze(maze,targetIdx){
     // whole TYPE rather than an extra effect layered onto a damage trap.
     if(Balance.trapShouldPoison(maze.depth)){
       PS.applyPoison(maze.depth);
-      setToast(`Something bites at your ankle! No wound, but you feel a poison take hold.`);
+      mazeLog(`Something bites at your ankle! No wound, but you feel a poison take hold.`);
       autosave(); render(); return;
     }
     // v0.13: scales with area level now (Gwen's report: a flat 4-12 damage trap was a
@@ -4416,7 +4839,10 @@ function onStepMaze(maze,targetIdx){
       return;
     }
     PS.current_hp-=dmg;
-    setToast(`Something bites at your ankle! You take ${Math.round(dmg)} damage.`);
+    mazeLog(`Something bites at your ankle! You take ${Math.round(dmg)} damage.`);
+    // v0.18 (#10): also show the floating "-X HP" overlay near the player's HP bar, same as
+    // any other source of damage, in addition to the existing toast/lore message above.
+    spawnFloat("player",`-${Math.round(dmg)} HP`,"float-text-dmg");
     autosave(); render(); return;
   }
   if(cell.type==="shrine" && !cell.cleared){
@@ -4424,11 +4850,11 @@ function onStepMaze(maze,targetIdx){
     // v0.17.1 (#12): 5 even outcomes now instead of 2 -- Stamina, XP, and the 3 new shrines
     // (Invulnerability/"Touch of Unicorn", Quad Damage, Magic Find).
     const roll=Math.floor(Math.random()*5);
-    if(roll===0){ PS.addStaminaShrineBuff(Balance.STAMINA_MAX_BASE*Balance.SHRINE_STAMINA_BUFF_PCT); setToast("A quiet shrine restores your stamina and grants a lasting reserve!"); }
-    else if(roll===1){ PS.applyXpShrineBuff(); setToast("A quiet shrine blesses you, bonus experience for a while!"); }
-    else if(roll===2){ PS.applyInvulnShrineBuff(); setToast(`A radiant shrine grants you the Touch of Unicorn -- you are immune to damage for ${Balance.SHRINE_INVULN_ROUNDS} combat rounds!`); }
-    else if(roll===3){ PS.applyQuadDamageShrineBuff(); setToast(`A furious shrine quadruples your damage output for ${Balance.SHRINE_QUAD_DAMAGE_ROUNDS} combat rounds!`); }
-    else { PS.applyMagicFindShrineBuff(); setToast(`A glimmering shrine sharpens your eye for treasure -- +${Balance.SHRINE_MAGIC_FIND_PCT}% Magic Find for a while!`); }
+    if(roll===0){ PS.addStaminaShrineBuff(Balance.STAMINA_MAX_BASE*Balance.SHRINE_STAMINA_BUFF_PCT); mazeLog("A quiet shrine restores your stamina and grants a lasting reserve!"); }
+    else if(roll===1){ PS.applyXpShrineBuff(); mazeLog("A quiet shrine blesses you, bonus experience for a while!"); }
+    else if(roll===2){ PS.applyInvulnShrineBuff(); mazeLog(`A radiant shrine grants you the Touch of Unicorn -- you are immune to damage for ${Balance.SHRINE_INVULN_ROUNDS} combat rounds!`); }
+    else if(roll===3){ PS.applyQuadDamageShrineBuff(); mazeLog(`A furious shrine quadruples your damage output for ${Balance.SHRINE_QUAD_DAMAGE_ROUNDS} combat rounds!`); }
+    else { PS.applyMagicFindShrineBuff(); mazeLog(`A glimmering shrine sharpens your eye for treasure -- +${Balance.SHRINE_MAGIC_FIND_PCT}% Magic Find for a while!`); }
     autosave(); render(); return;
   }
   if(cell.type==="herb" && !cell.cleared){
@@ -4441,7 +4867,7 @@ function onStepMaze(maze,targetIdx){
   }
   if(cell.type==="stronghold_guardian" && !cell.cleared){
     PS.tickXpBuff();
-    GF.goto("combat",{maze_depth:maze.depth, pending_monster_id:cell.guardianMonsterId, pending_guardian_cell_idx:targetIdx});
+    GF.goto("combat",{maze_depth:maze.depth, pending_monster_id:cell.guardianMonsterId, pending_guardian_cell_idx:targetIdx, pending_roamer_id:null});
     return;
   }
   if(cell.type==="stronghold_chest" && !cell.cleared){
@@ -4477,7 +4903,7 @@ function onStepMaze(maze,targetIdx){
     // ordinary grass encounter -- that's what was turning every regular mob into a
     // "Guardian" (with the tripled HP and Stronghold Key drop chance) once you'd fought
     // even one real guardian.
-    GF.goto("combat",{maze_depth:maze.depth, pending_monster_id:monster.id, pending_guardian_cell_idx:null});
+    GF.goto("combat",{maze_depth:maze.depth, pending_monster_id:monster.id, pending_guardian_cell_idx:null, pending_roamer_id:null});
     return;
   }
   autosave();
@@ -4498,20 +4924,104 @@ function attemptMazeMove(dx,dy){
   onStepMaze(maze,ni);
 }
 
+// v0.18 (#16): configurable maze movement keybinds -- Arrow Keys always work (never
+// disabled, no matter what's selected below, so nobody's existing muscle memory ever
+// breaks), and the player can ALSO opt into WASD or ZQSD (AZERTY) as an additional set of
+// keys that do the exact same attemptMazeMove() calls. Purely a local display/input
+// preference -- stored in Storage_ (localStorage, falls back to in-memory), never sent to
+// the server or attached to a character, so there's zero data-loss risk here either way.
+const KEYBIND_STORAGE_KEY="wandrian_keybind_scheme";
+const KEYBIND_SCHEMES={
+  arrows:{label:"Arrow Keys only", extraUp:[], extraDown:[], extraLeft:[], extraRight:[]},
+  wasd:{label:"WASD", extraUp:["w","W"], extraDown:["s","S"], extraLeft:["a","A"], extraRight:["d","D"]},
+  zqsd:{label:"ZQSD (AZERTY)", extraUp:["z","Z"], extraDown:["s","S"], extraLeft:["q","Q"], extraRight:["d","D"]},
+};
+function getKeybindScheme(){
+  const v=Storage_.getItem(KEYBIND_STORAGE_KEY);
+  return KEYBIND_SCHEMES[v]?v:"arrows";
+}
+function setKeybindScheme(v){
+  if(!KEYBIND_SCHEMES[v]) return;
+  Storage_.setItem(KEYBIND_STORAGE_KEY,v);
+}
+
+// v0.18 (#16): Settings screen -- currently just the keybind picker, reached via the
+// top-bar "Settings" link. Same "remember where I came from, Back returns there" pattern
+// as screenChangelog()/GF._preChangelogScreen.
+function keybindSchemeButton(key){
+  const selected=getKeybindScheme()===key;
+  return h("button",{
+    style:{background:selected?"var(--accent,#3a6a2a)":undefined,borderColor:selected?"#7ac67a":undefined},
+    onClick:()=>{ setKeybindScheme(key); render(); },
+  },[KEYBIND_SCHEMES[key].label]);
+}
+function screenSettings(){
+  const root=h("div",{});
+  root.appendChild(h("h2",{},["Settings"]));
+  root.appendChild(h("button",{style:{marginBottom:"10px"},onClick:()=>{ GF.goto(GF._preSettingsScreen||"town"); }},["← Back"]));
+  root.appendChild(h("div",{class:"panel",style:{marginBottom:"12px"}},[
+    h("div",{style:{fontWeight:"bold",marginBottom:"6px"}},["Maze Movement Keys"]),
+    h("div",{class:"muted",style:{marginBottom:"10px"}},["Arrow Keys always move you through the maze. Pick an additional set below if you'd rather use your left hand -- both work at the same time, so switching back is always free."]),
+    h("div",{class:"row gap"},[
+      keybindSchemeButton("arrows"),
+      keybindSchemeButton("wasd"),
+      keybindSchemeButton("zqsd"),
+    ]),
+  ]));
+  return root;
+}
+
 window.addEventListener("keydown",(e)=>{
   if(GF.screen!=="maze") return;
-  const keyMap={ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0]};
-  const d=keyMap[e.key]; if(!d) return;
+  const arrowMap={ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0]};
+  let d=arrowMap[e.key];
+  if(!d){
+    const scheme=KEYBIND_SCHEMES[getKeybindScheme()];
+    if(scheme.extraUp.includes(e.key)) d=[0,-1];
+    else if(scheme.extraDown.includes(e.key)) d=[0,1];
+    else if(scheme.extraLeft.includes(e.key)) d=[-1,0];
+    else if(scheme.extraRight.includes(e.key)) d=[1,0];
+  }
+  if(!d) return;
   e.preventDefault();
   attemptMazeMove(d[0],d[1]);
 });
 
+// v0.18 (#15) mobile UX fix: every info tooltip in the game (weapon/herb/potion details,
+// gear stats, the item "Comparison" box) is built on a shared .tooltip/.gear-compare-wrap
+// CSS :hover mechanism -- which never opens at all on a touch device, since touchscreens
+// have no hover state. Rather than rework each of the ~15 call sites that build one of
+// these (see IF.tooltipText() callers throughout), a single delegated tap handler here
+// toggles a class that the CSS above (see .tooltip.tooltip-open / .gear-compare-wrap.
+// compare-open) treats identically to :hover -- fixes every tooltip in the game from one
+// place, works alongside the existing desktop :hover behavior without changing it at all.
+function closestWithClass(el,className){
+  while(el && el.nodeType===1){
+    if(el.classList && el.classList.contains(className)) return el;
+    el=el.parentElement;
+  }
+  return null;
+}
+document.addEventListener("click",(e)=>{
+  const tipEl=closestWithClass(e.target,"tooltip");
+  const wrapEl=closestWithClass(e.target,"gear-compare-wrap");
+  document.querySelectorAll(".tooltip-open").forEach(el=>{ if(el!==tipEl) el.classList.remove("tooltip-open"); });
+  document.querySelectorAll(".compare-open").forEach(el=>{ if(el!==wrapEl) el.classList.remove("compare-open"); });
+  if(tipEl) tipEl.classList.toggle("tooltip-open");
+  if(wrapEl) wrapEl.classList.toggle("compare-open");
+});
 
 /* ================= COMBAT ================= */
 
 function ensureCombat(){
   const guardianCellIdx=GF.pending_guardian_cell_idx!=null?GF.pending_guardian_cell_idx:null;
-  if(!GF.combat || GF.combat.monster_id!==GF.pending_monster_id || GF.combat.guardianCellIdx!==guardianCellIdx){
+  // v0.18 (#2): a roaming mob is identified by its stable `roamerId`, not a cell index (its
+  // tile changes every player step -- see tickRoamingMobs()) -- included in this "is this
+  // still the same encounter, or a brand new one" guard exactly like guardianCellIdx is, so
+  // navigating away and back mid-fight doesn't reset it, but a genuinely different roamer
+  // (or guardian, or ordinary encounter) always does get a fresh GF.combat object.
+  const roamerId=GF.pending_roamer_id!=null?GF.pending_roamer_id:null;
+  if(!GF.combat || GF.combat.monster_id!==GF.pending_monster_id || GF.combat.guardianCellIdx!==guardianCellIdx || GF.combat.roamerId!==roamerId){
     const base=DL.getMonster(GF.pending_monster_id);
     // v0.17.3 (#16) AUDIT: Kill Streak no longer scales monster HP/damage at all -- see
     // Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL's comment for why that old behavior was
@@ -4519,14 +5029,20 @@ function ensureCombat(){
     // monster, but Balance.STRONGHOLD_GUARDIAN_HP_MULT (3x) more HP, per Gwen's spec:
     // "extra strong mobs... damage quite equal to regular mobs".
     const isGuardian=guardianCellIdx!=null;
-    const hpMult=isGuardian?Balance.STRONGHOLD_GUARDIAN_HP_MULT:1;
+    // v0.18 (#2): unlike a guardian, a roaming mob is tougher in BOTH stats per Gwen's
+    // spec -- "more hitpoints than the guardians currently have, and they also deal more
+    // damage" -- see Balance.ROAMING_MOB_HP_MULT/ROAMING_MOB_DAMAGE_MULT's declaration.
+    const isRoamer=roamerId!=null;
+    const hpMult=isGuardian?Balance.STRONGHOLD_GUARDIAN_HP_MULT:isRoamer?Balance.ROAMING_MOB_HP_MULT:1;
+    const dmgMult=isRoamer?Balance.ROAMING_MOB_DAMAGE_MULT:1;
     const maxHp=Balance.monsterHp(base.base_hp,GF.maze_depth)*hpMult;
     // v0.17 (#18): guardians are worth extra XP (see STRONGHOLD_GUARDIAN_XP_MULT) -- they
     // already cost 3x the HP and a real fight to bring down, but used to hand out the same
     // XP as an ordinary mob of that area level. v0.17.2 (#1) HOTFIX: this was 4x, reverted
     // to 1.5x per ImpulseBE's balance check -- 4x was overtuned relative to the fight.
-    const xpMult=isGuardian?Balance.STRONGHOLD_GUARDIAN_XP_MULT:1;
-    GF.combat={monster_id:base.id, name:isGuardian?`Guardian ${base.name}`:base.name, hp:maxHp, maxHp, dmgMin:Balance.monsterDamage(base.base_damage_min,GF.maze_depth), dmgMax:Balance.monsterDamage(base.base_damage_max,GF.maze_depth), xp:Balance.monsterXpReward(base.base_xp,GF.maze_depth)*xpMult, goldMin:base.gold_min, goldMax:base.gold_max, loot_table:base.loot_table, log:[], isGuardian, guardianCellIdx};
+    const xpMult=isGuardian?Balance.STRONGHOLD_GUARDIAN_XP_MULT:isRoamer?Balance.ROAMING_MOB_XP_MULT:1;
+    const name=isGuardian?`Guardian ${base.name}`:isRoamer?`Roaming ${base.name}`:base.name;
+    GF.combat={monster_id:base.id, name, hp:maxHp, maxHp, dmgMin:Balance.monsterDamage(base.base_damage_min,GF.maze_depth)*dmgMult, dmgMax:Balance.monsterDamage(base.base_damage_max,GF.maze_depth)*dmgMult, xp:Balance.monsterXpReward(base.base_xp,GF.maze_depth)*xpMult, goldMin:base.gold_min, goldMax:base.gold_max, loot_table:base.loot_table, log:[], isGuardian, guardianCellIdx, isRoamer, roamerId};
     // v0.17 (#16): 50% chance the monster gets an unavoidable first strike the instant this
     // encounter is created, before the player can act at all -- see MONSTER_FIRST_STRIKE_
     // CHANCE's comment above for the full rationale and why this floors at 1 HP instead of
@@ -4546,6 +5062,19 @@ function ensureCombat(){
 // instead of just adding empty space below the same old 5 lines.
 function combatLog(cb,msg){ cb.log.push(msg); if(cb.log.length>10) cb.log.shift(); }
 
+// v0.18 (#12): maze-event message log -- same capped-append shape as combatLog() above,
+// but backed by GF.mazeLog (a single running log for the whole maze session) rather than a
+// per-combat object, since these fire outside of combat (exhaustion warnings, ankle-bite
+// traps, shrines) while the player is just walking around. See mazeLogBox() for rendering.
+function mazeLog(msg){ GF.mazeLog.push(msg); if(GF.mazeLog.length>10) GF.mazeLog.shift(); }
+// Renders as a small fixed-height, always-present panel (never conditionally added/removed
+// like the old toastBox() banner was) so new entries scroll within their own box instead of
+// shifting anything else on the maze screen up or down.
+function mazeLogBox(){
+  return h("div",{class:"muted panel",style:{marginTop:"6px",marginBottom:"6px",height:"70px",overflowY:"auto"}},
+    GF.mazeLog.length===0?[h("div",{},["Nothing has happened yet. Explore..."])]:GF.mazeLog.map(l=>h("div",{},[l])));
+}
+
 function grantLoot(lootTable, mult){
   const loot=DL.rollLoot(lootTable);
   if(loot.type==="gear"){
@@ -4554,7 +5083,11 @@ function grantLoot(lootTable, mult){
     // v0.15: auto-equip straight onto the character if the matching slot is empty
     // (and the level requirement allows it), instead of always taking a backpack slot.
     const willAutoEquip=PS.canAutoEquip(inst);
-    if(PS.addGearAutoEquip(inst)) return willAutoEquip?`Found and equipped ${IF.displayName(inst)}!`:`Found ${IF.displayName(inst)}!`;
+    if(PS.addGearAutoEquip(inst)){
+      // v0.18 (#9): item drops shown briefly with their SVG icon in rarity color.
+      spawnFloatItem("player",inst);
+      return willAutoEquip?`Found and equipped ${IF.displayName(inst)}!`:`Found ${IF.displayName(inst)}!`;
+    }
     return `Found gear but your bags are full, it was left behind.`;
   }
   if(loot.type==="consumable"){ PS.addConsumable(loot.item_id,1); return `Found a ${DL.getItem(loot.item_id).name}.`; }
@@ -4635,7 +5168,10 @@ function screenCombat(){
     portraitWrap,
     h("div",{style:{fontWeight:"bold",textAlign:"center"}},[cb.name]),
     h("div",{style:{textAlign:"center"}},[`HP ${Math.round(Math.max(0,cb.hp))}/${Math.round(cb.maxHp)}`]),
-    bar(Math.max(0,cb.hp)/cb.maxHp*100,"bar-hp"),
+    // v0.18 (#9): position:relative wrapper so floatLayer("monster")'s absolutely-positioned
+    // damage/CRIT/Blocked text has this exact bar to hover above, same pattern as hpBar()'s
+    // own bar-bg for the player's side.
+    h("div",{style:{position:"relative"}},[bar(Math.max(0,cb.hp)/cb.maxHp*100,"bar-hp"), floatLayer("monster")]),
   ]);
   // v0.17.1 BUG FIX: a fixed 140px cap on the log panel meant that once the monster panel's
   // OWN natural height (portrait + name + HP text + bar, with padding) grew past 140px, the
@@ -4672,6 +5208,7 @@ function screenCombat(){
     const mobBlocked=Math.random()<Balance.mobBlockChance(GF.maze_depth);
     if(mobBlocked){
       combatLog(cb,`The ${cb.name} blocks your attack!`);
+      spawnFloat("monster","Blocked","float-text-block");
     } else {
       const [lo,hi]=PS.getDamageRange();
       let dmg=randRange(lo,hi);
@@ -4681,6 +5218,8 @@ function screenCombat(){
       if(quadActiveThisRound) dmg*=4;
       cb.hp-=dmg;
       combatLog(cb,`You hit the ${cb.name} for ${Math.round(dmg)} damage${crit?" (Critical!)":""}${quadActiveThisRound?" (Quad Damage!)":""}.`);
+      // v0.18 (#9): "-110 HP" near the monster, "CRIT!" appended when it lands as a crit.
+      spawnFloat("monster",`-${Math.round(dmg)} HP${crit?" CRIT!":""}`,crit?"float-text-crit":"float-text-dmg");
       // v0.12: every attack with a recognized weapon type equipped counts toward that
       // type's permanent proficiency (see PS.registerWeaponHit/getEquippedWeaponType).
       const weaponType=PS.getEquippedWeaponType();
@@ -4698,8 +5237,15 @@ function screenCombat(){
       // longer streak still means better loot on average, just via rarity odds instead of
       // a flat quantity/XP/gold multiplier.
       const gold=randIntRange(cb.goldMin,cb.goldMax);
+      // v0.18 (#7): captured BEFORE addXp() mutates PS.xp, so animateXpBarGrowth() below
+      // (called after this kill's render()) knows where the bar visually started from.
+      const preKillXpFraction=PS.xp_to_next>0?(PS.xp/PS.xp_to_next):0;
       const leveled=PS.addXp(cb.xp);
       PS.addGold(gold);
+      // v0.18 (#9): "+8 XP" in purple, gold amount in gold color -- both anchored near the
+      // player's own stat row/HP bar, same as any other player-side floating text.
+      spawnFloat("player",`+${Math.round(cb.xp)} XP`,"float-text-xp");
+      spawnFloat("player",`+${gold}g`,"float-text-gold");
       PS.incrementKillStreak();
       const lootMsg=grantLoot(cb.loot_table);
       cb.defeated=true;
@@ -4719,16 +5265,35 @@ function screenCombat(){
         // guaranteed-easy guardian kills for keys (see Balance.strongholdKeyEligible).
         const keyEligible=Balance.strongholdKeyEligible(GF.maze_depth, PS.level);
         if(keyEligible && Math.random()<Balance.STRONGHOLD_KEY_DROP_CHANCE){
-          PS.addConsumable("stronghold_key",1);
-          cb.result_text+=" It drops a Stronghold Key!";
+          // v0.18 (#5): the dropped key's tier is fixed to the area level this guardian was
+          // actually fought in (never the player's own level or anything else) -- exactly
+          // what stops a player from farming keys at a low, easy area level and saving
+          // them up to open a high-level chest later, per Gwen's stated reason for asking.
+          const keyTier=Balance.strongholdKeyTierForAreaLevel(GF.maze_depth);
+          PS.addConsumable(Balance.strongholdKeyItemIdForTier(keyTier),1);
+          cb.result_text+=` It drops a Stronghold Key (Tier ${keyTier})!`;
         } else if(keyEligible){
           cb.result_text+=" The path to the Stronghold's chest is open, if you can find a key.";
         } else {
           cb.result_text+=" The path to the Stronghold's chest is open, though this area is too tame for its guardians to yield a Stronghold Key.";
         }
       }
+      // v0.18 (#2): a defeated roaming mob is gone for good, same as a cleared guardian --
+      // marking it `defeated` here (rather than removing it from the array) keeps roamerId
+      // indices stable for the rest of this maze's lifetime and is what both
+      // tickRoamingMobs() and screenMaze()'s render loop already check for.
+      if(cb.isRoamer){
+        const maze=GF.overworld_snapshot;
+        if(maze && maze.roamers){
+          const r=maze.roamers.find(rr=>rr.roamerId===cb.roamerId);
+          if(r) r.defeated=true;
+        }
+      }
       autosave();
       render();
+      // v0.18 (#7): skipped on a level-up kill -- see animateXpBarGrowth()'s own comment
+      // for why the old/new fractions aren't comparable once xp_to_next itself changed.
+      if(!leveled) animateXpBarGrowth(preKillXpFraction);
       return;
     }
     // monster turn
@@ -4737,16 +5302,20 @@ function screenCombat(){
     // "block" log line implying the hit could otherwise have landed.
     if(invulnActiveThisRound){
       combatLog(cb,`The ${cb.name}'s attack passes through you harmlessly -- you are untouchable!`);
+      spawnFloat("player","Immune!","float-text-block");
       autosave(); render(); return;
     }
     if(Math.random()<PS.getBlockChance()){
       combatLog(cb,`You block the ${cb.name}'s attack entirely!`);
+      spawnFloat("player","Blocked","float-text-block");
       autosave(); render(); return;
     }
     let mdmg=randRange(cb.dmgMin,cb.dmgMax);
     mdmg*=(1.0-PS.getArmor());
     PS.current_hp-=mdmg;
     combatLog(cb,`The ${cb.name} hits you for ${Math.round(mdmg)} damage.`);
+    // v0.18 (#9): "-4 HP" in red near the player's HP bar.
+    spawnFloat("player",`-${Math.round(mdmg)} HP`,"float-text-dmg");
     // Anything below 1 HP is dead, a fractional sliver (e.g. 0.4) used to display as
     // "0 HP" and read as alive, letting players survive a fight at what looked like 0 HP
     // only to be one-shot next encounter. Treat "rounds down to 0" as actually dead.
@@ -4765,11 +5334,13 @@ function screenCombat(){
       combatLog(cb,"You fail to flee!");
       if(Math.random()<PS.getBlockChance()){
         combatLog(cb,`You block the ${cb.name}'s attack entirely!`);
+        spawnFloat("player","Blocked","float-text-block");
       } else {
         let mdmg=randRange(cb.dmgMin,cb.dmgMax);
         mdmg*=(1.0-PS.getArmor());
         PS.current_hp-=mdmg;
         combatLog(cb,`The ${cb.name} hits you for ${Math.round(mdmg)} damage.`);
+        spawnFloat("player",`-${Math.round(mdmg)} HP`,"float-text-dmg");
         if(PS.current_hp<1){ PS.current_hp=0; endCombatDeath(); return; }
       }
       autosave();
@@ -4848,19 +5419,27 @@ function screenStrongholdChest(){
   const t=toastBox(); if(t) root.appendChild(t);
   root.appendChild(statHeader());
 
-  const keyCount=PS.consumables["stronghold_key"]||0;
+  // v0.18 (#5): a chest only accepts a key of the SAME tier as the area it's standing
+  // in -- exactly Gwen's spec ("this avoids farming Keys at low levels and then saving
+  // them up and applying them later at high level area chests"). The required tier is
+  // derived from the chest's own area level (GF.maze_depth), the identical mapping used
+  // when a guardian's kill roll decides what tier key to drop in the first place, so a
+  // key farmed in THIS area (or any other area of the same tier bracket) always works.
+  const requiredTier=Balance.strongholdKeyTierForAreaLevel(GF.maze_depth);
+  const requiredKeyId=Balance.strongholdKeyItemIdForTier(requiredTier);
+  const keyCount=PS.consumables[requiredKeyId]||0;
   if(keyCount<=0){
-    root.appendChild(h("div",{class:"panel"},["This chest is sealed tight, you'll need a Stronghold Key to open it. Guardians have a small chance to drop one when defeated."]));
+    root.appendChild(h("div",{class:"panel"},[`This chest is sealed tight, you'll need a Tier ${requiredTier} Stronghold Key to open it (this area is Tier ${requiredTier}) -- a key of any other tier won't fit. Guardians have a small chance to drop one matching their own area's tier when defeated.`]));
     root.appendChild(h("div",{class:"row"},[
       h("button",{onClick:()=>{ GF.goto("maze",{maze_depth:GF.maze_depth}); }},["Leave it"]),
     ]));
     return root;
   }
 
-  root.appendChild(h("div",{class:"panel"},[`You have ${keyCount} Stronghold Key${keyCount===1?"":"s"}. Use one to open this chest?`]));
+  root.appendChild(h("div",{class:"panel"},[`You have ${keyCount} Tier ${requiredTier} Stronghold Key${keyCount===1?"":"s"}, a match for this area. Use one to open this chest?`]));
   root.appendChild(h("div",{class:"row"},[
     h("button",{class:"play",onClick:()=>{
-      PS._removeConsumableOne("stronghold_key");
+      PS._removeConsumableOne(requiredKeyId);
       const tier=Balance.rollItemTier(GF.maze_depth);
       const msgs=[];
 
@@ -5122,6 +5701,37 @@ function skillsBonusPanel(){
   ]);
 }
 
+// v0.18 (#11): "Shrine Bonuses" section on the Character Sheet -- lists any currently
+// active shrine buffs (Stamina, Experience, Touch of Unicorn/Invulnerability, Quad Damage,
+// Magic Find) so a player can see at a glance what's still running, right alongside the
+// Skill Bonuses / Gear Bonuses cards above. Expired or never-triggered buffs simply don't
+// appear; if nothing is currently active, a muted placeholder line is shown instead.
+function shrineBonusPanel(){
+  const lines=[];
+  if(PS.stamina_shrine_buff>0){
+    lines.push(`Stamina Shrine: ${Math.round(PS.stamina_shrine_buff)} bonus stamina in reserve.`);
+  }
+  if(PS.xp_buff_encounters_left>0){
+    lines.push(`Experience Shrine: +${Math.round((PS.xp_buff_multiplier-1)*100)}% XP for ${PS.xp_buff_encounters_left} more battle${PS.xp_buff_encounters_left===1?"":"s"}.`);
+  }
+  if(PS.isInvulnerable()){
+    lines.push(`Touch of Unicorn: immune to damage for ${PS.invuln_rounds_left} more combat round${PS.invuln_rounds_left===1?"":"s"}.`);
+  }
+  if(PS.hasQuadDamage()){
+    lines.push(`Quad Damage: 4x damage output for ${PS.quad_dmg_rounds_left} more combat round${PS.quad_dmg_rounds_left===1?"":"s"}.`);
+  }
+  const mfAmt=PS.getActiveTempBuff("magic_find");
+  if(mfAmt>0){
+    const secsLeft=Math.max(1,Math.ceil(PS.getTempBuffMsLeft("magic_find")/1000));
+    lines.push(`Magic Find Shrine: +${mfAmt}% Magic Find for ${secsLeft} more second${secsLeft===1?"":"s"}.`);
+  }
+  return h("div",{class:"panel",style:{marginTop:"12px",marginBottom:"12px"}},[
+    h("div",{style:{fontWeight:"bold",marginBottom:"8px"}},["Shrine Bonuses"]),
+    lines.length===0?h("div",{class:"muted"},["No active shrine effects."]):
+      h("div",{},lines.map(l=>h("div",{class:"muted",style:{marginBottom:"4px"}},[l]))),
+  ]);
+}
+
 function gearBonusPanel(){
   const lines=PS.getGearBonusLines();
   // v0.17 (#17b): a distinct "Skill Bonuses" sub-section, only shown when the currently
@@ -5266,6 +5876,7 @@ function screenInventory(){
     h("div",{style:{flex:"0 0 50%",maxWidth:"50%",minWidth:"0"}},[attributesPanel()]),
     h("div",{style:{flex:"1",minWidth:"0"}},[gearBonusPanel()]),
   ]));
+  root.appendChild(shrineBonusPanel());
 
   root.appendChild(h("h3",{style:{marginTop:"12px"}},["Equipped"]));
   const eqDoll=h("div",{class:"equip-doll"});
@@ -5281,6 +5892,10 @@ function screenInventory(){
   // custom-sort their backpack into their own groupings instead of always equip-on-click.
   root.appendChild(h("div",{class:"row gap",style:{marginBottom:"6px",alignItems:"center"}},[
     h("button",{onClick:()=>{ GF._bagReorderMode=!GF._bagReorderMode; GF._bagReorderSrcIdx=null; render(); }},[GF._bagReorderMode?"Done Reordering":"Reorder Items"]),
+    // v0.18 (#4): same one-click bulk sort as the Vault -- see backpackSortByTier()'s
+    // comment and vaultSortByTier()'s for why non-gear entries don't apply here (the
+    // backpack grid is gear-only to begin with).
+    h("button",{title:"Arrange your backpack by Tier -- click again to reverse the order.",onClick:backpackSortByTier},[GF._bagSortTierDesc?"Sort by Tier (T5 → T1)":"Sort by Tier (T1 → T5)"]),
     GF._bagReorderMode?h("div",{class:"muted"},[GF._bagReorderSrcIdx!=null?"Now click the slot you want to move it to (or click it again to cancel)." : "Click an item to pick it up, then click a slot to place it there."]):null,
   ]));
   root.appendChild(backpackGearGrid());
@@ -5596,6 +6211,33 @@ function vaultSwapSlots(slotA,slotB){
   render();
 }
 
+// v0.18 (#4): re-lays out every GEAR entry in the vault by Tier -- T1 first (top-left,
+// filling left-to-right then wrapping rows) through T5 last, or reversed on a second
+// click. Non-gear entries (consumables/herbs) have no tier to sort by, so per Gwen's
+// spec ("sort all gear by Tier") they're left out of the ordering entirely and simply
+// packed into whatever slots remain after all the now-sorted gear, in their original
+// relative order -- nothing about them is lost or reshuffled amongst themselves.
+function vaultSortByTier(){
+  const items=Net.vaultCache||[];
+  const gear=items.filter(e=>e.kind==="gear").slice().sort((a,b)=>a.inst.tier-b.inst.tier);
+  const nonGear=items.filter(e=>e.kind!=="gear").slice().sort((a,b)=>a.slot-b.slot);
+  if(GF._vaultSortTierDesc) gear.reverse();
+  let nextSlot=0;
+  for(const e of gear) e.slot=nextSlot++;
+  for(const e of nonGear) e.slot=nextSlot++;
+  GF._vaultSortTierDesc=!GF._vaultSortTierDesc;
+  PS.saveGame(); vaultSync(); render();
+}
+
+// v0.18 (#4): same idea for the backpack -- unlike the vault, gear_instances is a single
+// compact array with no non-gear entries to work around, so this is a plain in-place sort.
+function backpackSortByTier(){
+  PS.gear_instances.sort((a,b)=>a.tier-b.tier);
+  if(GF._bagSortTierDesc) PS.gear_instances.reverse();
+  GF._bagSortTierDesc=!GF._bagSortTierDesc;
+  PS.saveGame(); render();
+}
+
 /* ================= GEAR FILTERS (v0.17.3 #6/#11) ================= */
 /* Shared by the Storage Vault and the Auction House -- a Tier dropdown, an Item Type
    dropdown, and a multiselect stat toggle row, all combined with AND logic (an item must
@@ -5709,6 +6351,10 @@ function screenVault(){
   // on the grid means.
   root.appendChild(h("div",{class:"row gap",style:{marginBottom:"8px",alignItems:"center"}},[
     h("button",{onClick:()=>{ GF._vaultReorderMode=!GF._vaultReorderMode; GF._vaultReorderSrc=null; GF._vaultSplitSlot=null; render(); }},[GF._vaultReorderMode?"Done Reordering":"Reorder Items"]),
+    // v0.18 (#4): one-click bulk sort, independent of (and usable alongside) manual
+    // Reorder Items drag-and-drop -- toggles ascending/descending each click, see
+    // vaultSortByTier()'s comment.
+    h("button",{title:"Arrange every gear item by Tier -- click again to reverse the order.",onClick:vaultSortByTier},[GF._vaultSortTierDesc?"Sort by Tier (T5 → T1)":"Sort by Tier (T1 → T5)"]),
     GF._vaultReorderMode?h("div",{class:"muted"},[GF._vaultReorderSrc!=null?"Now click the slot you want to move it to (or click it again to cancel)." : "Click an item to pick it up, then click an empty or occupied slot to place it there."]):null,
   ]));
 
@@ -5892,7 +6538,11 @@ function screenMerchant(){
     grid.appendChild(h("div",{class:"tile"},[
       h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId), h("div",{},[h("div",{style:{fontWeight:"bold"}},[item.name]), h("div",{class:"muted",style:{fontSize:".85em"}},[DL.itemCategoryLabel(itemId)])])]),
       h("div",{class:"muted"},[`${price} gold`]),
-      h("button",{style:{marginTop:"6px"},disabled:PS.gold<price,onClick:()=>{ if(PS.buyConsumable(itemId)){autosave(); setToast(`Bought ${item.name}.`);} render(); }},["Buy"]),
+      // v0.18 (#12): the old "Bought X." toast banner popped in above the whole screen and
+      // shifted the potion grid on every purchase -- replaced with a brief gold-colored
+      // "-Ng" floating overlay near the HP bar (same spawnFloat() infra as combat's gold
+      // pickups), so nothing on this screen ever moves just from buying a potion.
+      h("button",{style:{marginTop:"6px"},disabled:PS.gold<price,onClick:()=>{ if(PS.buyConsumable(itemId)){autosave(); spawnFloat("player",`-${price}g`,"float-text-gold");} render(); }},["Buy"]),
     ]));
   }
   root.appendChild(grid);
@@ -6389,6 +7039,26 @@ function screenAdminPanel(){
 // Kept brief on purpose -- players don't need the internal blow-by-blow, just the
 // highlights per version, most recent first.
 const CHANGELOG=[
+  { version:"v0.18", notes:[
+    "Fixed a bug where failing a Broken Bridge Trial at a later step could reroll your new Level 1 at the wrong class tier's level curve (e.g. a Tier 2 step-2 failure landing you at Level 16 instead of Level 1).",
+    "Roaming mobs now wander the maze on their own, not just fixed grass-tile encounters -- a stumbled-into fight is now a real possibility anywhere they've wandered to.",
+    "Manually dragging an item in the Storage Vault or Backpack can now drop it into an empty slot, not just swap with an occupied one.",
+    "New \"Sort by Tier\" button in the Storage Vault and Backpack for a quick one-click tidy-up.",
+    "Stronghold Keys now roll a Tier matching the area level they dropped in, and only unlock a matching-Tier Stronghold chest.",
+    "Town HP/Stamina regen ticks now fill smoothly via CSS instead of snapping in one visible jump.",
+    "The XP bar now fills gradually (about a second) on a monster kill instead of jumping straight to the new value.",
+    "Drinking a potion now shows a preview overlay on the HP bar for the incoming heal, before it actually lands.",
+    "New floating combat text: damage, heals, XP, gold, and loot now pop up right over your character or the monster instead of only appearing in the combat log.",
+    "Maze traps dealing instant damage now also show the same floating \"-X HP\" text as a regular hit, on top of the existing toast/lore message.",
+    "New \"Shrine Bonuses\" section on the Character Sheet, listing every currently-active shrine effect (Stamina, Experience, Invulnerability, Quad Damage, Magic Find) in one place.",
+    "Fixed page-shifting toast banners while exploring the maze -- exhaustion, trap, and shrine messages now scroll through a fixed-size log instead of popping a banner that shoved the rest of the screen around; a potion purchase at the Merchant now shows a gold-colored floating overlay instead of a toast for the same reason.",
+    "Every piece of gear (Vault, Backpack, equipped slots, Merchant, Auction House, drops) now shows a small Roman-numeral Tier badge (I-V) in its icon's corner.",
+    "New \"Currently playing: ...\" line under Global Chat, listing accounts active in the last 5 minutes (5 most recent, plus a count of any others).",
+    "The Leaderboard now shows a \"Last seen\" time for every entry, built on the same activity tracking as the Global Chat feature above.",
+    "One-time server-side cleanup of stale Broken Bridge Trial step counts left over from a fixed pre-v0.17.2 bug -- purely a leaderboard display fix, no level/gold/gear/tier data was touched.",
+    "New Settings link (top bar, between Log out and Global Chat) for picking an alternate maze movement key layout -- WASD or ZQSD (AZERTY) -- alongside the Arrow Keys, which always keep working no matter what's picked.",
+    "Mobile UX pass: every info tooltip and the gear \"Comparison\" box (previously mouse-hover only, and therefore unreachable on touch devices) can now also be opened with a tap; buttons and links get a larger, easier-to-tap minimum size on narrow/touch screens.",
+  ]},
   { version:"v0.17.3", notes:[
     "The Gambling Goblin's price per pull dropped from 800g to 200g, back in reach for regular play.",
     "New characters (and every fresh Level 1 from a Broken Bridge Trial reroll) now start with 3 unspent stat points instead of 0, so there's an immediate build choice from the very first level. Every failed trial attempt permanently adds +1 more on top of that, until you finally cross and it resets back down to the base amount.",
@@ -6746,6 +7416,7 @@ const SCREENS={
   itemization: screenItemization,
   herbalism: screenHerbalismGuide,
   gameplayGuide: screenGameplayGuide,
+  settings: screenSettings,
 };
 
 // v0.13: town regen tick, reworked -- no more "resting" toggle to click, it's simply
@@ -6784,7 +7455,9 @@ setInterval(()=>{
     // swallowing clicks on buttons elsewhere on the page (reported: the Character Sheet's
     // "<- Back" button "not responding"). Only the live HP/Stamina numbers actually need
     // to change here, so just swap the stat header panel in place instead.
-    if(!refreshStatHeaderInPlace()){ render(); return; }
+    // v0.18 (#6): pass smooth=true here specifically -- this is the once-a-second campfire
+    // regen tick the CSS class above was built for.
+    if(!refreshStatHeaderInPlace(true)){ render(); return; }
   }
   if(GF.screen==="town") refreshBonfireCountdownInPlace();
 },1000);
@@ -6847,6 +7520,15 @@ setInterval(()=>{
     if(!refreshStatHeaderInPlace()) render();
   }
 },Balance.POTION_HEAL_TICK_MS);
+
+// v0.18 (#14): refresh "Currently playing" every 30s while the chat panel is actually open --
+// no point polling it while the panel is closed and no one can see the result, and 30s is
+// frequent enough to feel live against a 5-minute activity window without hammering the
+// server every render like the once-a-second regen/poison ticks do.
+setInterval(()=>{
+  if(!GF.chatOpen || !Net.online) return;
+  Net.fetchActivePlayers().then(render).catch(()=>{});
+},30000);
 
 (async function boot(){
   const resumed = await Net.tryResumeSession();

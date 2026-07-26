@@ -173,6 +173,10 @@ for (const stmt of [
   // brand new leaderboard_bests row from scratch, not a stale MAX()'d one).
   "ALTER TABLE leaderboard_bests ADD COLUMN weapon_skills TEXT NOT NULL DEFAULT '{}'",
   "ALTER TABLE leaderboard_bests ADD COLUMN herbalism_points INTEGER NOT NULL DEFAULT 0",
+  // v0.18 (#18): guard column for the one-time stale-bridge-steps cleanup below -- see
+  // migrateStaleBridgeSteps() for what it's cleaning up and why a blanket reset (rather than
+  // trying to guess which rows are actually corrupt) is the safe choice here.
+  "ALTER TABLE leaderboard_bests ADD COLUMN bridge_steps_migrated_v18 INTEGER NOT NULL DEFAULT 0",
 ]) {
   try { db.exec(stmt); } catch (e) { /* column already exists, fine */ }
 }
@@ -214,6 +218,52 @@ for (const stmt of [
     throw e;
   }
   console.log(`[migration] account gold: migrated ${unmigrated.length} account(s) to the shared account-level gold column.`);
+})();
+
+// v0.18 (#18) ONE-TIME MIGRATION: `last_bridge_steps` ("how far you got on your last Broken
+// Bridge Trial attempt") had a bug, fixed across v0.17.1 (client no longer forgets to reset
+// it to 0 the moment a promotion happens) and v0.17.2 (server-side ON CONFLICT clause now
+// forces it back to 0 the instant it sees highest_tier_reached increase, as a safety net).
+// Both fixes are self-healing for any promotion that happens FROM NOW ON, but neither one
+// retroactively touches a row that was already promoted before the fix shipped -- ordinary
+// gameplay (walking, fighting, shopping) never writes to this field, only a bridge-trial
+// attempt does, so a player who was promoted pre-fix and simply hasn't attempted another
+// trial since is still stuck showing a stale, leftover step count from their OLD tier next
+// to their CURRENT (higher) tier on the public leaderboard.
+//
+// There's no reliable way to tell, from the data alone, which nonzero values are this stale
+// leftover vs. a legitimate "failed my last attempt at my current tier and haven't played
+// since" -- both look identical (a plain 0-9 number). But `last_bridge_steps` is explicitly
+// just a "how far did you get on your LAST attempt" display/tiebreaker stat, not real
+// progression -- it's never load-bearing for level, gold, gear, or tier, all of which are
+// left completely untouched here. So the safe call is a blanket one-time reset to 0 for every
+// row that still has a nonzero value: worst case, a handful of players see their footstep
+// tiebreaker number reset to 0 instead of a legitimate small number, which costs them
+// nothing and re-populates itself accurately the moment they next attempt the trial (pass or
+// fail). Guarded by bridge_steps_migrated_v18 so, like the gold migration above, this only
+// ever touches each row once, no matter how many times the server restarts.
+(function migrateStaleBridgeSteps() {
+  const unmigrated = db.prepare("SELECT account_id, character_name, last_bridge_steps FROM leaderboard_bests WHERE bridge_steps_migrated_v18 = 0").all();
+  if (unmigrated.length === 0) return;
+  const resetStmt = db.prepare("UPDATE leaderboard_bests SET last_bridge_steps = 0, bridge_steps_migrated_v18 = 1 WHERE account_id = ? AND character_name = ?");
+  const markStmt = db.prepare("UPDATE leaderboard_bests SET bridge_steps_migrated_v18 = 1 WHERE account_id = ? AND character_name = ?");
+  let resetCount = 0;
+  db.exec("BEGIN");
+  try {
+    for (const row of unmigrated) {
+      if (row.last_bridge_steps > 0) {
+        resetStmt.run(row.account_id, row.character_name);
+        resetCount++;
+      } else {
+        markStmt.run(row.account_id, row.character_name);
+      }
+    }
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+  console.log(`[migration] stale bridge steps: reviewed ${unmigrated.length} leaderboard row(s), reset ${resetCount} stale/ambiguous last_bridge_steps value(s) to 0. No level, gold, gear, or tier data was touched.`);
 })();
 
 // v0.17 (#29): small helpers so every gold-touching route (character save, Auction House
@@ -699,7 +749,7 @@ app.get("/api/leaderboard", (req, res) => {
   // account-gold migration, so it's no longer a meaningful per-character skill signal).
   const rows = db
     .prepare(
-      `SELECT account_id, character_name, class_name, level, highest_tier_reached, gold, lifetime_xp, hardcore, is_dead, last_bridge_steps, xp
+      `SELECT account_id, character_name, class_name, level, highest_tier_reached, gold, lifetime_xp, hardcore, is_dead, last_bridge_steps, xp, updated_at
        FROM leaderboard_bests ORDER BY highest_tier_reached DESC, last_bridge_steps DESC, level DESC, xp DESC LIMIT 50`
     )
     .all();
@@ -723,6 +773,11 @@ app.get("/api/leaderboard", (req, res) => {
       is_dead: !!r.is_dead,
       last_bridge_steps: r.last_bridge_steps || 0,
       xp: r.xp || 0,
+      // v0.18 (#17): leaderboard_bests.updated_at is already stamped with nowIso() on
+      // every single character save (same upsert that maintains level/xp/tier above) --
+      // exactly the same "last active" signal /api/active-players computes off the
+      // characters table, just already sitting right here with zero extra plumbing.
+      last_active_at: r.updated_at,
     };
   });
   res.json({ entries: withNames });
@@ -774,6 +829,47 @@ app.get("/api/leaderboard/skills", (req, res) => {
 app.get("/api/leaderboard/gold", (req, res) => {
   const rows = db.prepare("SELECT username, gold FROM accounts ORDER BY gold DESC LIMIT 200").all();
   res.json({ entries: rows.map((r) => ({ player: r.username, gold: r.gold || 0 })) });
+});
+
+// v0.18 (#14/#17): "activity" tracking piggybacks entirely on the `characters.updated_at`
+// column that autosave (PUT /api/characters/:slot) already stamps on essentially every
+// meaningful in-game action -- no new column, no client heartbeat, nothing extra to keep in
+// sync. A character counts as "active" if ANY of that account's character slots saved within
+// the last ACTIVE_WINDOW_MS; only the single most-recently-updated slot per account is
+// surfaced (an account can only actually be playing one character at a time), so a player
+// with 6 characters never shows up as 6 separate "currently playing" entries.
+const ACTIVE_WINDOW_MS = 5 * 60 * 1000;
+function getActiveCharacters(limit) {
+  const cutoff = new Date(Date.now() - ACTIVE_WINDOW_MS).toISOString();
+  const rows = db
+    .prepare(
+      `SELECT c.data, c.updated_at
+       FROM characters c
+       INNER JOIN (
+         SELECT account_id, MAX(updated_at) AS max_updated FROM characters GROUP BY account_id
+       ) latest ON c.account_id = latest.account_id AND c.updated_at = latest.max_updated
+       WHERE c.updated_at >= ?
+       ORDER BY c.updated_at DESC
+       LIMIT ?`
+    )
+    .all(cutoff, limit);
+  const out = [];
+  for (const row of rows) {
+    try {
+      const data = JSON.parse(row.data);
+      if (data && data.character_name) out.push({ character_name: data.character_name, last_active_at: row.updated_at });
+    } catch (e) {
+      /* a corrupt row is just skipped -- never worth failing the whole list over */
+    }
+  }
+  return out;
+}
+// v0.18 (#14): public (no auth) -- this is no more sensitive than the character NAMES
+// already shown, unauthenticated, on /api/leaderboard. Capped generously above the client's
+// own "5 most recent, plus an 'and N others' count" truncation so the client always has
+// enough rows to compute an accurate "N others" figure itself.
+app.get("/api/active-players", (req, res) => {
+  res.json({ entries: getActiveCharacters(100) });
 });
 
 // v0.17.3 (#15): "Inspect Player" read-only character viewer. SECURITY-CRITICAL per Gwen's
