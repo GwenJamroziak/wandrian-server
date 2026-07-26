@@ -163,6 +163,16 @@ for (const stmt of [
   // guards against re-summing on every server restart).
   "ALTER TABLE accounts ADD COLUMN gold INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE accounts ADD COLUMN gold_migrated INTEGER NOT NULL DEFAULT 0",
+  // v0.17.3 (#13): denormalized copies of each character's weapon-skill hit counters and
+  // herbalism points, kept in step with the same upsert that already tracks level/xp/tier
+  // on every save -- lets the "Skill Progression" leaderboard tab rank every character by
+  // these without touching the private per-character `data` JSON blob at read time. Both
+  // are plain CURRENT snapshots (excluded.value, no MAX()) same as level/gold/xp -- see the
+  // ON CONFLICT clause below for why that's correct even though the values themselves only
+  // ever go up while a given character is alive (a deleted-and-recreated character gets a
+  // brand new leaderboard_bests row from scratch, not a stale MAX()'d one).
+  "ALTER TABLE leaderboard_bests ADD COLUMN weapon_skills TEXT NOT NULL DEFAULT '{}'",
+  "ALTER TABLE leaderboard_bests ADD COLUMN herbalism_points INTEGER NOT NULL DEFAULT 0",
 ]) {
   try { db.exec(stmt); } catch (e) { /* column already exists, fine */ }
 }
@@ -458,10 +468,31 @@ app.put("/api/characters/:slot", requireAuth, (req, res) => {
   // snapshots like level/gold, not maxed -- last_bridge_steps only changes client-side on a
   // trial failure (see attemptStep() in index.html), and xp resets every level-up, so
   // MAX()-ing either here would just freeze them at a stale high point.
+  // v0.17.3 (#12) HOTFIX: Gwen reported a character freshly promoted to Tier 2 still
+  // showing their old Tier 1 step count (e.g. "Tier 2, 8 steps") on the leaderboard,
+  // wrongly outranking players with genuine Tier 2 progress. The client already resets
+  // PS.last_bridge_steps to 0 the moment a promotion resolves (see resolveMasterTrial()
+  // in index.html) and saves it right after -- but that promotion-completing save is the
+  // SECOND of two autosave() calls fired in quick succession from attemptStep()'s pass
+  // branch (the first fires just after the final plank is recorded, still carrying
+  // whatever last_bridge_steps was left over from a previous failed run at the OLD tier).
+  // If those two requests ever land out of order (slow/retried request, multiple tabs,
+  // etc.) the stale one could stomp the correct 0 right back to a stale value, since this
+  // upsert used to always trust whatever last_bridge_steps the request carried. Closing
+  // the loophole at the source of truth instead of only trusting client ordering: any
+  // save that raises this row's highest_tier_reached (i.e. represents a promotion) now
+  // forces last_bridge_steps to 0 here regardless of what value rode along with it -- a
+  // just-promoted character has, by definition, taken 0 steps on their new tier's bridge
+  // yet. (The client-side double-autosave on the crossing step was also collapsed into a
+  // single save to remove the race at its root -- see attemptStep() in index.html.)
   if (data.character_name && data.class_display_name) {
+    // v0.17.3 (#13): weapon_skills/herbalism_points ride along on the same upsert as
+    // everything else here, stored as excluded.value (current snapshot, not MAX()'d) --
+    // see the ALTER TABLE comment above for why that's correct.
+    const weaponSkillsJson = JSON.stringify(data.weapon_skills || {});
     db.prepare(
-      `INSERT INTO leaderboard_bests (account_id, character_name, class_name, level, highest_tier_reached, gold, updated_at, hardcore, lifetime_xp, is_dead, last_bridge_steps, xp)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+      `INSERT INTO leaderboard_bests (account_id, character_name, class_name, level, highest_tier_reached, gold, updated_at, hardcore, lifetime_xp, is_dead, last_bridge_steps, xp, weapon_skills, herbalism_points)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
        ON CONFLICT(account_id, character_name) DO UPDATE SET
          class_name=excluded.class_name,
          level=excluded.level,
@@ -471,8 +502,10 @@ app.put("/api/characters/:slot", requireAuth, (req, res) => {
          hardcore=excluded.hardcore,
          lifetime_xp=MAX(leaderboard_bests.lifetime_xp, excluded.lifetime_xp),
          is_dead=0,
-         last_bridge_steps=excluded.last_bridge_steps,
-         xp=excluded.xp`
+         last_bridge_steps=CASE WHEN excluded.highest_tier_reached > leaderboard_bests.highest_tier_reached THEN 0 ELSE excluded.last_bridge_steps END,
+         xp=excluded.xp,
+         weapon_skills=excluded.weapon_skills,
+         herbalism_points=excluded.herbalism_points`
     ).run(
       req.account.id,
       data.character_name,
@@ -484,7 +517,9 @@ app.put("/api/characters/:slot", requireAuth, (req, res) => {
       data.hardcore ? 1 : 0,
       data.lifetime_xp || 0,
       data.last_bridge_steps || 0,
-      data.xp || 0
+      data.xp || 0,
+      weaponSkillsJson,
+      data.herbalism_points || 0
     );
   }
   res.json({ ok: true, account_gold: getAccountGold(req.account.id) });
@@ -672,6 +707,11 @@ app.get("/api/leaderboard", (req, res) => {
   const withNames = rows.map((r) => {
     const acc = db.prepare("SELECT username FROM accounts WHERE id = ?").get(r.account_id);
     return {
+      // v0.17.3 (#15): account_id is now included so the client's "Inspect Player"
+      // magnifying-glass button can address GET /api/leaderboard/inspect/:accountId/:name --
+      // it's already public knowledge via the join above (this same row's `player` username
+      // is looked up FROM this exact id), so exposing the numeric id itself leaks nothing new.
+      account_id: r.account_id,
       player: acc ? acc.username : "?",
       character_name: r.character_name,
       class_name: r.class_name,
@@ -686,6 +726,116 @@ app.get("/api/leaderboard", (req, res) => {
     };
   });
   res.json({ entries: withNames });
+});
+
+// v0.17.3 (#13): "Skill Progression" leaderboard tab -- unlike the main /api/leaderboard
+// above (capped at the top 50 by tier/steps/level/xp), this returns EVERY character's raw
+// weapon-skill hit counters + herbalism points, uncapped, because a character with a
+// modest tier but heavily-farmed weapon proficiency could easily fall outside that top-50
+// cut yet still belong on a top-5-per-skill list. The client computes each skill's actual
+// level/progress from these raw counters using the exact same Balance.weaponSkillLevelForHits/
+// herbalismLevelForPoints math the character sheet itself uses (see skillsBonusPanel()) --
+// deliberately NOT duplicated here, so there is exactly one place that formula can drift.
+app.get("/api/leaderboard/skills", (req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT account_id, character_name, class_name, level, weapon_skills, herbalism_points, is_dead
+       FROM leaderboard_bests`
+    )
+    .all();
+  const withNames = rows.map((r) => {
+    const acc = db.prepare("SELECT username FROM accounts WHERE id = ?").get(r.account_id);
+    let weaponSkills = {};
+    try {
+      weaponSkills = JSON.parse(r.weapon_skills || "{}");
+    } catch (e) {
+      /* corrupt/legacy row -- treat as no weapon-skill progress rather than failing the whole list */
+    }
+    return {
+      account_id: r.account_id,
+      player: acc ? acc.username : "?",
+      character_name: r.character_name,
+      class_name: r.class_name,
+      level: r.level,
+      weapon_skills: weaponSkills,
+      herbalism_points: r.herbalism_points || 0,
+      is_dead: !!r.is_dead,
+    };
+  });
+  res.json({ entries: withNames });
+});
+
+// v0.17.3 (#14): "Gold" leaderboard tab -- gold has been account-bound (not per-character)
+// since v0.17, so this queries `accounts` directly instead of `leaderboard_bests` (whose own
+// `gold` column is now just a stale per-save echo, see the PUT /api/characters/:slot route's
+// comment on why it's no longer a meaningful tiebreaker). Deliberately public/unauthenticated,
+// matching GET /api/leaderboard above -- only username + gold are exposed, never passcode
+// hashes/salts, email, or session tokens.
+app.get("/api/leaderboard/gold", (req, res) => {
+  const rows = db.prepare("SELECT username, gold FROM accounts ORDER BY gold DESC LIMIT 200").all();
+  res.json({ entries: rows.map((r) => ({ player: r.username, gold: r.gold || 0 })) });
+});
+
+// v0.17.3 (#15): "Inspect Player" read-only character viewer. SECURITY-CRITICAL per Gwen's
+// explicit spec: this must be impossible to use to intervene with, move, sell, or otherwise
+// manipulate another account's characters/gear/gold in any way. Concretely, that means:
+//   - GET only. There is no corresponding PUT/POST/DELETE anywhere that accepts an
+//     accountId/characterName pair from an arbitrary caller -- every mutating character
+//     route (PUT/DELETE /api/characters/:slot, the vault routes, auction routes) is scoped
+//     strictly to req.account.id from the caller's OWN session token, never from a URL
+//     param or request body. This route cannot be chained into a mutation anywhere else.
+//   - Requires a logged-in session (requireAuth) purely as an extra scraping speed-bump --
+//     the data itself is no more sensitive than what's already public on /api/leaderboard,
+//     but a full gear/stat snapshot per character is a bigger scrape target than a one-line
+//     ranking row, so this asks for a session token same as every other authenticated route.
+//   - Hand-picked field whitelist below, NOT a raw dump of the character's `data` JSON blob.
+//     That blob also contains things like backpack contents (gear_instances), in-progress
+//     trial/bonfire/poison/heal timers, and internal bookkeeping (_save_seq) that have no
+//     business being visible to another player and aren't part of Gwen's spec ("current
+//     gear, equipment, stats, skills progression") -- only equipped gear, attributes,
+//     weapon_skills, and herbalism_points are ever returned.
+app.get("/api/leaderboard/inspect/:accountId/:characterName", requireAuth, (req, res) => {
+  const accountId = Number(req.params.accountId);
+  const characterName = decodeURIComponent(req.params.characterName);
+  if (!Number.isInteger(accountId)) return res.status(400).json({ error: "Invalid account id." });
+
+  const acc = db.prepare("SELECT username FROM accounts WHERE id = ?").get(accountId);
+  if (!acc) return res.status(404).json({ error: "No such player." });
+
+  // Same json_extract-on-the-stored-blob lookup already used by the character-delete route
+  // to find a character by name without needing to know its slot number ahead of time.
+  const row = db
+    .prepare(
+      `SELECT data FROM characters WHERE account_id = ? AND json_extract(data, '$.character_name') = ?`
+    )
+    .get(accountId, characterName);
+  if (!row) return res.status(404).json({ error: "That character no longer exists." });
+
+  let data;
+  try {
+    data = JSON.parse(row.data);
+  } catch (e) {
+    return res.status(500).json({ error: "That character's data is corrupt." });
+  }
+
+  const lbRow = db
+    .prepare("SELECT highest_tier_reached, hardcore, is_dead FROM leaderboard_bests WHERE account_id = ? AND character_name = ?")
+    .get(accountId, characterName);
+
+  res.json({
+    player: acc.username,
+    character_name: data.character_name || characterName,
+    class_id: data.class_id || "",
+    class_display_name: data.class_display_name || "",
+    level: data.level || 1,
+    hardcore: !!(lbRow ? lbRow.hardcore : data.hardcore),
+    is_dead: !!(lbRow && lbRow.is_dead),
+    highest_tier_reached: lbRow ? lbRow.highest_tier_reached : data.highest_tier_reached || 1,
+    attributes: data.attributes || { str: 0, dex: 0, vit: 0, int: 0 },
+    equipped: data.equipped || {},
+    weapon_skills: data.weapon_skills || {},
+    herbalism_points: data.herbalism_points || 0,
+  });
 });
 
 /* ---------------- admin: leaderboard moderation ----------------

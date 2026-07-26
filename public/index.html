@@ -81,7 +81,10 @@ input[type=checkbox]:checked::after{content:"✓";position:absolute;top:-3px;lef
 .modal-box .row{justify-content:flex-end;margin-top:16px;}
 .social-login-btn{display:flex;align-items:center;justify-content:center;gap:8px;}
 .bar-bg{background:#000;border-radius:4px;overflow:hidden;height:16px;border:1px solid rgba(255,255,255,.08);}
-.bar-fill{height:100%;transition:width .25s;}
+/* v0.17.3 (#8): linear (not the default ease) so a bar fed by frequent small width updates
+   (see the Health Potion heal-over-time sub-tick interval) reads as one continuous smooth
+   climb instead of a series of tiny decelerate-then-stop motions. */
+.bar-fill{height:100%;transition:width .25s linear;}
 .bar-hp{background:var(--hp);} .bar-stamina{background:var(--stamina);} .bar-xp{background:var(--xp);} .bar-gold{background:var(--gold);} .bar-brew{background:#c9a04a;}
 .hp-text{color:var(--hp);} .stamina-text{color:var(--stamina);} .xp-text{color:var(--xp);} .gold-text{color:var(--gold);}
 /* v0.17 (#3/#8): Poisoned HP variants + the status icon's fade-out transition. */
@@ -116,6 +119,19 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
   padding:6px 8px;border-radius:4px;font-size:.8em;white-space:pre-line;width:220px;z-index:10;
   box-shadow:0 2px 8px rgba(0,0,0,.6);
 }
+/* v0.17.3 (#10): the "Comparison" box shown next to a gear item's normal tooltip (see
+   gearCompareWrap()) -- unlike .tooltip above (a single ::after driven by one data-tip
+   attribute), this needs real child DOM nodes (a title plus one or two structured stat
+   blocks), so it's a plain hidden sibling toggled by :hover on the shared wrapper instead
+   of a pseudo-element. Positioned to the right of where the primary tooltip box renders
+   (that one is width:220px at left:0 of its OWN element) so the two don't overlap. */
+.gear-compare-wrap{position:relative;display:inline-block;}
+.gear-compare-wrap .compare-box{
+  display:none;position:absolute;bottom:120%;left:225px;background:#000;color:#fff;
+  padding:6px 8px;border-radius:4px;font-size:.8em;width:220px;z-index:11;
+  box-shadow:0 2px 8px rgba(0,0,0,.6);border:1px solid var(--border);
+}
+.gear-compare-wrap:hover .compare-box{display:block;}
 .plank-row{display:flex;gap:8px;margin:6px 0;}
 .plank-row button.locked-safe{background:#254a25;color:#9fe89f;border-color:#3a7a3a;}
 .plank-row button.locked-fail{background:#4a2020;color:#e89f9f;border-color:#7a3a3a;}
@@ -483,6 +499,8 @@ const BONFIRE_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"
 // with 2 to 5 planks per step now (see Balance.bridgePlankCount), "Top"/"Bottom" text
 // labels stopped making sense, so every plank just shows this icon instead.
 const FOOTSTEP_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><ellipse cx="10" cy="6" rx="2.6" ry="3.4" transform="rotate(-18 10 6)"/><ellipse cx="14" cy="17" rx="2.6" ry="3.4" transform="rotate(12 14 17)"/></svg>`;
+// v0.17.3 (#15): magnifying-glass "Inspect Player" icon used on Leaderboard rows.
+const MAGNIFY_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>`;
 const CHARSELECT_BG_SVG = `<svg width="100%" height="100%" viewBox="0 0 900 200" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMax slice"><rect width="900" height="200" fill="none"/><path d="M0,200 L0,140 Q60,115 120,140 L120,200 Z" fill="#152016"/><path d="M780,200 L780,140 Q840,115 900,140 L900,200 Z" fill="#152016"/><circle cx="450" cy="160" r="22" fill="#ff9d3d" opacity="0.14"/><circle cx="450" cy="160" r="10" fill="#ffcf7a" opacity="0.22"/><path d="M425,200 Q450,180 475,200 Z" fill="#241a12"/></svg>`;
 
 function inlineIcon(svg,size=18){ const d=h("span",{style:{display:"inline-flex",alignItems:"center",justifyContent:"center",width:size+"px",height:size+"px",verticalAlign:"middle"}}); d.innerHTML=svg; return d; }
@@ -559,6 +577,29 @@ const Balance = {
   // that, so venturing several area levels above your own level gets punishing fast.
   // This is a first pass, expect further tuning as real playtesting comes in.
   MONSTER_HP_MULT:2.0, MONSTER_DAMAGE_MULT:2.0,
+  // v0.17.3 (#9): Gwen's report (backed by streamer VODs) was that Tier 2 players -- area
+  // level 10 and up -- with barely any gear (a rare piece or two, maybe one legendary) were
+  // one/two-shotting mobs of their own level with no need to regen or drink potions. Built
+  // balance_sim.js (a Node harness that plays the REAL combat formulas hundreds of times
+  // against a character leveled 1-N with modest randomly-generated gear via the real game
+  // code -- see that file) to check this rather than guess, and it confirmed the complaint:
+  // at area level 10 pre-patch, win rates were regularly 90-100% with 20-45% of wins landing
+  // in 1-2 hits and 65-90% of max HP still left standing afterward. Gwen's proposed fix was
+  // "+10% extra HP/damage per level, on top of the existing curve, starting at level 10" --
+  // asked for a gut check rather than blind implementation.
+  // Verdict: the 10%/level figure itself is approved, but my first implementation applied
+  // it as COMPOUNDING growth (1.10^levelsPastStart, matching the style of every other
+  // *_GROWTH constant below) and balance_sim.js caught that overshooting badly: by area
+  // level 20 an EQUAL-level character (same test Gwen asked for, own level vs same-level
+  // mobs -- not overleveled content) was down to a 0-40% win rate depending on class, and it
+  // only gets worse from there since players commonly keep leveling well past 10 within a
+  // single class tier before attempting the next Broken Bridge Trial. That's a much bigger
+  // swing than "stop Tier 2 from feeling trivial" called for. Shipped as flat/additive growth
+  // instead -- see lateGameMonsterGrowthMult() below -- which still delivers a real, steadily
+  // rising difficulty curve (2.1x extra by level 20, 6.1x by level 60) without the runaway
+  // explosion. Re-run balance_sim.js any time this needs revisiting; it's a permanent
+  // fixture now, not a one-off script.
+  LATE_GAME_MONSTER_GROWTH_START_LEVEL:10, LATE_GAME_MONSTER_GROWTH_PER_LEVEL:0.10,
   CRIT_MULTIPLIER:1.75,
   // v0.14: fleeing combat isn't a guaranteed clean exit anymore -- a 20% chance the
   // monster gets one more hit in (same block-chance/armor math as a normal monster turn)
@@ -680,12 +721,20 @@ const Balance = {
   // silently discarding the extra log's worth of bonus -- see PS.kindleBonfire().
   CAMPFIRE_REGEN_PER_SECOND:1.0, CAMPFIRE_STAMINA_REGEN_PER_SECOND:5.0,
   DRY_LOG_REGEN_PER_UNIT:7.0, BONFIRE_KINDLE_DURATION_MS:10*60*1000,
+  // v0.17.3 (#8): Health Potions used to apply their heal_amount instantly on click. Per
+  // Gwen's exact spec, a potion now delivers its total heal_amount smoothly over 5 real
+  // seconds instead (e.g. a 100hp potion = 20hp after 1 sec, 40 after 2, ... 100 after 5).
+  // POTION_HEAL_TICK_MS is deliberately much finer than 1000ms (5 sub-ticks per second)
+  // purely so the HP bar visibly creeps up in small smooth steps rather than jumping in
+  // 5 chunky once-a-second increments -- see the dedicated setInterval near the bottom of
+  // this file for the tick loop, and PS.active_heals for the per-potion running state.
+  POTION_HEAL_DURATION_MS:5000, POTION_HEAL_TICK_MS:200,
   EXIT_DEPTH_BONUS_PER_DESCENT:1, TRAPDOOR_DEPTH_PENALTY:1,
   CHARACTER_NAME_MAX_LEN:20, ELEMENT_ITEM_CHANCE:0.3,
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.17.2-web",
+  GAME_VERSION:"v0.17.3-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   NPC_BLACKSMITH_NAME:"Grondar Emberhand", NPC_ALCHEMIST_NAME:"Maren Thistlebrew", NPC_MERCHANT_NAME:"Cassius Wraithcoin",
@@ -780,10 +829,24 @@ const Balance = {
   // screenMasterTrial()'s "not yet implemented" branch for what happens after that.
   BRIDGE_ROWS:10, BRIDGE_MIN_PLANKS:2, BRIDGE_MAX_PLANKS:5,
   TRIAL_LEVEL_REQUIREMENT_PER_TIER:10,
-  KILL_STREAK_STAT_GROWTH_PER_KILL:0.015, KILL_STREAK_LOOT_GROWTH_PER_KILL:0.02, KILL_STREAK_CAP:40,
+  // v0.17.3 (#16) AUDIT: Kill Streak used to also scale monster HP/damage UP and gold/XP/
+  // loot UP together (KILL_STREAK_STAT_GROWTH_PER_KILL / KILL_STREAK_LOOT_GROWTH_PER_KILL,
+  // capped at KILL_STREAK_CAP=40 kills) -- an undocumented risk/reward escalation that
+  // wasn't explained anywhere in-game and wasn't what Gwen intended the mechanic to be.
+  // Removed entirely (see ensureCombat()/screenCombat()'s kill-confirmed branch, which no
+  // longer reference a streak multiplier at all) and replaced with a single, simple,
+  // documented effect: +1% Magic Find per kill in the current streak (see PS.getMagicFind()
+  // and Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL below), same as advertised on the
+  // Gameplay Guide. Uncapped here -- getMagicFind() already clamps the combined total to
+  // 500%, so there's no need for a second cap specific to the streak.
+  KILL_STREAK_MAGIC_FIND_PCT_PER_KILL:1,
   MAX_CHARACTER_SLOTS:6,
   EYESIGHT_AFFIX_CHANCE:0.03, ELIXIR_EYESIGHT_STEPS:500, RARE_HERB_CHANCE:0.06,
-  GAMBLE_ITEM_COST:800, GAMBLE_REVEAL_MS:2000,
+  // v0.17.3 (#1) HOTFIX: 800g was steep enough that most players could only gamble a
+  // handful of times total -- dropped to 200g so it's a real, repeatable gold sink instead
+  // of a rare novelty. The goblin's flavor text already carries the "price is time"
+  // quote (see screenGamblingGoblin()), unchanged by this.
+  GAMBLE_ITEM_COST:200, GAMBLE_REVEAL_MS:2000,
   // v0.17.1 (#7): the area level at/above which the 5 newest rare herbs (feeding the Might/
   // Swiftness/Intellect/Wardveil/Renewal potions) start turning up in herb nodes -- see each
   // herb's own min_area_level in HERBS (kept as a literal there since HERBS is defined
@@ -809,14 +872,41 @@ const Balance = {
   // for exactly how each attribute is used per class chain, summarized on the Player
   // Classes screen too.
   STAT_POINTS_PER_LEVEL:3,
+  // v0.17.3 (#2/#3): every Level 1 character (brand new, OR freshly rerolled by a failed
+  // Broken Bridge Trial attempt) now starts with 3 unspent stat points instead of 0, so
+  // there's an immediate build choice on day one instead of waiting for the first level-up.
+  // A failed trial attempt permanently adds +1 more on top of this base for that
+  // character's NEXT Level 1 (see PS.bridge_fail_streak / resolveMasterTrial()), until a
+  // successful promotion resets the streak (and this bonus) back down to the base value.
+  STARTING_STAT_POINTS:3,
   BLOCK_CHANCE_PER_DEX:0.01, BLOCK_CHANCE_MAX:0.60,
 
-  killStreakStatMult(s){return 1.0+this.KILL_STREAK_STAT_GROWTH_PER_KILL*Math.min(s,this.KILL_STREAK_CAP);},
-  killStreakLootMult(s){return 1.0+this.KILL_STREAK_LOOT_GROWTH_PER_KILL*Math.min(s,this.KILL_STREAK_CAP);},
   xpRequiredForLevel(level){return Math.round(this.KILLS_PER_LEVEL_TARGET*this.MONSTER_BASE_XP*Math.pow(1.0+this.LEVEL_XP_GROWTH,level));},
   monsterXpReward(baseXp,areaLevel){return baseXp*Math.pow(1.0+this.AREA_XP_GROWTH,areaLevel);},
-  monsterHp(baseHp,areaLevel){return baseHp*this.MONSTER_HP_MULT*Math.pow(1.0+this.AREA_HP_GROWTH,areaLevel);},
-  monsterDamage(baseDmg,areaLevel){return baseDmg*this.MONSTER_DAMAGE_MULT*Math.pow(1.0+this.AREA_DAMAGE_GROWTH,areaLevel);},
+  // v0.17.3 (#9): extra multiplier stacked on top of the normal area-level curve, active
+  // only from LATE_GAME_MONSTER_GROWTH_START_LEVEL (10) onward -- see that constant's
+  // comment above for the full rationale and balance_sim.js findings. Below level 10 this
+  // is exactly 1 (no change at all to the early game new players learn on).
+  // v0.17.3 (#9) TUNING NOTE: this was originally implemented as COMPOUNDING growth
+  // (1.10^levelsPastStart), matching the style of every other *_GROWTH constant in this
+  // file. balance_sim.js caught it overshooting badly before it ever shipped: by area
+  // level 20, an EQUAL-level character (same test Gwen asked for -- own level vs same-level
+  // mobs, not overleveled content) was down to a 0-40% win rate depending on class, and by
+  // level 30+ compounding 10%/level would have made even fair fights nearly unwinnable.
+  // That's a much bigger swing than "stop Tier 2 from being trivial" called for. Switched to
+  // flat/additive growth instead (+10 percentage points per level past 9, not +10%
+  // compounding on the previous level's total) -- still a real, steadily rising difficulty
+  // curve (2.1x extra by level 20, 6.1x by level 60), just one that doesn't runaway-explode
+  // for players who keep leveling normally within a tier instead of deliberately
+  // over-venturing above their level (which the EXISTING compounding AREA_HP_GROWTH/
+  // AREA_DAMAGE_GROWTH curve already punishes plenty on its own).
+  lateGameMonsterGrowthMult(areaLevel){
+    const lvl=areaLevel||1;
+    if(lvl<this.LATE_GAME_MONSTER_GROWTH_START_LEVEL) return 1.0;
+    return 1.0+this.LATE_GAME_MONSTER_GROWTH_PER_LEVEL*(lvl-(this.LATE_GAME_MONSTER_GROWTH_START_LEVEL-1));
+  },
+  monsterHp(baseHp,areaLevel){return baseHp*this.MONSTER_HP_MULT*Math.pow(1.0+this.AREA_HP_GROWTH,areaLevel)*this.lateGameMonsterGrowthMult(areaLevel);},
+  monsterDamage(baseDmg,areaLevel){return baseDmg*this.MONSTER_DAMAGE_MULT*Math.pow(1.0+this.AREA_DAMAGE_GROWTH,areaLevel)*this.lateGameMonsterGrowthMult(areaLevel);},
   // v0.13: the ankle-bite "trap" tile (NOT the trapdoor, which stays a flat fall-damage
   // hit) now scales with the area's level -- Gwen's report: a flat 4-12 damage trap was
   // trivial at area level 13 with 357 HP, multiplying by area level (so ~52-156 at 13)
@@ -995,7 +1085,9 @@ const DL = {
   // testers real time to learn instead of being instant via the UI).
   itemEffectDescription(id){
     const item=this.getItem(id); if(!item||!item.name) return "";
-    if(item.heal_amount!=null) return `Instantly restores ${item.heal_amount} HP.`;
+    // v0.17.3 (#8): Health Potions no longer land instantly -- see PS.useConsumable()/
+    // PS.active_heals for the heal-over-time mechanic this now describes.
+    if(item.heal_amount!=null) return `Restores ${item.heal_amount} HP gradually over ${(Balance.POTION_HEAL_DURATION_MS/1000)} seconds.`;
     if(item.stamina_amount!=null) return `Instantly restores ${item.stamina_amount} Stamina.`;
     if(item.eyesight_steps!=null) return `Doubles your maze reveal radius (3x3 -> 5x5 tiles around you) for your next ${item.eyesight_steps} steps.`;
     if(item.buff_type){
@@ -1246,6 +1338,10 @@ const Net = {
   accountGold:0,
   graveyardCache:null,
   leaderboardCache:null, leaderboardCacheHardcore:null,
+  // v0.17.3 (#13/#14/#15): separate caches for the Leaderboard's Skill Progression / Gold
+  // tabs, plus a single-entry cache for whichever character the Inspect Player view is
+  // currently showing. Cleared on logout just like the other caches below.
+  leaderboardSkillsCache:null, leaderboardGoldCache:null, inspectPlayerCache:null,
   auctionCache:null,
   vaultCache:null, vaultCapacity:200, vaultVersion:0,
   chatMessages:[], privateMessages:[], chatSocket:null,
@@ -1300,6 +1396,7 @@ const Net = {
   logout(){
     this.online=false; this.token=null; this.username=null; this.cache=null;
     this.graveyardCache=null; this.leaderboardCache=null; this.leaderboardCacheHardcore=null;
+    this.leaderboardSkillsCache=null; this.leaderboardGoldCache=null; this.inspectPlayerCache=null;
     this.auctionCache=null; this.vaultCache=null; this.vaultVersion=0; this.chatMessages=[]; this.privateMessages=[];
     this._saveInFlight={};
     if(this.chatSocket){ try{this.chatSocket.close();}catch(e){} this.chatSocket=null; }
@@ -1391,6 +1488,32 @@ const Net = {
     const res=await fetch(this.apiBase()+"/api/leaderboard");
     const json=await res.json().catch(()=>({entries:[]}));
     this.leaderboardCache=json.entries||[];
+  },
+  // v0.17.3 (#13): raw weapon-skill hit counters + herbalism points for every character on
+  // the board -- the Skill Progression tab computes actual levels/progress from these
+  // client-side (see skillProgressionRows() below), same as the character sheet's own
+  // skillsBonusPanel() does for the logged-in player.
+  async fetchLeaderboardSkills(){
+    const res=await fetch(this.apiBase()+"/api/leaderboard/skills");
+    const json=await res.json().catch(()=>({entries:[]}));
+    this.leaderboardSkillsCache=json.entries||[];
+  },
+  // v0.17.3 (#14): account name + gold for every account, sorted server-side.
+  async fetchLeaderboardGold(){
+    const res=await fetch(this.apiBase()+"/api/leaderboard/gold");
+    const json=await res.json().catch(()=>({entries:[]}));
+    this.leaderboardGoldCache=json.entries||[];
+  },
+  // v0.17.3 (#15): read-only snapshot of another player's equipped gear/attributes/skills
+  // for the "Inspect Player" view -- see the server route's comment for the security
+  // reasoning (GET-only, whitelisted fields, no mutation surface reachable from here).
+  async fetchInspectPlayer(accountId,characterName){
+    const url=this.apiBase()+`/api/leaderboard/inspect/${accountId}/${encodeURIComponent(characterName)}`;
+    const res=await fetch(url,{headers:this.authHeaders()});
+    const json=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(json.error||"Could not load that player's details.");
+    this.inspectPlayerCache=json;
+    return json;
   },
   // Admin token (Dev Tools gate + leaderboard moderation): server-verified only, never
   // embedded in the client. Not persisted anywhere -- typed in fresh each session, sent
@@ -1580,10 +1703,24 @@ const PS = {
   // stat is specifically meant to complement level/tier on the leaderboard for players who
   // haven't yet crossed, not to duplicate tier progress for players who have.
   last_bridge_steps:0,
+  // v0.17.3 (#3): cumulative COUNT of failed Broken Bridge Trial attempts since the last
+  // successful promotion at this tier -- drives the "+1 starting stat point per failed
+  // attempt" bonus (see Balance.STARTING_STAT_POINTS and resolveMasterTrial()). Reset to 0
+  // the moment a promotion succeeds, since the bonus is meant to soften the grind of
+  // repeated failures at the SAME tier, not carry across into the next one.
+  bridge_fail_streak:0,
   // v0.17 (#28): incremented once per RESOLVED Broken Bridge Trial attempt (pass or fail --
   // see resolveMasterTrial() below, which runs for both outcomes). Drives the Merchant's
   // gear-stock reroll cadence (see ensureMerchantStock()); not otherwise displayed anywhere.
   trial_attempts_count:0,
+  // v0.17.3 (#8): Health Potions heal gradually over Balance.POTION_HEAL_DURATION_MS instead
+  // of instantly. Each drunk potion pushes its own entry here -- {perTick, ticksLeft} -- so
+  // multiple potions drunk back-to-back (or while a previous one is still healing) each keep
+  // running independently rather than one overwriting the other. Drained by the dedicated
+  // heal-over-time setInterval near the bottom of this file; deliberately survives a
+  // save/reload (see saveGame()/_applyLoadedData()) so closing the tab mid-heal doesn't just
+  // discard the rest of a potion's effect.
+  active_heals:[],
   // v0.14: temporary stat-buff potions (Intellect/Might/Swiftness/Wardveil/Renewal), each a
   // wall-clock timed buff keyed by type ("intelligence"/"strength"/"dexterity"/
   // "block_chance"/"regen") -> {amount, expires_at}. Same Date.now()-expiry pattern as the
@@ -1681,10 +1818,15 @@ const PS = {
     // percentage points, e.g. 15 -> +15%) on top of the Dexterity-derived amount.
     return clampf(this.getTotalAttr("dex")*Balance.BLOCK_CHANCE_PER_DEX+this.getActiveTempBuff("block_chance")/100.0,0,Balance.BLOCK_CHANCE_MAX);
   },
-  _resetAttributesToClassBase(){
+  // v0.17.3 (#2/#3): `startingPoints` lets callers grant more than the default -- a failed
+  // Broken Bridge Trial attempt bumps this above Balance.STARTING_STAT_POINTS (see
+  // resolveMasterTrial()). Defaults to the base amount for brand new characters and any
+  // other caller that doesn't care about the bridge-failure bonus.
+  _resetAttributesToClassBase(startingPoints){
     const c=this.getClassData();
     this.attributes={str:c.base_str||5, dex:c.base_dex||5, vit:c.base_vit||5, int:c.base_int||5};
-    this.unspent_stat_points=0; this.bonus_hp_from_attributes=0; this.bonus_stamina_from_attributes=0;
+    this.unspent_stat_points=startingPoints!=null?startingPoints:Balance.STARTING_STAT_POINTS;
+    this.bonus_hp_from_attributes=0; this.bonus_stamina_from_attributes=0;
   },
   gearBonus(stat){
     let total=0;
@@ -1746,7 +1888,12 @@ const PS = {
   // v0.17.1 (#12): Magic Find -- gear affix total (see AFFIX_POOL's magic_find entry) plus
   // the temporary Magic Find shrine buff (see applyMagicFindShrineBuff()/getActiveTempBuff),
   // combined additively. Feeds Balance.rollRarity()'s mfPct param via IF.generate().
-  getMagicFind(){return clampf(this.gearBonus("magic_find")+this.getActiveTempBuff("magic_find"),0,500);},
+  // v0.17.3 (#16): Kill Streak's ONLY effect is folded in here too -- +1% per kill in the
+  // current streak (Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL), reset the moment the
+  // streak resets (see PS.resetKillStreak(), called on returning to town/dying). See that
+  // constant's comment for why the streak no longer touches monster stats or gold/XP/loot
+  // quantity the way it used to.
+  getMagicFind(){return clampf(this.gearBonus("magic_find")+this.getActiveTempBuff("magic_find")+(this.kill_streak||0)*Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL,0,500);},
   // v0.17.1 (#12): Magic Find shrine -- reuses the existing wall-clock temp-buff system
   // (see applyTempBuff/getActiveTempBuff, the same mechanism the Alchemist's stat potions
   // use), since Magic Find affects loot rolls (chests, kills) rather than anything
@@ -1844,13 +1991,24 @@ const PS = {
       // so it resets to 0 here immediately, same as everything else about the character
       // sheet that a promotion resets.
       this.last_bridge_steps=0;
+      // v0.17.3 (#3): a successful promotion clears this tier's failure streak (and its
+      // starting-stat-point bonus) -- see the field's declaration above.
+      this.bridge_fail_streak=0;
+    } else {
+      // v0.17.3 (#3): "when you fail a broken bridge attempt, you get +1 starting stat
+      // point for that failed attempt" -- accumulates across repeated failures at the
+      // same tier until a promotion (the branch above) resets it back to 0.
+      this.bridge_fail_streak=(this.bridge_fail_streak||0)+1;
     }
     // failure: class_id unchanged, no demotion, per v0.7 fix
     this.level=1; this.xp=0; this.xp_to_next=Balance.xpRequiredForLevel(this.level);
     // A promotion (or even a failed attempt, since level always resets to 1 here) is a
     // fresh character sheet for whatever class_id ends up active: attributes reset to
     // that class's own level-1 base values, and the level-up HP/Stamina pools start over.
-    this._resetAttributesToClassBase();
+    // v0.17.3 (#2/#3): starting stat points are Balance.STARTING_STAT_POINTS (3) plus
+    // whatever the failed-attempt streak has accumulated (0 right after a promotion,
+    // since that streak was just reset above).
+    this._resetAttributesToClassBase(Balance.STARTING_STAT_POINTS+this.bridge_fail_streak);
     this.current_hp=this.getMaxHp(); this.current_stamina=this.getMaxStamina();
     // v0.17 BUG FIX (#21): this used to leave max_maze_depth_reached (the Venture area-level
     // selector's upper bound) untouched, so a level-1 character fresh off a trial could
@@ -2050,7 +2208,17 @@ const PS = {
   useConsumable(itemId){
     if(!this.canUseConsumable(itemId)) return false;
     const item=DL.getItem(itemId); let used=false;
-    if((item.heal_amount||0)>0 && this.current_hp<this.getMaxHp()){ this.current_hp=Math.min(this.getMaxHp(),this.current_hp+item.heal_amount); used=true; }
+    // v0.17.3 (#8): Health Potions no longer land instantly on click -- the potion is still
+    // consumed right away (see _removeConsumableOne() below), but its heal_amount is queued
+    // up as a heal-over-time effect and delivered smoothly across Balance.POTION_HEAL_
+    // DURATION_MS by the dedicated setInterval near the bottom of this file (see
+    // PS.active_heals/PS.tickActiveHeals()). Multiple potions drunk in quick succession each
+    // get their own independent entry, so they stack rather than one replacing the other.
+    if((item.heal_amount||0)>0 && this.current_hp<this.getMaxHp()){
+      const totalTicks=Balance.POTION_HEAL_DURATION_MS/Balance.POTION_HEAL_TICK_MS;
+      this.active_heals.push({perTick:item.heal_amount/totalTicks, ticksLeft:totalTicks});
+      used=true;
+    }
     if((item.stamina_amount||0)>0 && this.current_stamina<this.getMaxStamina()){ this.current_stamina=Math.min(this.getMaxStamina(),this.current_stamina+item.stamina_amount); used=true; }
     if((item.eyesight_steps||0)>0){ this.eyesight_potion_steps_left=item.eyesight_steps; used=true; }
     // v0.14: the 5 new stat-buff potions (buff_type/buff_amount/buff_duration_ms on ITEMS)
@@ -2074,6 +2242,28 @@ const PS = {
     // on not-already-full.
     if(item.cures_poison && this.isPoisoned()) return true;
     return false;
+  },
+  // v0.17.3 (#8): drains PS.active_heals, one dedicated sub-tick (Balance.POTION_HEAL_
+  // TICK_MS) at a time -- called by the heal-over-time setInterval near the bottom of this
+  // file. Returns true if current_hp actually changed, so the caller knows whether it's
+  // worth refreshing the HP bar/text at all.
+  tickActiveHeals(){
+    if(!this.active_heals || !this.active_heals.length) return false;
+    let changed=false;
+    const maxHp=this.getMaxHp();
+    for(const heal of this.active_heals){
+      if(this.current_hp<maxHp){ this.current_hp=Math.min(maxHp,this.current_hp+heal.perTick); changed=true; }
+      heal.ticksLeft--;
+    }
+    this.active_heals=this.active_heals.filter(heal=>heal.ticksLeft>0);
+    return changed;
+  },
+  // Sum of every in-flight heal's per-second rate, purely for the "+X.X HP/sec" indicator
+  // next to the HP bar (see statHeader()) -- doesn't consume or mutate anything.
+  getHealPerSecond(){
+    if(!this.active_heals || !this.active_heals.length) return 0;
+    const ticksPerSecond=1000/Balance.POTION_HEAL_TICK_MS;
+    return this.active_heals.reduce((sum,heal)=>sum+heal.perTick*ticksPerSecond,0);
   },
   bestAvailableConsumable(kind){
     const field=kind==="health"?"heal_amount":"stamina_amount";
@@ -2254,9 +2444,18 @@ const PS = {
     // v0.17 (#1): same reused-singleton leak class as weapon_skills/trial_progress below --
     // a fresh character must not inherit the previous character's bridge-step history.
     this.last_bridge_steps=0;
+    // v0.17.3 (#3): same reused-singleton leak class -- a brand new character must not
+    // inherit the previous character's failed-attempt streak (and thus its starting stat
+    // point bonus). _resetAttributesToClassBase() below reads this indirectly via its
+    // default (Balance.STARTING_STAT_POINTS) since no override is passed here.
+    this.bridge_fail_streak=0;
     // v0.17 (#28): same reused-singleton leak class -- a fresh character starts with zero
     // resolved trial attempts, not whatever the previously-played character had.
     this.trial_attempts_count=0;
+    // v0.17.3 (#8): same reused-singleton leak class -- a fresh character must not inherit
+    // an in-flight heal-over-time from whatever potion the previously-played character
+    // drank right before this one was rolled.
+    this.active_heals=[];
     // Fresh character: brand new weapon-skill progression, NOT the reused-singleton's
     // previous character's progress (same bug class as the HP/Stamina fix just below --
     // PS is one shared object across character creations in a session, so anything not
@@ -2310,6 +2509,13 @@ const PS = {
       // v0.17 (#1): "steps completed before your most recent Broken Bridge Trial failure",
       // needed server-side for the leaderboard's new sort order (see attemptStep()).
       last_bridge_steps:this.last_bridge_steps||0,
+      // v0.17.3 (#3): must survive a save/reload just like last_bridge_steps above, or a
+      // player who fails, then closes the tab, would lose their earned stat-point bonus.
+      bridge_fail_streak:this.bridge_fail_streak||0,
+      // v0.17.3 (#8): an in-progress potion heal-over-time must survive a save/reload too,
+      // same reasoning as everything else here -- otherwise closing the tab mid-heal would
+      // just silently discard whatever HP hadn't been delivered yet.
+      active_heals:this.active_heals||[],
       // v0.17 (#28): drives the Merchant's gear-stock reroll cadence, see resolveMasterTrial().
       trial_attempts_count:this.trial_attempts_count||0,
       attributes:this.attributes,unspent_stat_points:this.unspent_stat_points,
@@ -2359,6 +2565,10 @@ const PS = {
     // v0.17 (#1): see saveGame() -- must survive a save/reload just like the other lifetime
     // progress stats above.
     this.last_bridge_steps=parsed.last_bridge_steps||0;
+    // v0.17.3 (#3): a save from before this shipped just won't have a streak yet.
+    this.bridge_fail_streak=parsed.bridge_fail_streak||0;
+    // v0.17.3 (#8): a save from before this shipped just won't have any heals-in-progress.
+    this.active_heals=parsed.active_heals||[];
     // v0.17 (#28): see saveGame().
     this.trial_attempts_count=parsed.trial_attempts_count||0;
     if(parsed.attributes){ this.attributes={str:parsed.attributes.str||0,dex:parsed.attributes.dex||0,vit:parsed.attributes.vit||0,int:parsed.attributes.int||0}; }
@@ -2444,6 +2654,12 @@ const GF = {
   ventureDepth:null, mazeOverlay:null, gambleReveal:null,
   admin_token:"", admin_leaderboard_cache:null, admin_leaderboard_error:"",
   attributesCollapsed:false, leaderboardPage:null, bonfireBranchesToKindle:0,
+  // v0.17.3 (#13/#14/#15): which Leaderboard sub-tab is showing ("ladder"/"skills"/"gold"),
+  // and which account_id/character_name pair the read-only Inspect Player view should
+  // fetch+display. Reset to null on goto("inspectPlayer") away-and-back not required -- a
+  // stale target is always overwritten before the screen is reachable (see the magnifying-
+  // glass button's onClick in screenLeaderboard()).
+  leaderboardTab:null, inspectPlayerTarget:null,
   goto(screen, extra={}){
     Object.assign(this, extra);
     this.screen=screen; render();
@@ -2579,6 +2795,15 @@ function refreshStatHeaderInPlace(){
   if(poisonIcon){
     poisonIcon.style.opacity=poisoned?"1":"0";
     if(poisoned) poisonIcon.setAttribute("title",`Poisoned: draining ${PS.getPoisonHpPerSec().toFixed(1)} HP/sec for ${formatMsAsMinSec(PS.getPoisonMsLeft())} more (won't drop you below 1 HP on its own).`);
+  }
+  // v0.17.3 (#8): keep the "(healing +X.X/sec)" indicator in sync on every fast heal
+  // sub-tick too -- see the dedicated heal-over-time setInterval below, which calls this
+  // function (not a full render()) on every 200ms sub-tick for exactly this reason.
+  const healingText=document.getElementById("stat-healing-text");
+  if(healingText){
+    const healPerSec=PS.getHealPerSecond();
+    healingText.style.display=healPerSec>0?"inline":"none";
+    healingText.textContent=`(healing +${healPerSec.toFixed(1)}/sec)`;
   }
   return true;
 }
@@ -2869,7 +3094,10 @@ function statHeader(opts={}){
         h("div",{style:{fontWeight:"bold"}},[PS.character_name, PS.hardcore?h("span",{style:{color:"#e07a7a"}},[" [Hardcore]"]):null]),
         h("div",{class:"muted"},[`Lv ${PS.level} ${c.display_name||""}`]),
         damageLine(),
-        PS.kill_streak>0?h("div",{class:"muted"},[`Kill streak: ${PS.kill_streak}`]):null,
+        // v0.17.3 (#16): shows the streak's one remaining effect right alongside the
+        // count, since "Kill streak: 7" on its own didn't tell a player what it was
+        // actually doing for them anymore -- see Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL.
+        PS.kill_streak>0?h("div",{class:"muted"},[`Kill streak: ${PS.kill_streak} (+${PS.kill_streak*Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL}% Magic Find)`]):null,
         buffIcons.length?h("div",{style:{marginTop:"2px"}},buffIcons):null,
       ]),
       h("div",{class:"row gap",style:{alignItems:"center"}},[
@@ -2908,7 +3136,21 @@ function statHeader(opts={}){
         h("div",{},[h("span",{id:"stat-hp-text",class:PS.isPoisoned()?"hp-text hp-text-poisoned":"hp-text"},[`HP ${Math.round(PS.current_hp)}/${Math.round(PS.getMaxHp())}`]), PS.isPoisoned()?h("span",{id:"stat-poison-icon",class:"poison-icon",title:`Poisoned: draining ${PS.getPoisonHpPerSec().toFixed(1)} HP/sec for ${formatMsAsMinSec(PS.getPoisonMsLeft())} more (won't drop you below 1 HP on its own).`,style:{marginLeft:"4px",opacity:"1"}},["🤢"]):null,
         // v0.17.1 (#12): Touch of Unicorn (Invulnerability shrine) indicator right at the HP
         // status, per Gwen's exact spec -- a unicorn icon with the remaining round count.
-        PS.isInvulnerable()?h("span",{title:`Touch of Unicorn: immune to damage for ${PS.invuln_rounds_left} more combat round(s).`,style:{marginLeft:"4px"}},["🦄"]):null]),
+        PS.isInvulnerable()?h("span",{title:`Touch of Unicorn: immune to damage for ${PS.invuln_rounds_left} more combat round(s).`,style:{marginLeft:"4px"}},["🦄"]):null,
+        // v0.17.3 (#7) BUG FIX: the Quad Damage shrine buff never actually had an icon
+        // anywhere in the UI (only the combat log's "(Quad Damage!)" line hinted at it,
+        // and only during an active fight) -- once you left combat (e.g. reaching the
+        // exit and descending to the next maze level), there was NO visible indicator the
+        // buff was still ticking down at all, even though PS.quad_dmg_rounds_left was
+        // correctly carried over and still applied in the next fight. Reported as "the
+        // icon disappeared" -- it never existed to begin with. Mirrors the Unicorn icon
+        // above exactly (same HP-row placement, same round-count tooltip).
+        PS.hasQuadDamage()?h("span",{title:`Quad Damage: 4x damage output for ${PS.quad_dmg_rounds_left} more combat round(s).`,style:{marginLeft:"4px"}},["⚡"]):null,
+        // v0.17.3 (#8): visible feedback that a potion's heal-over-time is actually in
+        // progress (otherwise the HP bar just creeps up with no explanation) -- kept in
+        // sync on every fast heal sub-tick by refreshStatHeaderInPlace() below, same
+        // pattern as the poison/regen indicators above.
+        h("span",{id:"stat-healing-text",class:"muted",style:{marginLeft:"4px",display:PS.getHealPerSecond()>0?"inline":"none"}},[`(healing +${PS.getHealPerSecond().toFixed(1)}/sec)`])]),
         bar(PS.current_hp/PS.getMaxHp()*100,PS.isPoisoned()?"bar-hp-poisoned":"bar-hp",compact,"stat-hp-bar-fill"),
         h("div",{},[h("span",{id:"stat-stamina-text",class:"stamina-text"},[`Stamina ${Math.round(PS.current_stamina)}/${Math.round(PS.getMaxStamina())}`]), PS.stamina_shrine_buff>0?h("span",{title:`Stamina shrine active: ${Math.round(PS.stamina_shrine_buff)} bonus stamina in reserve.`,style:{marginLeft:"4px"}},["✨"]):null]),
         bar(PS.current_stamina/PS.getMaxStamina()*100,"bar-stamina",compact,"stat-stamina-bar-fill"),
@@ -3099,6 +3341,27 @@ function screenMainMenuSlots(){
         h("div",{},["📜 Player Classes"]),
         h("div",{class:"dim-note",style:{marginTop:"2px"}},["See every path and its tiers"]),
       ]),
+    ]),
+  ]));
+  // v0.17.3 (#5): the Itemization, Herbalism & Alchemy, and new Gameplay guides are now
+  // ALSO reachable from right here, before you've even picked a character -- a second row
+  // under Create/Graveyard/Leaderboard/Player Classes, all reference material you might
+  // want to skim before diving in. Each guide's own Back button (GF._pre*Screen) is set to
+  // "mainMenuSlots" here so it returns to this screen, not wherever it happened to default.
+  // These stay in their existing spots too (Character Sheet, Alchemist) since those remain
+  // genuinely convenient mid-session shortcuts -- nothing was removed from there.
+  content.appendChild(h("div",{class:"row",style:{marginTop:"10px",gap:"12px"}},[
+    h("button",{class:"wide",style:{textAlign:"center",lineHeight:"1.3",padding:"8px 12px",flex:"1"},onClick:()=>{ GF._preGameplayScreen="mainMenuSlots"; GF.goto("gameplayGuide"); }},[
+      h("div",{},["📖 Gameplay Guide"]),
+      h("div",{class:"dim-note",style:{marginTop:"2px"}},["New here? Start with the core loop"]),
+    ]),
+    h("button",{class:"wide",style:{textAlign:"center",lineHeight:"1.3",padding:"8px 12px",flex:"1"},onClick:()=>{ GF._preItemizationScreen="mainMenuSlots"; GF.goto("itemization"); }},[
+      h("div",{},["⚔️ Itemization Guide"]),
+      h("div",{class:"dim-note",style:{marginTop:"2px"}},["Tiers, rarity, and affix rolls"]),
+    ]),
+    h("button",{class:"wide",style:{textAlign:"center",lineHeight:"1.3",padding:"8px 12px",flex:"1"},onClick:()=>{ GF._preHerbalismScreen="mainMenuSlots"; GF.goto("herbalism"); }},[
+      h("div",{},["🌿 Herbalism & Alchemy Guide"]),
+      h("div",{class:"dim-note",style:{marginTop:"2px"}},["Herbs, where to find them, and recipes"]),
     ]),
   ]));
   root.appendChild(content);
@@ -3329,12 +3592,51 @@ function screenClassProgression(){
 
 const LEADERBOARD_PAGE_SIZE=12;
 
+// v0.17.3 (#15): shared magnifying-glass "Inspect Player" button, used by both the Ladder
+// Progression and Skill Progression tabs' rows. Read-only -- see the GET
+// /api/leaderboard/inspect/:accountId/:characterName route's comment for the full security
+// reasoning (GET-only, whitelisted response fields, no mutation surface reachable from here).
+function inspectPlayerButton(accountId,characterName){
+  if(accountId==null || !characterName) return null;
+  return h("button",{title:"Inspect player (read-only)",style:{padding:"2px 7px",marginLeft:"6px",flex:"none"},onClick:(ev)=>{
+    ev.stopPropagation();
+    Net.inspectPlayerCache=null;
+    GF.goto("inspectPlayer",{inspectPlayerTarget:{accountId,characterName}});
+  }},[inlineIcon(MAGNIFY_SVG,14)]);
+}
+
+function leaderboardTabButton(key,label){
+  const selected=GF.leaderboardTab===key;
+  return h("button",{
+    style:{background:selected?"var(--accent,#3a6a2a)":undefined,borderColor:selected?"#7ac67a":undefined},
+    onClick:()=>{ GF.leaderboardTab=key; render(); },
+  },[label]);
+}
+
 function screenLeaderboard(){
   const root=h("div",{});
   root.appendChild(h("h2",{},["Leaderboard"]));
   root.appendChild(h("div",{class:"lore"},["The race is long, and in the end, it's only with yourself.", h("br",{}), "But still, here's a list of players outperforming you."]));
   // v0.16: Back moved up here instead of below the whole (paginated) list of players.
   root.appendChild(h("button",{style:{marginBottom:"10px"},onClick:()=>GF.goto("mainMenuSlots")},["← Back"]));
+
+  // v0.17.3 (#13/#14): three sub-tabs. Ladder Progression is the original single view
+  // (now with gold removed, see #410); Skill Progression and Gold are new.
+  if(GF.leaderboardTab==null) GF.leaderboardTab="ladder";
+  root.appendChild(h("div",{class:"row gap",style:{marginBottom:"12px"}},[
+    leaderboardTabButton("ladder","Ladder Progression"),
+    leaderboardTabButton("skills","Skill Progression"),
+    leaderboardTabButton("gold","Gold"),
+  ]));
+
+  if(GF.leaderboardTab==="skills"){ root.appendChild(leaderboardSkillsTab()); return root; }
+  if(GF.leaderboardTab==="gold"){ root.appendChild(leaderboardGoldTab()); return root; }
+  root.appendChild(leaderboardLadderTab());
+  return root;
+}
+
+function leaderboardLadderTab(){
+  const root=h("div",{});
   if(Net.leaderboardCache===null||Net.leaderboardCache===undefined){
     root.appendChild(h("div",{class:"muted"},["Loading..."]));
     Net.fetchLeaderboard().then(render).catch(()=>{ setToast("Could not load the leaderboard."); render(); });
@@ -3382,9 +3684,12 @@ function screenLeaderboard(){
         // v0.15 -- Gwen's ask was for the leaderboard tags to match that existing color.
         e.hardcore?h("span",{style:{color:"#e07a7a",fontWeight:"bold"}},[" [Hardcore]"]):null,
         isDead?h("span",{style:{color:"#e07a7a",fontWeight:"bold"}},[" [Dead]"]):null,
+        inspectPlayerButton(e.account_id,e.character_name),
       ]),
+      // v0.17.3 (#14): Gold dropped from this row -- see the new Gold tab (leaderboardGoldTab())
+      // for the account-bound gold total instead.
       h("div",{class:"muted row",style:{alignItems:"center",gap:"4px",flexWrap:"wrap"},title:e.last_bridge_steps>0?"Bridge steps completed before their most recent Broken Bridge Trial failure":undefined},[
-        h("span",{},[`Lv ${e.level} ${e.class_name} `]), tierNode, h("span",{},[`, ${e.lifetime_xp||0} Experience, ${e.gold} Gold`]),
+        h("span",{},[`Lv ${e.level} ${e.class_name} `]), tierNode, h("span",{},[`, ${e.lifetime_xp||0} Experience`]),
       ]),
     ]));
   });
@@ -3396,6 +3701,191 @@ function screenLeaderboard(){
       h("button",{disabled:GF.leaderboardPage>=totalPages-1,onClick:()=>{ GF.leaderboardPage++; render(); }},["Next →"]),
     ]));
   }
+
+  return root;
+}
+
+// v0.17.3 (#13): computes, for each of the 6 weapon types + Herbalism, the top 5 characters
+// ranked by (skill level DESC, points-into-current-level DESC) -- matching Gwen's example
+// format literally ("Wand Skill" 1. Fien Lv1 (123/200) ...). Levels/progress are derived
+// from the raw hit/point counters using the EXACT same Balance formulas the character
+// sheet's own skillsBonusPanel() uses (Balance.weaponSkillLevelForHits/
+// weaponSkillCumulativeHitsForLevel, Balance.herbalismLevelForPoints/
+// herbalismCumulativePointsForLevel) -- there's exactly one place this math lives.
+function computeSkillRankings(){
+  const entries=Net.leaderboardSkillsCache||[];
+  const result={};
+  for(const t of IF.WEAPON_TYPE_LIST){
+    const rows=entries.map(e=>{
+      const hits=(e.weapon_skills && e.weapon_skills[t] && e.weapon_skills[t].hits)||0;
+      const level=Balance.weaponSkillLevelForHits(hits);
+      const atStart=Balance.weaponSkillCumulativeHitsForLevel(level);
+      const forNext=Balance.weaponSkillCumulativeHitsForLevel(level+1)-atStart;
+      const into=hits-atStart;
+      return {account_id:e.account_id, character_name:e.character_name, player:e.player, is_dead:e.is_dead, level, into, forNext};
+    }).filter(r=>r.level>0||r.into>0);
+    rows.sort((a,b)=> b.level-a.level || b.into-a.into);
+    result[t]=rows.slice(0,5);
+  }
+  const herbRows=entries.map(e=>{
+    const points=e.herbalism_points||0;
+    const level=Balance.herbalismLevelForPoints(points);
+    const atStart=Balance.herbalismCumulativePointsForLevel(level);
+    const forNext=Balance.herbalismCumulativePointsForLevel(level+1)-atStart;
+    const into=points-atStart;
+    return {account_id:e.account_id, character_name:e.character_name, player:e.player, is_dead:e.is_dead, level, into, forNext};
+  }).filter(r=>r.level>0||r.into>0);
+  herbRows.sort((a,b)=> b.level-a.level || b.into-a.into);
+  result.herbalism=herbRows.slice(0,5);
+  return result;
+}
+
+function skillRankingCard(title,rows){
+  return h("div",{class:"panel",style:{marginBottom:"12px"}},[
+    h("div",{style:{fontWeight:"bold",marginBottom:"8px"}},[title]),
+    rows.length===0
+      ? h("div",{class:"muted"},["No progress recorded yet."])
+      : h("div",{},rows.map((r,i)=>h("div",{class:"row",style:{justifyContent:"space-between",alignItems:"center",marginBottom:"4px",gap:"8px"}},[
+          h("div",{style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},[
+            `${i+1}. ${r.character_name} `,
+            h("span",{class:"muted"},[`(${r.player}) `]),
+            r.is_dead?h("span",{style:{color:"#e07a7a"},title:"Fallen"},["🪦 "]):null,
+          ]),
+          h("div",{class:"row",style:{alignItems:"center",flex:"none"}},[
+            h("span",{class:"muted"},[`Lv${r.level} (${r.into}/${r.forNext})`]),
+            inspectPlayerButton(r.account_id,r.character_name),
+          ]),
+        ]))),
+  ]);
+}
+
+function leaderboardSkillsTab(){
+  const root=h("div",{});
+  if(Net.leaderboardSkillsCache===null||Net.leaderboardSkillsCache===undefined){
+    root.appendChild(h("div",{class:"muted"},["Loading..."]));
+    Net.fetchLeaderboardSkills().then(render).catch(()=>{ setToast("Could not load skill progression."); render(); });
+    return root;
+  }
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"10px"}},["Top 5 characters per weapon-type proficiency, plus Herbalism -- ranked by skill level, then progress into that level."]));
+  const rankings=computeSkillRankings();
+  for(const t of IF.WEAPON_TYPE_LIST){
+    root.appendChild(skillRankingCard(`${IF.WEAPON_TYPE_LABELS[t]} Skill`,rankings[t]));
+  }
+  root.appendChild(skillRankingCard("Herbalism",rankings.herbalism));
+  return root;
+}
+
+// v0.17.3 (#14): simple account-name + gold ranking. Deliberately NOT paginated like the
+// Ladder tab (server already caps it at 200 rows) -- if the player base grows enough for
+// that to matter, the same LEADERBOARD_PAGE_SIZE pagination pattern can be lifted over.
+function leaderboardGoldTab(){
+  const root=h("div",{});
+  if(Net.leaderboardGoldCache===null||Net.leaderboardGoldCache===undefined){
+    root.appendChild(h("div",{class:"muted"},["Loading..."]));
+    Net.fetchLeaderboardGold().then(render).catch(()=>{ setToast("Could not load the gold leaderboard."); render(); });
+    return root;
+  }
+  const entries=Net.leaderboardGoldCache;
+  if(entries.length===0){ root.appendChild(h("div",{class:"muted"},["No accounts yet."])); return root; }
+  entries.forEach((e,i)=>{
+    const isMine=e.player===Net.username;
+    root.appendChild(h("div",{class:"tile row",style:{marginBottom:"6px",justifyContent:"space-between",background:isMine?"#20304a":undefined}},[
+      h("div",{},[h("span",{class:"muted"},[`#${i+1} `]), h("span",{style:{fontWeight:"bold"}},[e.player])]),
+      h("div",{class:"gold-text"},[`${e.gold} Gold`]),
+    ]));
+  });
+  return root;
+}
+
+// v0.17.3 (#15): "Inspect Player" -- a strictly READ-ONLY view of another player's equipped
+// gear, attributes, and skill progression, reached via the magnifying-glass button on the
+// Ladder/Skill Progression tabs. This renders from a plain fetched data object
+// (Net.inspectPlayerCache), NEVER from the live PS singleton -- there is no code path here
+// that assigns anything into PS, so there is no risk of this screen bleeding another
+// player's data into your own active character, and nothing here can be used to equip,
+// unequip, sell, or otherwise touch the inspected character's (or your own) gear. Every
+// tile below is deliberately built without an onClick, matching that this is a look-only
+// screen. See the GET /api/leaderboard/inspect/:accountId/:characterName route for the
+// matching server-side security notes (GET-only, whitelisted fields, no mutation surface).
+function inspectEquipSlotTile(slot,snapshot){
+  const inst=snapshot.equipped[slot];
+  return h("div",{class:"tile"},[
+    h("div",{class:"muted"},[IF.slotLabel(slot)]),
+    inst?h("div",{class:"row gap",style:{alignItems:"center"}},[gearIcon(inst,26), h("div",{class:"tooltip rarity-"+inst.rarity,"data-tip":IF.tooltipText(inst)},[IF.displayName(inst)+` (T${inst.tier})`])]):h("div",{class:"muted"},["(empty)"]),
+  ]);
+}
+
+function screenInspectPlayer(){
+  const root=h("div",{});
+  root.appendChild(h("h2",{},["Inspect Player"]));
+  root.appendChild(h("div",{class:"lore"},["A read-only look at another wanderer's build. Nothing here can be moved, equipped, or taken."]));
+  root.appendChild(h("button",{style:{marginBottom:"10px"},onClick:()=>GF.goto("leaderboard")},["← Back to Leaderboard"]));
+
+  const target=GF.inspectPlayerTarget;
+  if(!target){ root.appendChild(h("div",{class:"muted"},["No player selected."])); return root; }
+
+  if(Net.inspectPlayerCache===null||Net.inspectPlayerCache===undefined){
+    root.appendChild(h("div",{class:"muted"},["Loading..."]));
+    Net.fetchInspectPlayer(target.accountId,target.characterName).then(render).catch(e=>{ setToast(e.message||"Could not load that player's details."); GF.goto("leaderboard"); });
+    return root;
+  }
+  const s=Net.inspectPlayerCache;
+
+  root.appendChild(h("div",{class:"panel",style:{marginBottom:"12px"}},[
+    h("div",{class:"row",style:{justifyContent:"space-between",alignItems:"center"}},[
+      h("div",{style:{fontWeight:"bold",fontSize:"1.1em"}},[
+        s.character_name, " ",
+        h("span",{class:"muted"},[`(${s.player})`]),
+        s.hardcore?h("span",{style:{color:"#e07a7a",fontWeight:"bold"}},[" [Hardcore]"]):null,
+        s.is_dead?h("span",{style:{color:"#e07a7a",fontWeight:"bold"}},[" [Dead]"]):null,
+      ]),
+    ]),
+    h("div",{class:"muted"},[`Lv ${s.level} ${s.class_display_name} (Tier ${s.highest_tier_reached})`]),
+  ]));
+
+  root.appendChild(h("h3",{},["Attributes"]));
+  const attrs=s.attributes||{str:0,dex:0,vit:0,int:0};
+  root.appendChild(h("div",{class:"panel",style:{marginBottom:"12px"}},[
+    h("div",{class:"row gap",style:{flexWrap:"wrap"}},[
+      h("div",{},[`Strength: ${attrs.str||0}`]),
+      h("div",{},[`Dexterity: ${attrs.dex||0}`]),
+      h("div",{},[`Vitality: ${attrs.vit||0}`]),
+      h("div",{},[`Intelligence: ${attrs.int||0}`]),
+    ]),
+  ]));
+
+  root.appendChild(h("h3",{},["Equipped"]));
+  const eqDoll=h("div",{class:"equip-doll"});
+  for(const rowSlots of EQUIP_DOLL_ROWS){
+    eqDoll.appendChild(h("div",{class:"equip-doll-row"},rowSlots.map(slot=>inspectEquipSlotTile(slot,s))));
+  }
+  root.appendChild(eqDoll);
+
+  root.appendChild(h("h3",{},["Skill Progression"]));
+  const weaponSkills=s.weapon_skills||{};
+  const skillRows=IF.WEAPON_TYPE_LIST.map(t=>{
+    const hits=(weaponSkills[t] && weaponSkills[t].hits)||0;
+    const level=Balance.weaponSkillLevelForHits(hits);
+    const atStart=Balance.weaponSkillCumulativeHitsForLevel(level);
+    const forNext=Balance.weaponSkillCumulativeHitsForLevel(level+1)-atStart;
+    const into=hits-atStart;
+    return h("div",{class:"row",style:{justifyContent:"space-between",marginBottom:"4px"}},[
+      h("div",{},[IF.WEAPON_TYPE_LABELS[t]]),
+      h("div",{class:"muted"},[`Lv ${level} (${into}/${forNext})`]),
+    ]);
+  });
+  const herbPoints=s.herbalism_points||0;
+  const herbLevel=Balance.herbalismLevelForPoints(herbPoints);
+  const herbAtStart=Balance.herbalismCumulativePointsForLevel(herbLevel);
+  const herbForNext=Balance.herbalismCumulativePointsForLevel(herbLevel+1)-herbAtStart;
+  const herbInto=herbPoints-herbAtStart;
+  root.appendChild(h("div",{class:"panel"},[
+    ...skillRows,
+    h("div",{class:"row",style:{justifyContent:"space-between"}},[
+      h("div",{},["Herbalism"]),
+      h("div",{class:"muted"},[`Lv ${herbLevel} (${herbInto}/${herbForNext})`]),
+    ]),
+  ]));
 
   return root;
 }
@@ -4023,19 +4513,20 @@ function ensureCombat(){
   const guardianCellIdx=GF.pending_guardian_cell_idx!=null?GF.pending_guardian_cell_idx:null;
   if(!GF.combat || GF.combat.monster_id!==GF.pending_monster_id || GF.combat.guardianCellIdx!==guardianCellIdx){
     const base=DL.getMonster(GF.pending_monster_id);
-    const streakMult=Balance.killStreakStatMult(PS.kill_streak);
-    // Stronghold guardians (v0.12): same per-area-level damage as an ordinary monster,
-    // but Balance.STRONGHOLD_GUARDIAN_HP_MULT (3x) more HP, per Gwen's spec: "extra
-    // strong mobs... damage quite equal to regular mobs".
+    // v0.17.3 (#16) AUDIT: Kill Streak no longer scales monster HP/damage at all -- see
+    // Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL's comment for why that old behavior was
+    // removed. Stronghold guardians (v0.12): same per-area-level damage as an ordinary
+    // monster, but Balance.STRONGHOLD_GUARDIAN_HP_MULT (3x) more HP, per Gwen's spec:
+    // "extra strong mobs... damage quite equal to regular mobs".
     const isGuardian=guardianCellIdx!=null;
-    const hpMult=(isGuardian?Balance.STRONGHOLD_GUARDIAN_HP_MULT:1)*streakMult;
+    const hpMult=isGuardian?Balance.STRONGHOLD_GUARDIAN_HP_MULT:1;
     const maxHp=Balance.monsterHp(base.base_hp,GF.maze_depth)*hpMult;
     // v0.17 (#18): guardians are worth extra XP (see STRONGHOLD_GUARDIAN_XP_MULT) -- they
     // already cost 3x the HP and a real fight to bring down, but used to hand out the same
     // XP as an ordinary mob of that area level. v0.17.2 (#1) HOTFIX: this was 4x, reverted
     // to 1.5x per ImpulseBE's balance check -- 4x was overtuned relative to the fight.
     const xpMult=isGuardian?Balance.STRONGHOLD_GUARDIAN_XP_MULT:1;
-    GF.combat={monster_id:base.id, name:isGuardian?`Guardian ${base.name}`:base.name, hp:maxHp, maxHp, dmgMin:Balance.monsterDamage(base.base_damage_min,GF.maze_depth)*streakMult, dmgMax:Balance.monsterDamage(base.base_damage_max,GF.maze_depth)*streakMult, xp:Balance.monsterXpReward(base.base_xp,GF.maze_depth)*xpMult, goldMin:base.gold_min, goldMax:base.gold_max, loot_table:base.loot_table, log:[], isGuardian, guardianCellIdx};
+    GF.combat={monster_id:base.id, name:isGuardian?`Guardian ${base.name}`:base.name, hp:maxHp, maxHp, dmgMin:Balance.monsterDamage(base.base_damage_min,GF.maze_depth), dmgMax:Balance.monsterDamage(base.base_damage_max,GF.maze_depth), xp:Balance.monsterXpReward(base.base_xp,GF.maze_depth)*xpMult, goldMin:base.gold_min, goldMax:base.gold_max, loot_table:base.loot_table, log:[], isGuardian, guardianCellIdx};
     // v0.17 (#16): 50% chance the monster gets an unavoidable first strike the instant this
     // encounter is created, before the player can act at all -- see MONSTER_FIRST_STRIKE_
     // CHANCE's comment above for the full rationale and why this floors at 1 HP instead of
@@ -4200,14 +4691,19 @@ function screenCombat(){
     }
     if(!mobBlocked && cb.hp<=0){
       cb.hp=0;
-      const streakMult=Balance.killStreakLootMult(PS.kill_streak);
-      const gold=randIntRange(cb.goldMin,cb.goldMax)*streakMult;
-      const leveled=PS.addXp(cb.xp*streakMult);
+      // v0.17.3 (#16) AUDIT: gold/XP/loot no longer get a Kill Streak multiplier -- see
+      // Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL's comment. The streak's ONLY remaining
+      // effect is the Magic Find bonus rolled into PS.getMagicFind() (which grantLoot()'s
+      // gear roll already reads through IF.generate() -> Balance.rollRarity()), so a
+      // longer streak still means better loot on average, just via rarity odds instead of
+      // a flat quantity/XP/gold multiplier.
+      const gold=randIntRange(cb.goldMin,cb.goldMax);
+      const leveled=PS.addXp(cb.xp);
       PS.addGold(gold);
       PS.incrementKillStreak();
-      const lootMsg=grantLoot(cb.loot_table, streakMult);
+      const lootMsg=grantLoot(cb.loot_table);
       cb.defeated=true;
-      cb.result_text=`${cb.name} defeated! +${Math.round(cb.xp*streakMult)} XP, +${Math.round(gold)} gold. ${lootMsg}`;
+      cb.result_text=`${cb.name} defeated! +${Math.round(cb.xp)} XP, +${Math.round(gold)} gold. ${lootMsg}`;
       if(cb.isGuardian){
         // v0.12: beating a Stronghold guardian opens the direct path to that Stronghold's
         // chest (any 1 of the 4 is enough), and has its own independent 5% chance to drop
@@ -4472,13 +4968,48 @@ function screenHerbEncounter(){
 }
 
 
+// v0.17.3 (#10): shared "Comparison" popup shown alongside a gear item's normal tooltip
+// wherever the player is looking at gear they DON'T currently have on (Inventory backpack,
+// Storage Vault, Auction House, and -- as a bonus, same helper -- the Merchant's stock and
+// Blacksmith's sell list), so they can tell at a glance whether it beats what's equipped
+// without leaving the screen to check. A ring compares against BOTH ring slots (there's no
+// single "the" equipped ring), everything else maps 1:1 onto its own equip slot.
+function gearComparisonContent(inst){
+  const slotsToCompare=inst.slot==="ring"?["ring1","ring2"]:[inst.slot];
+  const nodes=[h("div",{style:{fontWeight:"bold",marginBottom:"4px"}},["Comparison"])];
+  for(const slotKey of slotsToCompare){
+    const equipped=PS.equipped[slotKey];
+    const label=IF.slotLabel(slotKey);
+    if(!equipped){
+      nodes.push(h("div",{class:"muted",style:{marginBottom:"4px"}},[`${label}: (nothing equipped)`]));
+    } else {
+      nodes.push(h("div",{style:{marginBottom:"4px"}},[
+        h("div",{style:{fontWeight:"bold"}},[`${label}: ${IF.displayName(equipped)} (T${equipped.tier})`]),
+        h("div",{style:{whiteSpace:"pre-line"}},[IF.tooltipText(equipped)]),
+      ]));
+    }
+  }
+  return nodes;
+}
+// Wraps an already-built tooltip-trigger element (e.g. the bold item-name div that already
+// carries the normal .tooltip/data-tip pair) so hovering it also reveals the Comparison box
+// beside it -- see the .gear-compare-wrap/.compare-box CSS rules for the positioning (pure
+// CSS :hover toggle, no JS mouse listeners needed, consistent with how every other tooltip
+// in this file already works).
+function gearCompareWrap(triggerEl, inst){
+  return h("div",{class:"gear-compare-wrap"},[
+    triggerEl,
+    h("div",{class:"compare-box"},gearComparisonContent(inst)),
+  ]);
+}
+
 /* ================= INVENTORY ================= */
 
 function gearRow(inst, actions){
   return h("div",{class:"tile gear-row",style:{marginBottom:"6px"}},[
     gearIcon(inst),
     h("div",{class:"col",style:{flex:"1",minWidth:"0",gap:"2px"}},[
-      h("div",{class:"tooltip rarity-"+inst.rarity,style:{fontWeight:"bold"},"data-tip":IF.tooltipText(inst)},[IF.displayName(inst)+` (T${inst.tier})`]),
+      gearCompareWrap(h("div",{class:"tooltip rarity-"+inst.rarity,style:{fontWeight:"bold"},"data-tip":IF.tooltipText(inst)},[IF.displayName(inst)+` (T${inst.tier})`]), inst),
       // v0.14: a plain "Ring"/"Head"/"Weapon"/etc. category subtext under every gear name,
       // so new players don't have to guess an item's slot from its flavorful base name
       // (e.g. "Rare Withered Petal Ring of Fire" -> "Ring").
@@ -4681,7 +5212,7 @@ function backpackGearGrid(){
     }
     const canEquip=PS.canEquipGear(inst);
     const borderColor=isReorderSrc?"#4ac6ff":(RARITY_BORDER_COLORS[inst.rarity]||"var(--border)");
-    grid.appendChild(h("div",{
+    const tile=h("div",{
       class:"tile tooltip",
       style:{width:"38px",height:"38px",padding:"0",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",border:`2px solid ${borderColor}`},
       "data-tip":`${IF.tooltipText(inst)}\n${IF.categoryLabel(inst)}`,
@@ -4697,7 +5228,10 @@ function backpackGearGrid(){
         const label=PS.wouldSwap(inst)?"Swap":"Equip";
         askConfirm(`${label} ${IF.displayName(inst)}?`,()=>{ PS.equipGear(inst.instance_id); autosave(); render(); },{confirmLabel:label,danger:false});
       },
-    },[gearIcon(inst,26)]));
+    },[gearIcon(inst,26)]);
+    // v0.17.3 (#10): see gearCompareWrap()'s comment -- lets a player check a backpack
+    // item against whatever's currently equipped in that slot without leaving this screen.
+    grid.appendChild(gearCompareWrap(tile, inst));
   }
   return grid;
 }
@@ -5062,6 +5596,89 @@ function vaultSwapSlots(slotA,slotB){
   render();
 }
 
+/* ================= GEAR FILTERS (v0.17.3 #6/#11) ================= */
+/* Shared by the Storage Vault and the Auction House -- a Tier dropdown, an Item Type
+   dropdown, and a multiselect stat toggle row, all combined with AND logic (an item must
+   satisfy every active condition to "match"). Non-gear entries (consumables, herbs) never
+   match a gear filter, since Tier/Type/Stats are gear-only concepts. Per Gwen's spec, a
+   match doesn't hide non-matching entries -- it visually mutes everything that DOESN'T
+   match (see gearFilterOpacity() below), so the contrast highlights what does. */
+
+// Nicer display labels than IF.GEAR_CATEGORY_LABELS provides for a plain "ring" slot (that
+// map only has "ring1"/"ring2" for the two EQUIPPED DOLL positions -- an actual generated
+// ring item's own .slot is just "ring", see IF.GENERATION_SLOTS/IF.generate()).
+const GEAR_FILTER_SLOT_LABELS={weapon:"Weapon",head:"Head",shoulders:"Shoulders",armor:"Armor",pants:"Pants",gloves:"Gloves",boots:"Boots",ring:"Ring",amulet:"Amulet",belt:"Belt"};
+
+function gearMatchesFilter(inst, filter){
+  if(!inst) return false; // consumables/herbs: never match a gear-only filter
+  if(filter.tier && inst.tier!==filter.tier) return false;
+  if(filter.slot && inst.slot!==filter.slot) return false;
+  if(filter.stats && filter.stats.length){
+    const instStats=new Set((inst.affixes||[]).map(a=>a.stat));
+    for(const s of filter.stats) if(!instStats.has(s)) return false;
+  }
+  return true;
+}
+function gearFilterActive(filter){ return !!(filter.tier || filter.slot || (filter.stats&&filter.stats.length>0)); }
+// A single reusable "is this entry visually muted right now" check -- entry may be a gear
+// instance directly, or null/undefined (a non-gear entry, or an empty slot -- never muted,
+// there's nothing there to contrast against).
+function gearFilterOpacity(inst, filter){
+  // Order matters: check whether a filter is active FIRST. gearMatchesFilter() already
+  // returns false for a missing/non-gear `inst` -- with no filter active, that would
+  // wrongly mute every consumable/herb/empty slot even with nothing selected. With a
+  // filter active, that same false is exactly right: non-gear entries can't satisfy a
+  // gear-only filter, so they get muted along with any non-matching gear.
+  if(!gearFilterActive(filter)) return 1;
+  return gearMatchesFilter(inst,filter) ? 1 : 0.25;
+}
+
+// Builds the filter row itself: Tier select, Type select, and a row of stat toggle chips.
+// `filter` is mutated in place (it's a plain object stashed on GF, e.g. GF._vaultFilter),
+// `onChange` is called (expected to re-render) after every control changes.
+function gearFilterPanel(filter, onChange){
+  const tierSelect=h("select",{});
+  tierSelect.appendChild(h("option",{value:""},["All Tiers"]));
+  for(let t=1;t<=Balance.ITEM_TIER_MAX;t++) tierSelect.appendChild(h("option",{value:String(t)},[`T${t}`]));
+  tierSelect.value=filter.tier?String(filter.tier):"";
+  tierSelect.addEventListener("change",()=>{ filter.tier=tierSelect.value?parseInt(tierSelect.value,10):""; onChange(); });
+
+  const slotSelect=h("select",{});
+  slotSelect.appendChild(h("option",{value:""},["All Item Types"]));
+  for(const slot of IF.GENERATION_SLOTS) slotSelect.appendChild(h("option",{value:slot},[GEAR_FILTER_SLOT_LABELS[slot]||slot]));
+  slotSelect.value=filter.slot||"";
+  slotSelect.addEventListener("change",()=>{ filter.slot=slotSelect.value||""; onChange(); });
+
+  const statsRow=h("div",{class:"row gap",style:{flexWrap:"wrap",marginTop:"6px"}});
+  for(const stat of Balance.AFFIX_POOL){
+    const selected=filter.stats.includes(stat);
+    statsRow.appendChild(h("button",{
+      style:{padding:"3px 9px",fontSize:".85em",background:selected?"var(--accent,#3a6a2a)":undefined,borderColor:selected?"#7ac67a":undefined},
+      title:selected?`Click to remove ${IF.affixLabel(stat)} from the filter`:`Click to require ${IF.affixLabel(stat)}`,
+      onClick:()=>{
+        if(selected) filter.stats=filter.stats.filter(s=>s!==stat);
+        else filter.stats=[...filter.stats,stat];
+        onChange();
+      },
+    },[IF.affixLabel(stat)]));
+  }
+
+  const clearBtn=h("button",{
+    disabled:!gearFilterActive(filter),
+    onClick:()=>{ filter.tier=""; filter.slot=""; filter.stats=[]; onChange(); },
+  },["Clear Filters"]);
+
+  return h("div",{class:"panel",style:{marginBottom:"10px"}},[
+    h("div",{class:"row gap",style:{alignItems:"center",flexWrap:"wrap"}},[
+      h("span",{class:"muted"},["Filter:"]),
+      tierSelect,
+      slotSelect,
+      clearBtn,
+    ]),
+    statsRow,
+  ]);
+}
+
 function screenVault(){
   const root=h("div",{});
   root.appendChild(h("div",{class:"row gap"},[iconBadge(`<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><rect x="6" y="14" width="28" height="20" rx="3" fill="#5a4028" stroke="#2a2a2a" stroke-width="1.5"/><rect x="6" y="14" width="28" height="6" fill="#7a5a38"/><circle cx="20" cy="26" r="4" fill="#2a2a2a"/><rect x="18.5" y="26" width="3" height="6" fill="#2a2a2a"/></svg>`,52),h("div",{},[h("h2",{},["Storage Vault"]),h("div",{class:"flavor"},["\"Whatever you leave here waits for any hero of yours who comes looking, it's shared across every character on your account.\""])])]));
@@ -5078,6 +5695,12 @@ function screenVault(){
 
   const capacity=Net.vaultCapacity||200;
   root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},[`${Net.vaultCache.length}/${capacity} slots used, 20x10, shared across every character on this account.`]));
+
+  // v0.17.3 (#6): Tier/Item Type/Stat filters -- see gearFilterPanel()'s comment block for
+  // the shared implementation (also used by the Auction House). GF._vaultFilter persists
+  // for the session (not saved to the server) the same way GF._vaultReorderMode does.
+  if(!GF._vaultFilter) GF._vaultFilter={tier:"",slot:"",stats:[]};
+  root.appendChild(gearFilterPanel(GF._vaultFilter, render));
 
   // v0.17.1 (#13, credit: Marudok for suggesting manual item repositioning): a toggle that
   // switches the grid's click behavior from "click = withdraw" to "click = pick up / drop
@@ -5133,13 +5756,19 @@ function screenVault(){
         else { askConfirm(`Withdraw ${label} back to your backpack?`,()=>vaultWithdraw(i),{confirmLabel:"Withdraw",danger:false}); }
       };
     }
-    grid.appendChild(h("div",{
+    // v0.17.3 (#6): mute (don't hide) any slot that doesn't match the active filter, so
+    // the ones that DO match stand out by contrast -- see gearFilterOpacity()'s comment.
+    const filterOpacity=gearFilterOpacity(entry&&entry.kind==="gear"?entry.inst:null, GF._vaultFilter);
+    const vaultTile=h("div",{
       class:"tile"+(entry?" tooltip":"")+(entry&&entry.kind==="gear"?" rarity-"+entry.inst.rarity:""),
       style:{width:"32px",height:"32px",padding:"0",display:"flex",alignItems:"center",justifyContent:"center",cursor:(entry||GF._vaultReorderMode)?"pointer":"default",
-        border:isReorderSrc?"2px solid #4ac6ff":undefined, boxSizing:"border-box"},
+        border:isReorderSrc?"2px solid #4ac6ff":undefined, boxSizing:"border-box", opacity:String(filterOpacity)},
       "data-tip":tip||undefined,
       onClick:onClickFn,
-    },[icon]));
+    },[icon]);
+    // v0.17.3 (#10): only gear entries get a meaningful Comparison box (consumables/herbs
+    // have no equip slot to compare against) -- see gearCompareWrap()'s comment.
+    grid.appendChild(entry&&entry.kind==="gear"?gearCompareWrap(vaultTile,entry.inst):vaultTile);
   }
   root.appendChild(grid);
 
@@ -5389,6 +6018,10 @@ function screenAuctionHouse(){
   ]));
 
   root.appendChild(h("h3",{},["Current Listings"]));
+  // v0.17.3 (#11): same Tier/Item Type/Stat filter as the Storage Vault -- see
+  // gearFilterPanel()'s comment block. GF._ahFilter persists for the session.
+  if(!GF._ahFilter) GF._ahFilter={tier:"",slot:"",stats:[]};
+  root.appendChild(gearFilterPanel(GF._ahFilter, render));
   if(Net.auctionCache===null||Net.auctionCache===undefined){
     root.appendChild(h("div",{class:"muted"},["Loading..."]));
     Net.fetchAuction().then(render).catch(()=>{ setToast("Could not load the auction house."); render(); });
@@ -5401,14 +6034,18 @@ function screenAuctionHouse(){
       // v0.13: gear listings get the same hover tooltip (full stat breakdown) the
       // Character Sheet already shows, so buyers can inspect an item before spending gold.
       const isGear=listing.type==="gear" && listing.item;
+      // v0.17.3 (#10): gear listings also get the Comparison box against whatever the buyer
+      // has equipped in that slot -- see gearCompareWrap()'s comment.
       const labelEl=isGear
-        ? h("span",{class:"tooltip rarity-"+listing.item.rarity,style:{fontWeight:"bold"},"data-tip":IF.tooltipText(listing.item)},[label])
+        ? gearCompareWrap(h("span",{class:"tooltip rarity-"+listing.item.rarity,style:{fontWeight:"bold"},"data-tip":IF.tooltipText(listing.item)},[label]), listing.item)
         : h("span",{style:{fontWeight:"bold"}},[label]);
       // v0.14: a plain-language category subtext (Herb/Ring/Potion/etc.) on every listing,
       // same reasoning as the gear/consumable rows elsewhere -- buyers browsing the block
       // shouldn't have to guess what a flavorful item name actually is.
       const categoryLabel=isGear?IF.categoryLabel(listing.item):(listing.type==="herb"?"Herb":DL.itemCategoryLabel(listing.item_key));
-      root.appendChild(h("div",{class:"tile row",style:{marginBottom:"6px",justifyContent:"space-between"}},[
+      // v0.17.3 (#11): mute (not hide) any listing that doesn't match the active filter.
+      const filterOpacity=gearFilterOpacity(isGear?listing.item:null, GF._ahFilter);
+      root.appendChild(h("div",{class:"tile row",style:{marginBottom:"6px",justifyContent:"space-between",opacity:String(filterOpacity)}},[
         h("div",{},[labelEl, categoryLabel?h("span",{class:"muted",style:{fontSize:".85em"}},[` (${categoryLabel})`]):null, h("span",{class:"muted"},[`, listed by ${listing.seller_character_name} (${listing.seller_username})`])]),
         h("div",{class:"row gap"},[
           h("span",{class:"gold-text"},[`${listing.price}g`]),
@@ -5567,6 +6204,15 @@ function screenMasterTrial(){
     h("div",{class:"flavor",style:{margin:"0"}},["Tread carefully, a wrong step is a costly investment."]),
   ]));
 
+  // v0.17.3 (#3): tell the player up front that failing isn't pure loss -- every fall
+  // permanently banks +1 starting stat point for their next Level 1 at this tier (reset
+  // once they finally cross), so the info is visible right where the decision to keep
+  // trying (or retreat) actually gets made.
+  const failStreak=PS.bridge_fail_streak||0;
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"10px"}},[
+    `A new attempt at this tier starts with ${Balance.STARTING_STAT_POINTS} unspent stat points. Every failed attempt permanently adds +1 more (currently +${failStreak}, for ${Balance.STARTING_STAT_POINTS+failStreak} total) until you successfully cross.`,
+  ]));
+
   function attemptStep(plankIndex){
     if(failed) return;
     const stepIdx=progress.discoveredSides.length;
@@ -5588,7 +6234,15 @@ function screenMasterTrial(){
       // progress.stepFailedPlanks[i] for every step including completed ones, keeps
       // showing the full red-and-green history of that step permanently -- exactly the
       // "overview of where and how many times they failed" Gwen asked for.
-      autosave();
+      // v0.17.3 (#12) HOTFIX: the crossing-complete branch below calls resolveMasterTrial()
+      // right after this, which resets last_bridge_steps to 0 -- saving HERE too (before
+      // that reset) used to fire two autosave() calls back to back on the exact step that
+      // completes a crossing, one still carrying the stale pre-reset last_bridge_steps.
+      // Two saves racing on the network could land out of order and let the stale one win,
+      // which is exactly the "shows old tier's step count right after promoting" bug Gwen
+      // reported. Skip this intermediate save on the crossing-completing step -- the single
+      // save inside the block below (with the reset already applied) covers it.
+      if(progress.discoveredSides.length<rows) autosave();
       if(progress.discoveredSides.length>=rows){
         const nameBefore=c.display_name, levelBefore=PS.level;
         const result=PS.resolveMasterTrial(true);
@@ -5735,6 +6389,19 @@ function screenAdminPanel(){
 // Kept brief on purpose -- players don't need the internal blow-by-blow, just the
 // highlights per version, most recent first.
 const CHANGELOG=[
+  { version:"v0.17.3", notes:[
+    "The Gambling Goblin's price per pull dropped from 800g to 200g, back in reach for regular play.",
+    "New characters (and every fresh Level 1 from a Broken Bridge Trial reroll) now start with 3 unspent stat points instead of 0, so there's an immediate build choice from the very first level. Every failed trial attempt permanently adds +1 more on top of that, until you finally cross and it resets back down to the base amount.",
+    "New Gameplay Guide page walking through the core loop (Venture -> loot/level -> gear up -> Broken Bridge Trial), linked from the character-select screen alongside the existing guides.",
+    "Storage Vault now has the same Tier/Slot/Stat filter panel as the Auction House, so a big stash is much easier to search.",
+    "Fixed a bug where the Quad Damage shrine buff's icon indicator could disappear if you changed maze levels mid-buff.",
+    "Potions no longer heal instantly on click -- a potion's total heal amount is now delivered gradually over 5 seconds, with a live \"healing +X/sec\" indicator and a smoother HP bar to match.",
+    "Monster difficulty from area level 10 onward now scales up an extra +10 percentage points (additive, not compounding) per level on top of the existing curve, aimed squarely at Tier 2's early levels feeling too easy -- verified with a new automated balance-test harness before shipping, and reusable any time this needs revisiting.",
+    "New: hovering gear in your Backpack, the Storage Vault, or an Auction House listing now shows a side-by-side \"Comparison\" against whatever you currently have equipped in that slot.",
+    "Fixed a bug where a character freshly promoted to a new tier could still show their old tier's Broken Bridge Trial step count on the leaderboard, wrongly outranking players with genuine progress at the new tier.",
+    "Leaderboard overhaul: it's now three tabs. \"Ladder Progression\" is the original ranked list (gold removed from its row, see the new Gold tab). \"Skill Progression\" shows the top 5 characters for each of the 6 weapon-type proficiencies plus Herbalism, ranked by skill level. \"Gold\" lists every account by its shared gold total. Every row also has a magnifying-glass \"Inspect Player\" button for a read-only look at that character's equipped gear, attributes, and skill progression -- it's strictly look-only, with no way to move, equip, sell, or otherwise touch another player's items or data.",
+    "Audited the Kill Streak Counter: it only ever grants Magic Find per kill now, matching what's actually advertised in the UI (the old stat/loot-growth wiring some players remembered was already dead code).",
+  ]},
   { version:"v0.17.2", notes:[
     "Stronghold guardians' XP bonus reverted from 4x down to 1.5x -- a quick balance check from ImpulseBE found 4x was handing out way more XP than the fight's actual difficulty warranted.",
     "Strongholds are no longer a guaranteed find in every single maze -- they now spawn on roughly 40% of mazes, making a find feel more special.",
@@ -6022,6 +6689,32 @@ function screenHerbalismGuide(){
   return root;
 }
 
+/* ================= GAMEPLAY GUIDE (v0.17.3 #4) ================= */
+/* Same idea as the Itemization/Herbalism guides above, but for the core game loop itself --
+   what you're actually doing minute to minute and how class progression works end to end.
+   Reachable from the character select screen (see screenMainMenuSlots()'s guide row). */
+
+function screenGameplayGuide(){
+  const root=h("div",{});
+  root.appendChild(h("h2",{},["Gameplay Guide"]));
+  root.appendChild(h("div",{class:"lore"},["New to Wandrian? Here's the loop: what you do, why the Broken Bridge Trial matters, and what a Kill Streak actually gets you."]));
+  root.appendChild(h("button",{style:{marginBottom:"10px"},onClick:()=>{ GF.goto(GF._preGameplayScreen||"mainMenuSlots"); }},["← Back"]));
+
+  root.appendChild(h("h3",{},["The Core Loop"]));
+  root.appendChild(h("div",{class:"panel",style:{marginBottom:"16px"}},[
+    h("div",{style:{marginBottom:"8px"}},[`You Venture out from Town into a maze full of grass, obstacles, chests, shrines, and the occasional Stronghold. Fights happen on grass tiles as you explore. Somewhere in the maze is an exit tile -- like every other tile, it's hidden by the fog of war until you actually stumble across it, so finding it is a real discovery, not a beeline. Stepping onto it advances you to the next area level (a tougher, freshly generated maze) and is how you gain levels along the way.`]),
+    h("div",{style:{marginBottom:"8px"}},[`Once you reach Level ${Balance.trialLevelRequirement(1)} on your current class, the Broken Bridge Trial opens up back in Town. Cross it, and you're promoted to Level 1 of the next class tier on your path (see the Player Classes page for the full chain). Fall off a plank, and you're instead rerolled back to Level 1 of your CURRENT class tier -- but the bridge remembers every safe (and every broken) plank you've already found, so a retry never has to repeat a mistake, and eventually the last untried plank at a step is guaranteed safe.`]),
+    h("div",{},[`Failing an attempt isn't pure loss: every failure permanently adds +1 to the starting stat points your next Level 1 begins with (base ${Balance.STARTING_STAT_POINTS}, see the Broken Bridge Trial screen for your current running total), so repeated attempts at a tough tier make each retry a little stronger. That bonus resets back down to the base ${Balance.STARTING_STAT_POINTS} the moment you finally cross.`]),
+  ]));
+
+  root.appendChild(h("h3",{},["Kill Streak"]));
+  root.appendChild(h("div",{class:"panel"},[
+    h("div",{style:{marginBottom:"8px"}},[`Every monster you defeat without returning to Town extends your Kill Streak by 1, shown right on your Character Sheet stat panel. Its only effect is +${Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL}% Magic Find per kill in the streak (better odds at higher-rarity gear drops) -- it does NOT make monsters tougher or change how much gold, XP, or loot quantity you get per kill. You'll see the current bonus tick up next to the streak count after every kill, for as long as you keep venturing without heading back to Town.`]),
+  ]));
+
+  return root;
+}
+
 /* ================= SCREEN ROUTER ================= */
 
 const SCREENS={
@@ -6033,6 +6726,7 @@ const SCREENS={
   classProgression: screenClassProgression,
   graveyard: screenGraveyard,
   leaderboard: screenLeaderboard,
+  inspectPlayer: screenInspectPlayer,
   town: screenTown,
   maze: screenMaze,
   combat: screenCombat,
@@ -6051,6 +6745,7 @@ const SCREENS={
   changelog: screenChangelog,
   itemization: screenItemization,
   herbalism: screenHerbalismGuide,
+  gameplayGuide: screenGameplayGuide,
 };
 
 // v0.13: town regen tick, reworked -- no more "resting" toggle to click, it's simply
@@ -6127,6 +6822,31 @@ setInterval(()=>{
     if(!refreshStatHeaderInPlace()) render();
   }
 },1000);
+
+// v0.17.3 (#8): Health Potion heal-over-time tick. Deliberately NOT gated to
+// REGEN_ACTIVE_SCREENS (unlike the campfire regen tick above) -- a potion drunk mid-combat
+// or mid-maze has to keep delivering its heal wherever the player is, same "runs on every
+// screen" reasoning as the poison drain tick just above. Runs at Balance.POTION_HEAL_
+// TICK_MS (200ms, 5x/sec) rather than once a second purely so the HP bar visibly creeps up
+// in small smooth steps instead of jumping in 5 chunky once-a-second increments -- see
+// PS.tickActiveHeals()/PS.getHealPerSecond() for the actual math. `healSaveCounter` throttles
+// PS.saveGame() to roughly once a second (every 5th sub-tick) even while healing is active,
+// same spirit as the regen tick's cadence -- there's no need to hit the network 5x/sec for a
+// handful of HP per sub-tick, and Net.saveCharacter's own coalescing (see its declaration)
+// means a slightly-stale in-flight save is never actually lost, just superseded.
+let healSaveCounter=0;
+setInterval(()=>{
+  if(PS.current_slot<0) return;
+  if(!PS.active_heals || !PS.active_heals.length) return;
+  const hadHeals=PS.active_heals.length>0;
+  const changed=PS.tickActiveHeals();
+  const stillHealing=PS.active_heals.length>0;
+  healSaveCounter++;
+  if((healSaveCounter%5===0) || (hadHeals && !stillHealing)) PS.saveGame();
+  if(changed){
+    if(!refreshStatHeaderInPlace()) render();
+  }
+},Balance.POTION_HEAL_TICK_MS);
 
 (async function boot(){
   const resumed = await Net.tryResumeSession();
