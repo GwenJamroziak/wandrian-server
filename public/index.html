@@ -17,6 +17,8 @@
   --hp:#d94a4a; --stamina:#eae6d9; --xp:#9e59d9; --gold:#e0b23d;
   --bg:#12140f; --panel:#1c2018; --panel2:#242a1e; --border:#3a4230;
   --text:#e8e4d8; --muted:#9a9686; --accent:#4a7a3a;
+  /* v0.18.1 (#13): shared green/red for gear-compare stat deltas (Diablo-3-style +N/-N). */
+  --good:#6fcf6f; --bad:#e0685f;
   /* v0.17 (#3): HP text/bar turn this color while Poisoned, instead of staying HP-red, so
      the ongoing drain reads as "a different status" rather than looking like normal combat
      damage. */
@@ -27,7 +29,14 @@ body{
   margin:0; font-family:Georgia,'Times New Roman',serif; background:radial-gradient(ellipse at 50% 20%,#2a3322,#0c0e09 75%);
   color:var(--text); min-height:100vh;
 }
-#app{max-width:1100px;margin:0 auto;padding:28px 24px 60px;}
+/* v0.18.1 (#5): general UI transition fluency -- a lightweight opacity fade whenever the
+   player navigates to a genuinely different screen via GF.goto(), so screens ease into
+   view instead of snapping. Deliberately NOT tied to every render() call (there are ~150
+   of those -- quantity steppers, tab switches, equip/sell buttons, the 30s active-players
+   poll, etc -- which must stay instant or this would flash constantly); see GF.goto() for
+   how the opacity is toggled. Same "flip a starting value, then flip to the real value on
+   the next tick" trick already used by animateXpBarGrowth() and the maze overlay fade. */
+#app{max-width:1100px;margin:0 auto;padding:28px 24px 60px;transition:opacity .18s ease;}
 h1,h2,h3{margin:0 0 6px;}
 h1{font-size:2.4em;color:#fff;text-shadow:0 0 12px rgba(255,180,80,.35);}
 .subtitle{color:#f0d9a0;font-size:1.05em;margin-bottom:10px;}
@@ -99,6 +108,9 @@ input[type=checkbox]:checked::after{content:"✓";position:absolute;top:-3px;lef
    it automatically shrinks the instant the player takes damage mid-heal, with no extra
    bookkeeping needed here. */
 .bar-hp-heal-preview{background:#a85a5a;}
+/* v0.18.1 (#20): stamina potions gained the exact same gradual-heal preview overlay as HP
+   potions above -- same reasoning, just tinted toward the stamina bar's own hue. */
+.bar-stamina-heal-preview{background:#4a7a8a;}
 /* v0.18 (#6): the once-a-second town HP/Stamina regen tick used to just jump the bar to its
    new width every 1000ms with the fast .25s transition above -- the bar would ease for a
    quarter-second then sit dead still for the other three-quarters, reading as a visible
@@ -140,8 +152,16 @@ a.back-link,.linklike{color:#cbd9a0;cursor:pointer;text-decoration:underline;}
 .gear-tier-badge{position:absolute;top:-3px;left:-3px;min-width:13px;padding:0 2px;font-size:9px;line-height:13px;text-align:center;font-weight:bold;color:#fff;background:rgba(0,0,0,.8);border:1px solid rgba(255,255,255,.35);border-radius:3px;pointer-events:none;z-index:2;}
 .services{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:14px 0;}
 .maze-wrap{display:flex;gap:20px;align-items:flex-start;}
-.maze-grid{display:grid;gap:1px;background:#000;border:2px solid #333;}
+.maze-grid{display:grid;gap:1px;background:#000;border:2px solid #333;position:relative;}
 .maze-tile{width:34px;height:34px;}
+/* v0.18.1 (#21): the player/roaming-mob overlay markers -- see screenMaze()'s comment on
+   why these are now separate absolutely-positioned elements instead of being baked into
+   whichever grid-cell div currently holds them. transition on left/top is what makes
+   animateMazeMovers()'s snap-old-position-then-set-new-position trick actually glide. */
+.maze-mover{position:absolute;width:34px;height:34px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;font-size:16px;pointer-events:none;transition:left .18s linear,top .18s linear;z-index:5;}
+.maze-mover-player{background:#e0c96a;}
+/* .maze-mover-roamer's background comes from ROAMING_MOB_COLOR inline in screenMaze(), not
+   here, so the two never drift out of sync with each other. */
 .side-panel{min-width:260px;display:flex;flex-direction:column;gap:8px;}
 /* v0.16 (#332): on-screen D-pad for maze navigation, brought back specifically for
    touch/mobile -- keyboard arrow keys (see the maze's keydown handler) already cover
@@ -186,10 +206,21 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 .gear-compare-wrap .compare-box{
   display:none;position:absolute;bottom:120%;left:225px;background:#000;color:#fff;
   padding:6px 8px;border-radius:4px;font-size:.8em;width:220px;z-index:11;
-  box-shadow:0 2px 8px rgba(0,0,0,.6);border:1px solid var(--border);
+  box-shadow:0 2px 8px rgba(0,0,0,.6);border:1px solid var(--accent);
 }
 /* v0.18 (#15): same tap-to-open mobile fix as .tooltip above, same shared handler. */
 .gear-compare-wrap:hover .compare-box,.gear-compare-wrap.compare-open .compare-box{display:block;}
+/* v0.18.1 (#12): distinctive title for the "Currently Equipped" compare box (was a plain
+   bold "Comparison" label) -- uppercase/letter-spaced/accent-colored with its own underline
+   so it reads as a clearly different kind of box than the plain black .tooltip beside it. */
+.compare-box .compare-title{
+  font-weight:bold;color:var(--accent);text-transform:uppercase;font-size:.82em;
+  letter-spacing:.04em;margin-bottom:5px;padding-bottom:4px;border-bottom:1px solid var(--border);
+}
+/* v0.18.1 (#13): Diablo-3-style per-stat delta coloring inside the compare box -- green for
+   a stat the hovered item improves on, red for one it falls behind on. */
+.compare-box .stat-delta-good{color:var(--good);font-weight:bold;}
+.compare-box .stat-delta-bad{color:var(--bad);font-weight:bold;}
 .plank-row{display:flex;gap:8px;margin:6px 0;}
 .plank-row button.locked-safe{background:#254a25;color:#9fe89f;border-color:#3a7a3a;}
 .plank-row button.locked-fail{background:#4a2020;color:#e89f9f;border-color:#7a3a3a;}
@@ -222,12 +253,25 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 .maze-overlay-grid{position:absolute;top:0;left:0;width:100%;height:100%;background:#000;display:flex;align-items:center;justify-content:center;z-index:20;opacity:1;transition:opacity 1.3s ease;text-align:center;}
 .maze-overlay-grid.fade{opacity:0;}
 .maze-overlay-text{color:#e8d24a;font-size:1.8em;font-weight:bold;letter-spacing:1.5px;text-shadow:0 0 18px rgba(232,210,74,.6);padding:0 10px;}
-.venture-card{padding:18px;display:flex;flex-direction:column;gap:12px;}
+/* v0.18.1 (#33): the Venture and Kindle-the-Bonfire cards are meant to line up as a matched
+   pair (same width, same rough height) since they sit stacked in the same town quadrant --
+   but flex:1 used to live bundled inside .venture-clickable, which the Bonfire card only
+   carries while UNkindled (see kindleBonfirePanel()). Once the bonfire was actively kindled
+   it lost .venture-clickable (it's no longer clickable -- there's nothing to click), and
+   with it lost flex:1, so the card shrank to fit its text instead of matching the Venture
+   card's width above it. flex:1 is now its own class (.venture-fill) applied to BOTH cards
+   unconditionally, independent of whether a card happens to be clickable right now.
+   .venture-card also gets a min-height so the "Logs (N)"/"Area Lv" chevron sidebars (which
+   stretch to match their row via .venture-row's align-items:stretch) don't end up two very
+   different heights depending on whether the bonfire's longer unkindled description text is
+   showing or not. */
+.venture-card{padding:18px;display:flex;flex-direction:column;gap:12px;min-height:64px;box-sizing:border-box;}
 .venture-title{font-size:1.25em;font-weight:bold;}
 .venture-row{align-items:stretch;}
-.venture-clickable{flex:1;cursor:pointer;transition:.12s;}
+.venture-fill{flex:1;}
+.venture-clickable{cursor:pointer;transition:.12s;}
 .venture-clickable:hover{background:#28331e;}
-.venture-chevrons{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:6px 10px;}
+.venture-chevrons{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:6px 10px;box-sizing:border-box;}
 .venture-chevrons button{padding:2px 10px;font-size:1em;line-height:1;}
 .class-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:0 14px;position:relative;}
 .class-grid>*{min-width:0;}
@@ -399,11 +443,13 @@ const ITEMS = {
   // literal Tier 1 key rather than introduced as a new "stronghold_key_t1" -- any keys a
   // player already had stashed before this patch shipped are automatically, correctly
   // Tier 1 keys with zero migration needed and zero risk of silently vanishing.
-  stronghold_key:{name:"Stronghold Key (Tier 1)",type:"consumable",sell_value:150},
-  stronghold_key_t2:{name:"Stronghold Key (Tier 2)",type:"consumable",sell_value:300},
-  stronghold_key_t3:{name:"Stronghold Key (Tier 3)",type:"consumable",sell_value:450},
-  stronghold_key_t4:{name:"Stronghold Key (Tier 4)",type:"consumable",sell_value:600},
-  stronghold_key_t5:{name:"Stronghold Key (Tier 5)",type:"consumable",sell_value:750},
+  // v0.18.1 (#30): Roman-numeral tier tags sitewide -- "(Tier 2)" becomes "(II)", matching
+  // the gear-tile tier badge's I-V numerals (see TIER_ROMAN_NUMERALS/tierRomanNumeral()).
+  stronghold_key:{name:"Stronghold Key (I)",type:"consumable",sell_value:150},
+  stronghold_key_t2:{name:"Stronghold Key (II)",type:"consumable",sell_value:300},
+  stronghold_key_t3:{name:"Stronghold Key (III)",type:"consumable",sell_value:450},
+  stronghold_key_t4:{name:"Stronghold Key (IV)",type:"consumable",sell_value:600},
+  stronghold_key_t5:{name:"Stronghold Key (V)",type:"consumable",sell_value:750},
   // v0.13: fuel for "Kindle the Bonfire" in town (see PS.kindleBonfire) -- each log fed
   // in adds Balance.DRY_LOG_REGEN_PER_UNIT to both HP and Stamina regen for 10 minutes.
   // Same plain "consumable" pattern as stronghold_key: rides the stackable-item plumbing
@@ -727,6 +773,25 @@ const Balance = {
   // clip, instead of them being buried under 5x rarer odds of the same total shrine rate.
   MAZE_SHRINE_CHANCE_PER_TILE:0.002,
   MAZE_HERB_CHANCE_PER_TILE:0.002, MAZE_TRAPDOOR_CHANCE_PER_TILE:0.005,
+  // v0.18.2 (#6): non-moving critter encounters -- a small, harmless creature you can
+  // squash (Forest Reputation -1, see PS.adjustForestReputation()) or spare (+1). Rolled in
+  // the same per-tile sequence as chest/shrine/herb/trapdoor above, at roughly the same
+  // rarity as a shrine.
+  MAZE_CRITTER_CHANCE_PER_TILE:0.002,
+  // v0.18.2 (#6): "1 strike = dead" per Gwen's spec -- kept as its own named constant (not a
+  // literal 1) specifically so a future patch can make tougher critters take more hits
+  // ("so we can increase the squash count later"), reusing the exact same
+  // hits_done/hits_required progress-bar pattern chests already use, without touching the
+  // screen's rendering code at all.
+  CRITTER_HITS_REQUIRED:1,
+  // v0.18.2.1 CORRECTION: Gwen's original spec described a flat "+10 XP per point" bonus,
+  // but the intent was actually a PERSISTENT PERCENTAGE buff -- +10% experience gained on
+  // every kill for as long as you're exploring that tier's forest, per point of POSITIVE
+  // Forest Reputation, stacking multiplicatively on top of (not replacing) every other XP
+  // multiplier (Community XP, shrines, gear XP Find). Negative reputation never reduces XP;
+  // see PS.getForestReputationXpMult()/getForestReputationExtraRoamers() for how each
+  // direction is actually spent.
+  FOREST_REPUTATION_XP_PCT_PER_POINT:10,
   STAMINA_MAX_BASE:100.0, STAMINA_COST_PER_STEP:1.0,
   SHRINE_STAMINA_BUFF_PCT:1.0, SHRINE_XP_BUFF_MULT:1.5, SHRINE_XP_BUFF_ENCOUNTERS:20,
   // v0.17.1 (#12): three new shrine types, each an even 1-in-5 outcome alongside the
@@ -753,6 +818,14 @@ const Balance = {
   // Balance.trapShouldPoison()), giving new players real time to prepare before it becomes
   // a factor.
   POISON_TRAP_MIN_AREA_LEVEL:6, POISON_TRAP_CHANCE_FROM_MIN_LEVEL:0.35,
+  // v0.18.1 (#28): the poison drain tick used to apply a whole second's worth of damage in
+  // one lump every 1000ms, which made the HP bar visibly SNAP downward once a second instead
+  // of draining smoothly -- same jarring effect the Health/Stamina Potion heal-over-time
+  // ticks deliberately avoid by sub-ticking at a much finer interval (see
+  // POTION_HEAL_TICK_MS). POISON_TICK_MS mirrors that same 200ms/5x-per-second cadence so
+  // PS.getPoisonHpPerSec()'s total HP-per-second gets spread across 5 small sub-ticks
+  // instead of landing all at once.
+  POISON_TICK_MS:200,
   // v0.17 (#11): monsters now get a flat chance to block a player's attack outright (no
   // damage dealt that swing), scaling gently with area level -- see Balance.mobBlockChance().
   // 5% at area level 1, +0.5 percentage points per level above that (6.5% at level 4, etc).
@@ -783,7 +856,11 @@ const Balance = {
   // which made them feel routine rather than a special find. Reduced to a 40% chance per
   // maze -- see generateMaze()'s roll before calling placeStronghold().
   STRONGHOLD_SPAWN_CHANCE:0.40,
-  STRONGHOLD_GUARDIAN_HP_MULT:3.0, STRONGHOLD_GUARDIAN_XP_MULT:1.5, STRONGHOLD_KEY_DROP_CHANCE:0.05,
+  // v0.18.2 (#2): tripled from 0.05 -- Strongholds themselves became 2.5x rarer to even
+  // find back in v0.17.2 (100% -> 40% spawn chance per maze, see STRONGHOLD_SPAWN_CHANCE
+  // above), so even with this same 5% per-guardian-kill roll, keys had effectively become
+  // much scarcer overall. Bumping the roll itself compensates directly.
+  STRONGHOLD_GUARDIAN_HP_MULT:3.0, STRONGHOLD_GUARDIAN_XP_MULT:1.5, STRONGHOLD_KEY_DROP_CHANCE:0.15,
   // v0.18 (#2): roaming mobs -- unlike a Stronghold guardian (fixed tile, only engages if
   // you walk up to it) or an ordinary grass encounter (random roll, no visible identity on
   // the map at all), a roaming mob is a persistent, visible monster that actively wanders
@@ -847,7 +924,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.18-web",
+  GAME_VERSION:"v0.18.2.1-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   NPC_BLACKSMITH_NAME:"Grondar Emberhand", NPC_ALCHEMIST_NAME:"Maren Thistlebrew", NPC_MERCHANT_NAME:"Cassius Wraithcoin",
@@ -894,7 +971,10 @@ const Balance = {
   // "Epic"), the one colored blue is now "Magical" (used to say "Rare"), Uncommon drops
   // its prefix entirely since it's meant to read as unremarkable, and Common becomes a
   // plainly low-quality adjective. Legendary is untouched, Gwen didn't ask for it to change.
-  RARITY_DISPLAY_NAMES:{Common:"Crude", Uncommon:"", Rare:"Magical", Epic:"Rare", Legendary:"Legendary"},
+  // v0.18.1: the internal "Uncommon" tier used to display with no adjective at all (an
+  // unnamed placeholder between Crude and Magical) -- it now reads "Common", giving every
+  // rarity band a real player-facing name (Crude < Common < Magical < Rare < Legendary).
+  RARITY_DISPLAY_NAMES:{Common:"Crude", Uncommon:"Common", Rare:"Magical", Epic:"Rare", Legendary:"Legendary"},
   rarityDisplayName(name){ return this.RARITY_DISPLAY_NAMES[name]!=null ? this.RARITY_DISPLAY_NAMES[name] : name; },
   // v0.17.1 (#12): magic_find added -- +% chance to bias a gear drop's rarity roll toward
   // something better (see Balance.rollRarity()'s mfPct param). Its T1 max of 10 run through
@@ -1122,7 +1202,15 @@ const Balance = {
   // only 2+ levels above (a real mismatch, not a mid-run level-up) triggers the existing
   // "tame" 0%-chance message.
   strongholdKeyEligible(mazeDepth, playerLevel){ return (mazeDepth||1)>=(playerLevel||1)-1; },
-  salvageValue(tier,slots){return tier*slots*this.SALVAGE_MATERIALS_PER_SLOT;},
+  // v0.18.2 (#5): salvage already scaled BY tier (linearly), but that meant a Tier 5 item
+  // was only worth 5x a Tier 1 item of the same affix count -- not a strong enough pull to
+  // make hauling higher-tier junk back to town feel meaningfully better than low-tier junk.
+  // Switched the tier term to tier^1.5 so the gap widens the higher you go (Tier 1: 1x,
+  // Tier 2: ~2.8x, Tier 3: ~5.2x, Tier 4: 8x, Tier 5: ~11.2x a same-affix-count Tier 1 item)
+  // without the runaway blowout a flat tier^2 would cause. rerollCost derives from this
+  // same value (see below), so higher-tier rerolls get proportionally pricier too, which
+  // tracks with them being worth more to salvage instead.
+  salvageValue(tier,slots){return Math.round(Math.pow(tier,1.5)*slots*this.SALVAGE_MATERIALS_PER_SLOT);},
   rerollCost(tier,slots){return this.salvageValue(tier,slots)*this.REROLL_MATERIAL_COST_MULT;},
   sellValue(tier,slots){return tier*this.SELL_GOLD_PER_TIER+slots*this.SELL_GOLD_PER_SLOT;},
   bagBuyPrice(cap){return cap*this.BAG_BUY_GOLD_PER_CAPACITY;},
@@ -1150,11 +1238,22 @@ const Balance = {
     Uncommon:[500,2000],
     Common:[500,2000],
   },
+  // v0.18.1 (#11): Gwen's feedback was that even the bottom of each price band above still
+  // felt too expensive for the lower rarities -- rather than re-tune the bands themselves
+  // (which would also shift the Auction House's sense of "what's a fair price"), a flat
+  // rarity-keyed discount is applied on top of the existing banded roll. Keyed by internal
+  // rarity name, but described in the spec by DISPLAY name (see RARITY_DISPLAY_NAMES):
+  // "crude" (Common) and "common" (Uncommon, no distinct display adjective) both get -75%,
+  // "magical" (internal Rare) gets -50%, "rare" (internal Epic) gets -25%, Legendary is
+  // unchanged.
+  MERCHANT_RARITY_PRICE_MULTIPLIER:{Legendary:1.0, Epic:0.75, Rare:0.5, Uncommon:0.25, Common:0.25},
   merchantGearPrice(inst){
     const band=this.MERCHANT_PRICE_BANDS[inst.rarity]||this.MERCHANT_PRICE_BANDS.Common;
     const [lo,hi]=band;
     const quality=IF.gearRollQuality(inst);
-    return Math.round(lo+quality*(hi-lo));
+    const raw=lo+quality*(hi-lo);
+    const mult=this.MERCHANT_RARITY_PRICE_MULTIPLIER[inst.rarity]!=null?this.MERCHANT_RARITY_PRICE_MULTIPLIER[inst.rarity]:1;
+    return Math.max(1,Math.round(raw*mult));
   },
 };
 
@@ -1203,7 +1302,9 @@ const DL = {
     // v0.17.3 (#8): Health Potions no longer land instantly -- see PS.useConsumable()/
     // PS.active_heals for the heal-over-time mechanic this now describes.
     if(item.heal_amount!=null) return `Restores ${item.heal_amount} HP gradually over ${(Balance.POTION_HEAL_DURATION_MS/1000)} seconds.`;
-    if(item.stamina_amount!=null) return `Instantly restores ${item.stamina_amount} Stamina.`;
+    // v0.18.1 (#20): Stamina Potions now heal gradually too, same mechanic (and same
+    // wording pattern) as Health Potions above -- see PS.active_stamina_heals.
+    if(item.stamina_amount!=null) return `Restores ${item.stamina_amount} Stamina gradually over ${(Balance.POTION_HEAL_DURATION_MS/1000)} seconds.`;
     if(item.eyesight_steps!=null) return `Doubles your maze reveal radius (3x3 -> 5x5 tiles around you) for your next ${item.eyesight_steps} steps.`;
     if(item.buff_type){
       const suffixByType={strength:" Strength",dexterity:" Dexterity",intelligence:" Intelligence",block_chance:"% Block Chance",regen:" HP/sec and Stamina/sec regen"};
@@ -1214,6 +1315,18 @@ const DL = {
     if(item.level_bonus!=null) return `Your next venture starts ${item.level_bonus} area level${item.level_bonus===1?"":"s"} higher than your current one.`;
     if(item.type==="bag") return `+${item.capacity} inventory capacity while equipped.`;
     return "";
+  },
+  // v0.18.1 (#7/#8): a shorter, list-row-sized subtext for the Merchant's Consumables tab
+  // and the Alchemist's recipe list -- potions get an exact "Gradually recovers XX hit/
+  // stamina points" line per Gwen's spec (distinct from itemEffectDescription()'s longer,
+  // duration-inclusive tooltip wording above), everything else just falls back to the
+  // existing category label (Herb/Ring/Head/Potion/etc.) since there's nothing more useful
+  // to say about a scroll or a bag in one short line.
+  itemShopSubtext(id){
+    const item=this.getItem(id); if(!item||!item.name) return "";
+    if(item.heal_amount!=null) return `Gradually recovers ${item.heal_amount} hit points.`;
+    if(item.stamina_amount!=null) return `Gradually recovers ${item.stamina_amount} stamina.`;
+    return this.itemCategoryLabel(id);
   },
   getMonster(id){return MONSTERS.find(m=>m.id===id)||{};},
   getHerb(id){return HERBS[id]||{};},
@@ -1249,14 +1362,33 @@ const DL = {
     if(pool.length===0) pool=MONSTERS;
     return pick(pool);
   },
-  rollLoot(tableId){
+  // v0.18.2 (#9) AUDIT FIX: Magic Find previously affected ONLY item rarity (via
+  // Balance.rollRarity()'s reroll-and-keep-rarer), never how MUCH loot you actually got --
+  // a deliberate v0.17.3 (#16) design decision at the time (see the combat resolver's own
+  // comment on this), but Gwen's later report was that MF felt like it wasn't doing
+  // anything for "amount," which is a fair read once quantity was intentionally excluded.
+  // Now mirrors the exact same reroll-and-keep-the-better-outcome pattern rollRarity()
+  // already uses: a "nothing" result gets one reroll chance (probability scaling with MF%,
+  // capped at 90%, same cap/shape as the rarity reroll) to instead land on a real drop.
+  // This can only ever turn a would-be-empty kill into a drop -- it never removes/downgrades
+  // an already-successful roll, so MF still strictly never hurts you.
+  rollLoot(tableId, mfPct=0){
     const table=LOOT_TABLES[tableId]||[];
-    if(table.length===0) return {type:"nothing"};
-    let total=0; for(const e of table) total+=e.weight;
-    if(total<=0) return {type:"nothing"};
-    let roll=randi(total), cum=0;
-    for(const e of table){cum+=e.weight; if(roll<cum) return e;}
-    return {type:"nothing"};
+    const rollOnce=()=>{
+      if(table.length===0) return {type:"nothing"};
+      let total=0; for(const e of table) total+=e.weight;
+      if(total<=0) return {type:"nothing"};
+      let roll=randi(total), cum=0;
+      for(const e of table){cum+=e.weight; if(roll<cum) return e;}
+      return {type:"nothing"};
+    };
+    const first=rollOnce();
+    if(first.type!=="nothing" || !mfPct) return first;
+    if(Math.random()<Math.min(0.9,mfPct/100)){
+      const second=rollOnce();
+      if(second.type!=="nothing") return second;
+    }
+    return first;
   },
 };
 
@@ -1289,6 +1421,37 @@ const IF = {
   WEAPON_TYPE_LIST:["wand","staff","sword","axe","bow","dagger"],
   WEAPON_TYPE_LABELS:{wand:"Wand",staff:"Staff",sword:"Sword",axe:"Axe",bow:"Bow",dagger:"Dagger"},
   weaponTypeForInstance(inst){ return (inst&&inst.base_name) ? (this.WEAPON_TYPE_BY_BASE_NAME[inst.base_name]||null) : null; },
+
+  // v0.18.1 (#3): class-based weapon-type restrictions. Keyed by weapon type; the listed
+  // class_ids are the ONLY classes allowed to equip that type. A weapon type with no entry
+  // here (currently just "dagger") is unrestricted -- every class can use it. This is
+  // deliberately separate from WEAPON_TYPE_BY_BASE_NAME/LIST above: those describe what a
+  // weapon IS, this describes who's allowed to wield it. Existing equipped/owned items are
+  // never retroactively stripped -- see PS.canEquipGear(), which is the single choke point
+  // both level AND class validity flow through, so a class change (Broken Bridge Trial pass)
+  // can retroactively invalidate an already-equipped weapon exactly like an under-level item.
+  WEAPON_TYPE_CLASS_RESTRICTIONS:{
+    wand:["wizard","sorcerer"],
+    staff:["warlock","rootbinder","druid"],
+    sword:["thornguard","stonewarden","treesinger","galestrider"],
+    axe:["thornguard","stonewarden","rootbinder","windrider","galestrider","galeshaper"],
+    bow:["windrider","galestrider","treesinger"],
+    // dagger intentionally omitted: available to every class
+  },
+  // True if classId is allowed to equip the given weapon type (unrestricted types, and the
+  // "not a weapon at all" case via weaponType===null, both return true).
+  classCanUseWeaponType(classId, weaponType){
+    if(!weaponType) return true;
+    const list=this.WEAPON_TYPE_CLASS_RESTRICTIONS[weaponType];
+    return !list || list.includes(classId);
+  },
+  // True if classId can equip this specific item instance at all, considering ONLY the
+  // class/weapon-type restriction (level is handled separately by Balance.tierLevelRequirement).
+  // Non-weapon gear (armor, rings, etc.) is always class-unrestricted.
+  classCanEquipItem(classId, inst){
+    if(!inst || inst.slot!=="weapon") return true;
+    return this.classCanUseWeaponType(classId, this.weaponTypeForInstance(inst));
+  },
 
   slotLabel(slot){return this.SLOT_LABELS[slot]||slot;},
   // v0.14: a collapsed version of SLOT_LABELS for the item-category subtext shown under
@@ -1395,10 +1558,28 @@ const IF = {
     return `+${Math.round(a.value)} ${label}`;
   },
   tooltipText(inst){
-    const lines=[`${this.displayName(inst)} (Tier ${inst.tier})`];
+    // v0.18.1 (#30): Roman numeral, matching the gear-tile tier badge and every other
+    // tier tag sitewide -- see tierRomanNumeral().
+    const lines=[`${this.displayName(inst)} (${tierRomanNumeral(inst.tier)})`];
     // v0.14: spell out the level requirement to equip this tier right in the hover
     // tooltip, so players understand why an Equip button might be greyed out.
     lines.push(`Requires Level ${Balance.tierLevelRequirement(inst.tier)}`);
+    // v0.18.1 (#3): spell out which classes can wield this weapon type, same reasoning as
+    // the level-requirement line above -- only shown for weapon types that are actually
+    // restricted (see WEAPON_TYPE_CLASS_RESTRICTIONS; Dagger etc. have no entry and no line).
+    const weaponType=this.weaponTypeForInstance(inst);
+    const restrictedTo=weaponType?this.WEAPON_TYPE_CLASS_RESTRICTIONS[weaponType]:null;
+    if(restrictedTo) lines.push(`Class: ${restrictedTo.map(id=>DL.getClass(id).display_name||id).join(", ")}`);
+    // v0.18.1 (#31): a plain dashed divider between the item's header info (name/tier, level
+    // requirement, class restriction) and its actual stat bonuses below. The tooltip itself
+    // is a single CSS `content:attr(data-tip)` pseudo-element (see the .tooltip::after rule
+    // above), which can only ever render plain text -- no nested/colored child DOM nodes --
+    // so a plain-text rule is the "color/line" option that's actually achievable here without
+    // rearchitecting every .tooltip in the game (the richer structured-and-colored treatment
+    // is reserved for the "Currently Equipped" compare-box next to it, see
+    // gearComparisonContent()/.compare-box, which already renders real DOM). Only added when
+    // there's at least one stat line following it, so there's never a dangling trailing rule.
+    if(inst.affixes && inst.affixes.length>0) lines.push("───────────────");
     for(const a of inst.affixes) lines.push(this.formatAffix(a));
     return lines.join("\n");
   },
@@ -1457,6 +1638,8 @@ const Net = {
   // tabs, plus a single-entry cache for whichever character the Inspect Player view is
   // currently showing. Cleared on logout just like the other caches below.
   leaderboardSkillsCache:null, leaderboardGoldCache:null, inspectPlayerCache:null,
+  // v0.18.2 (#8): "Max Killstreak" leaderboard tab -- same caching pattern as the two above.
+  leaderboardKillstreakCache:null,
   // v0.18 (#14): "Currently playing" list under Global Chat -- see fetchActivePlayers().
   activePlayersCache:null,
   auctionCache:null,
@@ -1475,6 +1658,10 @@ const Net = {
     this.token=token; this.username=username; this.online=true;
     try{
       await this.refreshCharacters();
+      // v0.18.1 (#29): same reasoning as afterAuth() -- a resumed session (page reload with
+      // an existing token) is just as much a "session start" as a fresh login, so it needs
+      // its own kick-off fetch for the now-always-visible "Currently playing" line too.
+      this.fetchActivePlayers().then(render).catch(()=>{});
       return true;
     }catch(e){
       this.online=false; this.token=null; this.username=null; this.clearPersistedSession();
@@ -1498,6 +1685,12 @@ const Net = {
     this.username=username; this.token=token; this.online=true;
     this.persistSession();
     await this.refreshCharacters();
+    // v0.18.1 (#29): "Currently playing" is now always visible at the top of the page (see
+    // activePlayersLine()/render()), not just while the Global Chat panel happens to be
+    // open -- so it needs its own fetch kicked off the moment a session actually starts,
+    // not only from toggleChat(). Fire-and-forget: a failure here just leaves the line on
+    // its "loading..." state until the next successful poll.
+    this.fetchActivePlayers().then(render).catch(()=>{});
   },
   async refreshCharacters(){
     const res=await fetch(this.apiBase()+"/api/characters",{headers:this.authHeaders()});
@@ -1514,6 +1707,7 @@ const Net = {
     this.online=false; this.token=null; this.username=null; this.cache=null;
     this.graveyardCache=null; this.leaderboardCache=null; this.leaderboardCacheHardcore=null;
     this.leaderboardSkillsCache=null; this.leaderboardGoldCache=null; this.inspectPlayerCache=null;
+    this.leaderboardKillstreakCache=null;
     this.activePlayersCache=null;
     this.auctionCache=null; this.vaultCache=null; this.vaultVersion=0; this.chatMessages=[]; this.privateMessages=[];
     this._saveInFlight={};
@@ -1622,6 +1816,13 @@ const Net = {
     const json=await res.json().catch(()=>({entries:[]}));
     this.leaderboardGoldCache=json.entries||[];
   },
+  // v0.18.2 (#8): "Max Killstreak" leaderboard tab -- per-CHARACTER (not per-account, see
+  // max_kill_streak's declaration), already sorted+capped server-side, top 50.
+  async fetchLeaderboardKillstreak(){
+    const res=await fetch(this.apiBase()+"/api/leaderboard/killstreak");
+    const json=await res.json().catch(()=>({entries:[]}));
+    this.leaderboardKillstreakCache=json.entries||[];
+  },
   // v0.18 (#14/#17): character name + last-active timestamp for every account whose most
   // recently-updated character saved within the last 5 minutes (server-computed off the
   // same `characters.updated_at` column autosave already stamps -- see /api/active-players'
@@ -1661,6 +1862,13 @@ const Net = {
     const json=await res.json().catch(()=>({}));
     if(!res.ok) throw new Error(json.error||"Could not delete that leaderboard entry.");
     return json;
+  },
+  // v0.18.1 (#2): read-only account list (createdOn/email/lastActiveAt) for the admin panel.
+  async fetchAdminAccounts(adminToken){
+    const res=await fetch(this.apiBase()+"/api/admin/accounts",{headers:this.authHeaders({"X-Admin-Token":adminToken})});
+    const json=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(json.error||"Could not load the account list.");
+    return json.entries||[];
   },
   async announceTrialResult(payload){
     if(!this.online) return;
@@ -1848,7 +2056,21 @@ const PS = {
   bags:{},
   consumables:{}, materials:0, herbs:{}, pending_scroll_bonus:0,
   xp_buff_multiplier:1.0, xp_buff_encounters_left:0, stamina_shrine_buff:0.0,
-  highest_tier_reached:1, season_won:false, kill_streak:0, hardcore:false, current_slot:-1,
+  highest_tier_reached:1, season_won:false, kill_streak:0,
+  // v0.18.2 (#8): unlike kill_streak (reset to 0 on every return to Town/reload, see
+  // resetKillStreak()/_applyLoadedData() below), max_kill_streak is a LIFETIME record for
+  // this character -- it only ever goes up (see incrementKillStreak()), survives save/reload,
+  // and rides along on the same character-save upsert as everything else so the new
+  // "Max Killstreak" leaderboard tab can rank characters by it server-side.
+  max_kill_streak:0,
+  // v0.18.2 (#6): Forest Reputation, kept SEPARATELY per class tier (Gwen's spec: "saved
+  // specifically to each forest tier" -- the class tier you're currently in determines which
+  // forest/town you're exploring, see getTownName()/Balance.TOWN_NAMES). Keyed by tier number
+  // (as an object, not an array -- tiers are 1-5, never 0-indexed). Starts at 0 for a tier
+  // the player hasn't touched yet (see getForestReputation()'s default), can go negative,
+  // has no stated cap in either direction.
+  forest_reputation:{},
+  hardcore:false, current_slot:-1,
   lifetime_xp:0, isRestingAtCampfire:false, eyesight_potion_steps_left:0, max_maze_depth_reached:1,
   // v0.17 (#1): "how far across the Broken Bridge Trial did you get last time" -- only ever
   // updated at the moment of a FAILED step (see attemptStep() in screenMasterTrial()), to
@@ -1867,13 +2089,17 @@ const PS = {
   // gear-stock reroll cadence (see ensureMerchantStock()); not otherwise displayed anywhere.
   trial_attempts_count:0,
   // v0.17.3 (#8): Health Potions heal gradually over Balance.POTION_HEAL_DURATION_MS instead
-  // of instantly. Each drunk potion pushes its own entry here -- {perTick, ticksLeft} -- so
-  // multiple potions drunk back-to-back (or while a previous one is still healing) each keep
-  // running independently rather than one overwriting the other. Drained by the dedicated
-  // heal-over-time setInterval near the bottom of this file; deliberately survives a
-  // save/reload (see saveGame()/_applyLoadedData()) so closing the tab mid-heal doesn't just
-  // discard the rest of a potion's effect.
+  // of instantly. Holds at most ONE {perTick, ticksLeft} entry at a time -- see
+  // PS._queueGradualHeal()'s comment for why (v0.18.1 #27 bug fix: multiple potions used to
+  // each push their own independent entry, which stacked their delivery RATE instead of just
+  // extending how long the healing ran for). Drained by the dedicated heal-over-time
+  // setInterval near the bottom of this file; deliberately survives a save/reload (see
+  // saveGame()/_applyLoadedData()) so closing the tab mid-heal doesn't just discard the rest
+  // of a potion's effect.
   active_heals:[],
+  // v0.18.1 (#20): Stamina Potions now heal gradually too, exactly mirroring active_heals
+  // above (same _queueGradualHeal() helper, same single-entry invariant, same tick cadence).
+  active_stamina_heals:[],
   // v0.14: temporary stat-buff potions (Intellect/Might/Swiftness/Wardveil/Renewal), each a
   // wall-clock timed buff keyed by type ("intelligence"/"strength"/"dexterity"/
   // "block_chance"/"regen") -> {amount, expires_at}. Same Date.now()-expiry pattern as the
@@ -1942,14 +2168,18 @@ const PS = {
     const pointsIntoLevel=points-pointsAtLevelStart;
     return {level, points, pointsIntoLevel, pointsForNextLevel};
   },
-  // v0.17.1 (#7): called once per Gather-button click in screenHerbEncounter (one point per
-  // "strike", matching Gwen's spec literally -- a herb requiring 4 strikes to fully gather
-  // nets 4 total points over the course of gathering it, 1 per click, even if the player
-  // abandons the node partway through via "Leave it"). Returns whether this strike pushed
+  // v0.17.1 (#7) / v0.18.1 (#25): originally called once per Gather-button click (1 point
+  // per "strike", awarded immediately) -- but that let a player farm free herbalism points
+  // by clicking Gather exactly once on a node, then "Leave it" before it finished, walking
+  // back onto a fresh node, and repeating forever with zero risk and no herb ever actually
+  // collected. Fixed by only ever calling this ONCE, from screenHerbEncounter, at the exact
+  // moment a node is FULLY harvested -- passing the node's total required strikes as
+  // `count` so a herb requiring 4 strikes still nets exactly 4 points overall, just all at
+  // once on completion instead of trickling in per click. Returns whether this pushed
   // herbalism to a new level, same {leveledUp, newLevel} shape as registerWeaponHit().
-  registerHerbalismStrike(){
+  registerHerbalismStrike(count=1){
     const before=this.getHerbalismLevel();
-    this.herbalism_points=(this.herbalism_points||0)+1;
+    this.herbalism_points=(this.herbalism_points||0)+count;
     const after=this.getHerbalismLevel();
     return {leveledUp:after>before, newLevel:after};
   },
@@ -2250,6 +2480,22 @@ const PS = {
     const pct=this.poison_pct_per_sec||Balance.POISON_PCT_PER_SEC_PER_TIER;
     return this.getMaxHp()*pct*(1-this.getPoisonResistance()/100);
   },
+  // v0.18.1 (#28): applies exactly ONE sub-tick's worth of Poison drain (a fraction of
+  // getPoisonHpPerSec()'s per-SECOND rate, sized to Balance.POISON_TICK_MS) and returns
+  // whether it actually drained anything -- pulled out of the setInterval loop below into
+  // its own testable method, same spirit as tickActiveHeals()/tickActiveStaminaHeals().
+  // Never drops HP below 1 by itself, matching the old once-a-second behavior. Running this
+  // at a finer cadence (5x/sec instead of 1x/sec) is the whole fix: the same total HP drains
+  // over the same real time, just spread across small smooth steps instead of one lump per
+  // second, so the HP bar creeps down instead of visibly snapping.
+  tickPoisonDrain(){
+    if(!this.isPoisoned() || this.current_hp<=1) return false;
+    const dpsPerSecond=this.getPoisonHpPerSec();
+    if(dpsPerSecond<=0) return false;
+    const perTick=dpsPerSecond/(1000/Balance.POISON_TICK_MS);
+    this.current_hp=Math.max(1,this.current_hp-perTick);
+    return true;
+  },
   // v0.14: apply/read a temporary stat-buff potion's effect. `type` is one of
   // "intelligence"/"strength"/"dexterity"/"block_chance"/"regen" (see ITEMS' buff_type
   // fields on the 5 new potions). Drinking a potion while its buff is already active just
@@ -2342,8 +2588,32 @@ const PS = {
     delete this.consumables[choice.id];
     return {text:`${DL.getItem(choice.id).name} x${qtyLost}`, rarity:null};
   },
-  incrementKillStreak(){ this.kill_streak++; },
+  incrementKillStreak(){
+    this.kill_streak++;
+    // v0.18.2 (#8): track the lifetime record alongside the resettable current streak --
+    // see max_kill_streak's declaration for why this one never resets on its own.
+    if(this.kill_streak>this.max_kill_streak) this.max_kill_streak=this.kill_streak;
+  },
   resetKillStreak(){ this.kill_streak=0; },
+  // v0.18.2 (#6): Forest Reputation helpers -- all of them key off `this.highest_tier_reached`
+  // (the SAME value getTownName() uses to pick which town/forest is currently active), never
+  // off GF.maze_depth (the area level within a tier's range), per Gwen's explicit "the class
+  // tier you are currently in defines the forest you are exploring" spec.
+  getForestReputation(tier){ return (this.forest_reputation && this.forest_reputation[tier]) || 0; },
+  getCurrentForestReputation(){ return this.getForestReputation(this.highest_tier_reached||1); },
+  adjustForestReputation(delta){
+    const tier=this.highest_tier_reached||1;
+    if(!this.forest_reputation) this.forest_reputation={};
+    this.forest_reputation[tier]=(this.forest_reputation[tier]||0)+delta;
+  },
+  // v0.18.2.1: a persistent XP MULTIPLIER, not a flat bonus -- +10% experience gained per
+  // point of POSITIVE reputation, applying to every kill for as long as you're exploring
+  // this tier's forest (see Balance.FOREST_REPUTATION_XP_PCT_PER_POINT's comment). Returns
+  // exactly 1.0 (no change) at zero or negative reputation -- never a penalty.
+  getForestReputationXpMult(){ return 1+Math.max(0,this.getCurrentForestReputation())*Balance.FOREST_REPUTATION_XP_PCT_PER_POINT/100; },
+  // v0.18.2 (#6): "+1 extra roaming mob per point" of NEGATIVE reputation -- never fewer than
+  // the base count when positive/zero.
+  getForestReputationExtraRoamers(){ return Math.max(0,-this.getCurrentForestReputation()); },
   handleDeath(cause){
     if(this.hardcore){
       const cd=this.getClassData();
@@ -2358,21 +2628,49 @@ const PS = {
   },
   addConsumable(itemId,count=1){ this.consumables[itemId]=(this.consumables[itemId]||0)+count; },
   _removeConsumableOne(itemId){ const rem=(this.consumables[itemId]||0)-1; if(rem>0) this.consumables[itemId]=rem; else delete this.consumables[itemId]; },
+  // v0.18.1 (#27): merge-or-create helper shared by both health and stamina gradual
+  // healing. Guarantees `arr` (PS.active_heals or PS.active_stamina_heals) holds AT MOST
+  // ONE {perTick, ticksLeft} entry at any time -- if one's already running, a fresh potion
+  // extends its remaining pending amount (capped at `headroom`) instead of pushing a second,
+  // independent stream alongside it. This is the entire fix for "drinking a 2nd/3rd potion
+  // speeds up the fill instead of just extending it": before, every consumer of these arrays
+  // (getHealPerSecond/tickActiveHeals and their stamina equivalents) summed every entry's
+  // contribution each tick, so N simultaneous potions delivered N times the rate.
+  _queueGradualHeal(arr,amount,headroom,totalTicks){
+    if(headroom<=0) return;
+    if(arr.length>0){
+      const existing=arr[0];
+      const currentPending=existing.perTick*existing.ticksLeft;
+      const newPending=Math.min(headroom,currentPending+amount);
+      existing.ticksLeft=existing.perTick>0?newPending/existing.perTick:0;
+    } else {
+      const rate=amount/totalTicks;
+      const pending=Math.min(headroom,amount);
+      arr.push({perTick:rate, ticksLeft: rate>0?pending/rate:0});
+    }
+  },
   useConsumable(itemId){
     if(!this.canUseConsumable(itemId)) return false;
     const item=DL.getItem(itemId); let used=false;
+    const totalTicks=Balance.POTION_HEAL_DURATION_MS/Balance.POTION_HEAL_TICK_MS;
     // v0.17.3 (#8): Health Potions no longer land instantly on click -- the potion is still
     // consumed right away (see _removeConsumableOne() below), but its heal_amount is queued
     // up as a heal-over-time effect and delivered smoothly across Balance.POTION_HEAL_
     // DURATION_MS by the dedicated setInterval near the bottom of this file (see
-    // PS.active_heals/PS.tickActiveHeals()). Multiple potions drunk in quick succession each
-    // get their own independent entry, so they stack rather than one replacing the other.
-    if((item.heal_amount||0)>0 && this.current_hp<this.getMaxHp()){
-      const totalTicks=Balance.POTION_HEAL_DURATION_MS/Balance.POTION_HEAL_TICK_MS;
-      this.active_heals.push({perTick:item.heal_amount/totalTicks, ticksLeft:totalTicks});
+    // PS.active_heals/PS.tickActiveHeals()). v0.18.1 (#27): the gating condition below checks
+    // the PENDING target, not raw current_hp, so the button correctly disables once the
+    // in-flight heal(s) already fully cover the gap to max HP -- exactly like the old
+    // instant-heal-to-max behavior used to.
+    if((item.heal_amount||0)>0 && (this.current_hp+this.getPendingHealAmount())<this.getMaxHp()){
+      this._queueGradualHeal(this.active_heals,item.heal_amount,this.getMaxHp()-this.current_hp,totalTicks);
       used=true;
     }
-    if((item.stamina_amount||0)>0 && this.current_stamina<this.getMaxStamina()){ this.current_stamina=Math.min(this.getMaxStamina(),this.current_stamina+item.stamina_amount); used=true; }
+    // v0.18.1 (#20): Stamina Potions now heal gradually too, mirroring Health Potions exactly
+    // (same duration/tick cadence, same active_stamina_heals array, same merge-not-stack fix).
+    if((item.stamina_amount||0)>0 && (this.current_stamina+this.getPendingStaminaHealAmount())<this.getMaxStamina()){
+      this._queueGradualHeal(this.active_stamina_heals,item.stamina_amount,this.getMaxStamina()-this.current_stamina,totalTicks);
+      used=true;
+    }
     if((item.eyesight_steps||0)>0){ this.eyesight_potion_steps_left=item.eyesight_steps; used=true; }
     // v0.14: the 5 new stat-buff potions (buff_type/buff_amount/buff_duration_ms on ITEMS)
     // -- always usable (unlike heal/stamina potions there's no "already full" cap), and
@@ -2386,8 +2684,8 @@ const PS = {
   canUseConsumable(itemId){
     if((this.consumables[itemId]||0)<=0) return false;
     const item=DL.getItem(itemId);
-    if((item.heal_amount||0)>0 && this.current_hp<this.getMaxHp()) return true;
-    if((item.stamina_amount||0)>0 && this.current_stamina<this.getMaxStamina()) return true;
+    if((item.heal_amount||0)>0 && (this.current_hp+this.getPendingHealAmount())<this.getMaxHp()) return true;
+    if((item.stamina_amount||0)>0 && (this.current_stamina+this.getPendingStaminaHealAmount())<this.getMaxStamina()) return true;
     if((item.eyesight_steps||0)>0) return true;
     if(item.buff_type) return true;
     // v0.16: the Antidote is only "usable" (button enabled) while actually poisoned --
@@ -2429,6 +2727,30 @@ const PS = {
     const total=this.active_heals.reduce((sum,heal)=>sum+heal.perTick*heal.ticksLeft,0);
     return Math.min(total, Math.max(0,this.getMaxHp()-this.current_hp));
   },
+  // v0.18.1 (#20): Stamina Potion equivalents of the 3 Health Potion functions directly
+  // above -- same math, same reasoning, just against active_stamina_heals/current_stamina/
+  // getMaxStamina() instead.
+  tickActiveStaminaHeals(){
+    if(!this.active_stamina_heals || !this.active_stamina_heals.length) return false;
+    let changed=false;
+    const maxStamina=this.getMaxStamina();
+    for(const heal of this.active_stamina_heals){
+      if(this.current_stamina<maxStamina){ this.current_stamina=Math.min(maxStamina,this.current_stamina+heal.perTick); changed=true; }
+      heal.ticksLeft--;
+    }
+    this.active_stamina_heals=this.active_stamina_heals.filter(heal=>heal.ticksLeft>0);
+    return changed;
+  },
+  getStaminaHealPerSecond(){
+    if(!this.active_stamina_heals || !this.active_stamina_heals.length) return 0;
+    const ticksPerSecond=1000/Balance.POTION_HEAL_TICK_MS;
+    return this.active_stamina_heals.reduce((sum,heal)=>sum+heal.perTick*ticksPerSecond,0);
+  },
+  getPendingStaminaHealAmount(){
+    if(!this.active_stamina_heals || !this.active_stamina_heals.length) return 0;
+    const total=this.active_stamina_heals.reduce((sum,heal)=>sum+heal.perTick*heal.ticksLeft,0);
+    return Math.min(total, Math.max(0,this.getMaxStamina()-this.current_stamina));
+  },
   bestAvailableConsumable(kind){
     const field=kind==="health"?"heal_amount":"stamina_amount";
     let bestId="", bestAmt=-1;
@@ -2442,15 +2764,20 @@ const PS = {
     }
     return bestId;
   },
-  buyConsumable(itemId){
+  // v0.18.1 (#7): optional `qty` param -- the Merchant's new amount-picker lets a player
+  // buy several potions in one click instead of clicking Buy N times. Atomic: either the
+  // full qty is affordable and gets bought as one transaction, or nothing happens at all
+  // (no partial-buy where you can afford 3 of the 5 you asked for).
+  buyConsumable(itemId,qty=1){
     const item=DL.getItem(itemId); if(!item.name) return false;
     // v0.12.1: Stronghold Keys are an achievement drop, not a shop item -- guarded here
     // too (not just hidden from the Merchant's Buy grid) so there's no back door to
     // buying one directly. They still trade freely on the Auction House.
     if(Balance.MERCHANT_EXCLUDED_ITEMS.includes(itemId)) return false;
-    const price=Balance.itemBuyPrice(item);
+    if(qty<=0) return false;
+    const price=Balance.itemBuyPrice(item)*qty;
     if(this.gold<price) return false;
-    this.gold-=price; this.addConsumable(itemId); return true;
+    this.gold-=price; this.addConsumable(itemId,qty); return true;
   },
   getInventoryCapacity(){
     let cap=Balance.BASE_INVENTORY_SLOTS;
@@ -2507,7 +2834,32 @@ const PS = {
   // v0.14: a gear item's Tier now doubles as a character-level requirement to equip it
   // (see Balance.tierLevelRequirement) -- you can always still wear a tier below what
   // your level allows, you just can't equip AHEAD of your level anymore.
-  canEquipGear(inst){ return this.level>=Balance.tierLevelRequirement(inst.tier); },
+  // v0.18.1 (#3): also gated by class -- e.g. a Wand requires wizard/sorcerer. Both checks
+  // flow through this single function, which is itself the one choke point gearBonus()/
+  // isEquippedSlotInvalid() use, so an already-equipped item that becomes class-invalid
+  // (e.g. after a Broken Bridge Trial class change) is excluded from stats and flagged
+  // exactly like an under-level item, with no extra plumbing needed elsewhere.
+  canEquipGear(inst){ return this.level>=Balance.tierLevelRequirement(inst.tier) && IF.classCanEquipItem(this.class_id, inst); },
+  // v0.18.1 (#3): specifically whether the CLASS requirement (not level) is the reason an
+  // item can't be equipped -- used to show a distinct, class-specific explanatory message
+  // rather than the generic "requires Level N" one.
+  classInvalidGear(inst){ return !IF.classCanEquipItem(this.class_id, inst); },
+  // v0.18.1 (#3): a single human-readable sentence explaining why this item either can't be
+  // equipped right now, or -- if it's already sitting in an equip slot -- is currently
+  // flagged invalid. Level is checked first since it's the more fundamental gate; only one
+  // reason is ever surfaced even if both would independently fail, to keep the message short.
+  // Shared by the equip-attempt toast (backpackGearGrid) and the equipped-slot tooltip
+  // (equipSlotTile) so the two never drift out of sync with each other.
+  gearInvalidReason(inst){
+    const needLevel=Balance.tierLevelRequirement(inst.tier);
+    if(this.level<needLevel) return `Requires Level ${needLevel}, you are Lv ${this.level}.`;
+    if(!IF.classCanEquipItem(this.class_id, inst)){
+      const weaponType=IF.weaponTypeForInstance(inst);
+      const label=IF.WEAPON_TYPE_LABELS[weaponType]||"weapon";
+      return `${this.getClassData().display_name||this.class_id} cannot equip a ${label}.`;
+    }
+    return "";
+  },
   // v0.15: which equip slot key a not-yet-owned gear instance WOULD go into if auto-
   // equipped right now, or null if there's nowhere open for it (matches the ring1/ring2
   // fallback logic equipGear() uses for an item already in the backpack). Kept separate
@@ -2573,16 +2925,19 @@ const PS = {
   // v0.14: recipes can now also carry a gold_cost (the 5 new stat-buff potions charge
   // 130g/190g on top of their herbs -- see RECIPES), older recipes simply have no
   // gold_cost field and this is a no-op for them.
-  canAffordRecipe(recipe){
-    for(const h in recipe.herbs) if((this.herbs[h]||0)<recipe.herbs[h]) return false;
-    if((recipe.gold_cost||0)>this.gold) return false;
+  // v0.18.1 (#8): optional `qty` -- the Alchemist's new amount-picker lets a player queue
+  // several brews of the same recipe in one click. Both functions default qty to 1 so every
+  // existing single-arg caller (and test) keeps working unchanged.
+  canAffordRecipe(recipe,qty=1){
+    for(const h in recipe.herbs) if((this.herbs[h]||0)<recipe.herbs[h]*qty) return false;
+    if((recipe.gold_cost||0)*qty>this.gold) return false;
     return true;
   },
-  brewRecipe(recipe){
-    if(!this.canAffordRecipe(recipe)) return false;
-    for(const h in recipe.herbs) this.herbs[h]-=recipe.herbs[h];
-    if(recipe.gold_cost) this.gold-=recipe.gold_cost;
-    this.addConsumable(recipe.result_item); return true;
+  brewRecipe(recipe,qty=1){
+    if(!this.canAffordRecipe(recipe,qty)) return false;
+    for(const h in recipe.herbs) this.herbs[h]-=recipe.herbs[h]*qty;
+    if(recipe.gold_cost) this.gold-=recipe.gold_cost*qty;
+    this.addConsumable(recipe.result_item,qty); return true;
   },
 
   startNewCharacter(classId,name,slot,isHardcore){
@@ -2602,7 +2957,7 @@ const PS = {
     for(const s of IF.EQUIPPED_SLOT_KEYS) this.equipped[s]=null;
     this.equipped_bags=[]; this.pending_scroll_bonus=0; this.xp_buff_multiplier=1.0;
     this.xp_buff_encounters_left=0; this.stamina_shrine_buff=0.0; this.highest_tier_reached=1;
-    this.season_won=false; this.kill_streak=0; this.xp_to_next=Balance.xpRequiredForLevel(this.level);
+    this.season_won=false; this.kill_streak=0; this.max_kill_streak=0; this.forest_reputation={}; this.xp_to_next=Balance.xpRequiredForLevel(this.level);
     this.lifetime_xp=0; this.isRestingAtCampfire=false; this.eyesight_potion_steps_left=0;
     this.max_maze_depth_reached=1;
     // v0.17 (#1): same reused-singleton leak class as weapon_skills/trial_progress below --
@@ -2620,6 +2975,9 @@ const PS = {
     // an in-flight heal-over-time from whatever potion the previously-played character
     // drank right before this one was rolled.
     this.active_heals=[];
+    // v0.18.1 (#20): stamina potions now heal gradually too, same reused-singleton leak
+    // class as active_heals immediately above -- must reset for a fresh character.
+    this.active_stamina_heals=[];
     // Fresh character: brand new weapon-skill progression, NOT the reused-singleton's
     // previous character's progress (same bug class as the HP/Stamina fix just below --
     // PS is one shared object across character creations in a session, so anything not
@@ -2680,12 +3038,21 @@ const PS = {
       // same reasoning as everything else here -- otherwise closing the tab mid-heal would
       // just silently discard whatever HP hadn't been delivered yet.
       active_heals:this.active_heals||[],
+      // v0.18.1 (#20): stamina potions' in-progress heal-over-time, same reasoning as
+      // active_heals immediately above.
+      active_stamina_heals:this.active_stamina_heals||[],
       // v0.17 (#28): drives the Merchant's gear-stock reroll cadence, see resolveMasterTrial().
       trial_attempts_count:this.trial_attempts_count||0,
       attributes:this.attributes,unspent_stat_points:this.unspent_stat_points,
       bonus_hp_from_attributes:this.bonus_hp_from_attributes,bonus_stamina_from_attributes:this.bonus_stamina_from_attributes,
       weapon_skills:this.weapon_skills,
       herbalism_points:this.herbalism_points||0,
+      // v0.18.2 (#8): the lifetime Kill Streak record, needed server-side for the new
+      // "Max Killstreak" leaderboard tab -- see max_kill_streak's declaration/_applyLoadedData().
+      max_kill_streak:this.max_kill_streak||0,
+      // v0.18.2 (#6): per-tier Forest Reputation, must survive a save/reload -- see its
+      // declaration/_applyLoadedData() above.
+      forest_reputation:this.forest_reputation||{},
       // v0.13: Broken Bridge Trial progress (which planks are already known-safe per
       // step, and which have already been tried-and-failed at the current step) must
       // survive a save/reload, otherwise the "remembers the faulty plank" guarantee only
@@ -2712,7 +3079,14 @@ const PS = {
   },
   _applyLoadedData(slot,parsed){
     this.current_slot=slot; this.class_id=parsed.class_id||""; this.character_name=parsed.character_name||"Hero";
-    this.hardcore=!!parsed.hardcore; this.kill_streak=0; this.level=parsed.level||1; this.xp=parsed.xp||0;
+    this.hardcore=!!parsed.hardcore; this.kill_streak=0;
+    // v0.18.2 (#8): unlike kill_streak (deliberately reset to 0 on every load, right above),
+    // max_kill_streak is the lifetime record and must survive a save/reload intact.
+    this.max_kill_streak=parsed.max_kill_streak||0;
+    // v0.18.2 (#6): Forest Reputation is per-tier persisted state, same "must survive a
+    // save/reload" reasoning as max_kill_streak just above.
+    this.forest_reputation=parsed.forest_reputation||{};
+    this.level=parsed.level||1; this.xp=parsed.xp||0;
     this.xp_to_next=parsed.xp_to_next||Balance.xpRequiredForLevel(this.level); this.gold=parsed.gold||0;
     this.materials=parsed.materials||0; this.herbs=parsed.herbs||{}; this.consumables=parsed.consumables||{};
     // v0.17.1 (#8): a save from before this fix shipped just won't have any stored bags yet.
@@ -2733,6 +3107,8 @@ const PS = {
     this.bridge_fail_streak=parsed.bridge_fail_streak||0;
     // v0.17.3 (#8): a save from before this shipped just won't have any heals-in-progress.
     this.active_heals=parsed.active_heals||[];
+    // v0.18.1 (#20): a save from before this shipped just won't have any stamina heals-in-progress.
+    this.active_stamina_heals=parsed.active_stamina_heals||[];
     // v0.17 (#28): see saveGame().
     this.trial_attempts_count=parsed.trial_attempts_count||0;
     if(parsed.attributes){ this.attributes={str:parsed.attributes.str||0,dex:parsed.attributes.dex||0,vit:parsed.attributes.vit||0,int:parsed.attributes.int||0}; }
@@ -2817,6 +3193,9 @@ const GF = {
   trialJustFailed:false, trialFailedPlankIndex:null, trialFailedStepIndex:-1,
   ventureDepth:null, mazeOverlay:null, gambleReveal:null,
   admin_token:"", admin_leaderboard_cache:null, admin_leaderboard_error:"",
+  // v0.18.1 (#2): admin account list (createdOn/email/lastActiveAt), same load-on-demand
+  // caching pattern as admin_leaderboard_cache/admin_leaderboard_error above.
+  admin_accounts_cache:null, admin_accounts_error:"",
   attributesCollapsed:false, leaderboardPage:null, bonfireBranchesToKindle:0,
   // v0.17.3 (#13/#14/#15): which Leaderboard sub-tab is showing ("ladder"/"skills"/"gold"),
   // and which account_id/character_name pair the read-only Inspect Player view should
@@ -2839,6 +3218,19 @@ const GF = {
   goto(screen, extra={}){
     Object.assign(this, extra);
     this.screen=screen; render();
+    // v0.18.1 (#5): fade the freshly-rendered screen in. Scoped to real navigation only
+    // (this is the single function every screen change goes through, see render()'s own
+    // comment on how many other things call render() directly for same-screen refreshes) --
+    // start at opacity 0 with transitions off, then flip both back on next tick so the
+    // browser actually paints the "before" frame first instead of jumping straight to 1.
+    if(typeof app!=="undefined" && app){
+      app.style.transition="none";
+      app.style.opacity="0";
+      setTimeout(()=>{
+        app.style.transition="";
+        app.style.opacity="1";
+      },20);
+    }
   },
 };
 
@@ -2886,10 +3278,34 @@ function hpBar(compact){
   // conditionally added/removed -- that lets refreshStatHeaderInPlace() below patch its width
   // on every tick with a plain style mutation, with no DOM node creation/removal required for
   // an id-based incremental refresh to keep working.
-  return h("div",{class:"bar-bg"+(compact?" compact":"")},[
-    h("div",{id:"stat-hp-heal-preview",class:"bar-fill bar-hp-heal-preview",style:{width:previewPct+"%"}}),
-    h("div",{id:"stat-hp-bar-fill",class:"bar-fill "+(poisoned?"bar-hp-poisoned":"bar-hp"),style:{width:curPct+"%"}}),
+  // v0.18.1 (#22) BUG FIX: floatLayer("player") used to be a CHILD of the .bar-bg div below
+  // it -- but .bar-bg has overflow:hidden (needed so the two absolutely-positioned fill bars
+  // never visually poke out past its rounded corners), which was silently clipping the "-X
+  // HP"/CRIT!/Blocked floating text the instant it tried to rise above the bar's own box
+  // (.float-text-layer positions itself at top:-6px specifically so it hovers just above
+  // whatever it's anchored to). Moving it out to be a sibling of .bar-bg, inside a plain
+  // position:relative wrapper that does NOT clip overflow, is the same pattern
+  // screenCombat() already uses correctly for floatLayer("monster") next to the monster's
+  // own HP bar -- see that call site's comment.
+  return h("div",{style:{position:"relative"}},[
+    h("div",{class:"bar-bg"+(compact?" compact":"")},[
+      h("div",{id:"stat-hp-heal-preview",class:"bar-fill bar-hp-heal-preview",style:{width:previewPct+"%"}}),
+      h("div",{id:"stat-hp-bar-fill",class:"bar-fill "+(poisoned?"bar-hp-poisoned":"bar-hp"),style:{width:curPct+"%"}}),
+    ]),
     floatLayer("player"),
+  ]);
+}
+// v0.18.1 (#20): stamina potions now heal gradually too (same mechanic as hpBar() above,
+// see PS._queueGradualHeal()) -- this is the exact same pattern, just for Stamina, with no
+// floatLayer() (that's HP-only combat-text real estate, not duplicated here).
+function staminaBar(compact){
+  const maxStamina=PS.getMaxStamina();
+  const curPct=clampf(PS.current_stamina/maxStamina*100,0,100);
+  const pendingHeal=PS.getPendingStaminaHealAmount();
+  const previewPct=clampf((PS.current_stamina+pendingHeal)/maxStamina*100,0,100);
+  return h("div",{class:"bar-bg"+(compact?" compact":"")},[
+    h("div",{id:"stat-stamina-heal-preview",class:"bar-fill bar-stamina-heal-preview",style:{width:previewPct+"%"}}),
+    h("div",{id:"stat-stamina-bar-fill",class:"bar-fill bar-stamina",style:{width:curPct+"%"}}),
   ]);
 }
 function iconBadge(svg, size){ const d=h("div",{class:"icon-badge",style:size?{width:size+"px",height:size+"px"}:{}}); d.innerHTML=svg; return d; }
@@ -2948,8 +3364,10 @@ function toggleChat(){
   GF.chatOpen=!GF.chatOpen;
   if(GF.chatOpen){
     Net.ensureChat();
-    // v0.18 (#14): kick off a fresh fetch every time the panel opens (not just once ever)
-    // so "Currently playing" doesn't go stale across a long session.
+    // v0.18 (#14): kick off a fresh fetch every time the panel opens too -- "Currently
+    // playing" is always visible now (v0.18.1 #29: afterAuth()/tryResumeSession() kick off
+    // the first fetch, and a 30s interval keeps it fresh after that), but there's no harm
+    // in an extra opportunistic refresh right when the player's attention is on chat anyway.
     Net.fetchActivePlayers().then(render).catch(()=>{});
   }
   render();
@@ -2967,6 +3385,43 @@ function activePlayersLine(){
   const others=entries.length-shown.length;
   const text="Currently playing: "+shown.join(", ")+(others>0?`, and ${others} other${others===1?"":"s"}`:"");
   return h("div",{class:"muted",style:{fontSize:".85em",marginBottom:"6px"}},[text]);
+}
+
+// v0.18.2 (#7): the same server-verified "active in the last 5 minutes" account count
+// activePlayersLine() already fetches (Net.activePlayersCache, see fetchActivePlayers())
+// doubles as a community XP buff -- Gwen's spec: 1 player (just yourself) = no bonus, 2 =
+// double XP for everyone, 3 = triple, 4 = 4x, and so on (count itself IS the multiplier).
+// Deliberately keyed off the raw entry count, not "entries minus yourself", since the server
+// route makes no attempt to exclude the caller's own account and Gwen's examples ("when you
+// are the only player online") clearly mean the total headcount including yourself.
+// Returns 1 (no bonus, never a penalty) while the very first fetch hasn't resolved yet
+// (cache still null) rather than guessing at a count nobody has confirmed.
+function getGlobalXpMultiplier(){
+  const entries=Net.activePlayersCache;
+  if(!entries) return 1;
+  return Math.max(1, entries.length);
+}
+
+// v0.18.2 (#7): the always-visible banner announcing the current community XP multiplier
+// (or its absence). Rendered once at the very top of the page, right above
+// activePlayersLine(), on every screen that shows the top bar -- see render() -- so it's
+// "permanently visible" exactly as Gwen's spec asks, not a toast that fades away. Renders an
+// empty (but still real, appendChild-safe) div until the first /api/active-players fetch
+// resolves, matching activePlayersLine()'s own loading behavior, rather than flashing a
+// possibly-wrong "alone" message before the real count is known.
+function globalXpMultiplierLine(){
+  const entries=Net.activePlayersCache;
+  if(!entries) return h("div",{});
+  const n=Math.max(1, entries.length);
+  let text;
+  if(n<=1) text="You are all alone in the dark forest.";
+  else if(n===2) text="Two players are currently in the Wandrian realm -- experience gained is doubled for everyone!";
+  else if(n===3) text="Three players are currently in the Wandrian realm -- experience gained is tripled for everyone!";
+  else text=`${n} players are currently in the Wandrian realm -- experience gained is ${n}x for everyone!`;
+  // v0.18.2 (#7): reuse the same purple already used for XP floating text (.float-text-xp)
+  // to tie this banner visually to "more XP", rather than introducing a brand new color.
+  const style=n>=2?{fontSize:".9em",marginBottom:"6px",fontWeight:"bold",color:"#b46cff"}:{fontSize:".9em",marginBottom:"6px"};
+  return h("div",{class:n>=2?"":"muted",style},[text]);
 }
 
 function topBar(){
@@ -3009,7 +3464,9 @@ function chatBody(closeBtn){
   input.addEventListener("keydown",(e)=>{ if(e.key==="Enter") send(); });
   const root=h("div",{style:{display:"flex",flexDirection:"column",height:"100%"}},[
     h("div",{class:"row",style:{justifyContent:"space-between",marginBottom:"8px"}},[h("h2",{style:{margin:0}},["Global Chat"]), closeBtn?h("span",{class:"linklike",onClick:closeBtn},["Close ✕"]):null]),
-    activePlayersLine(),
+    // v0.18.1 (#29): activePlayersLine() moved OUT of here -- it's now rendered once at the
+    // top of the page, right under the top bar (see render()), so it's visible at all times
+    // instead of only while this collapsible chat panel happens to be open.
     log,
     h("div",{class:"row"},[input, h("button",{onClick:send},["Send"])]),
   ]);
@@ -3063,6 +3520,9 @@ function refreshStatHeaderInPlace(smooth){
   // mid-heal shrinks the preview on the very next tick of ANY of these three intervals.
   const healPreviewFill=document.getElementById("stat-hp-heal-preview");
   if(healPreviewFill) healPreviewFill.style.width=clampf((PS.current_hp+PS.getPendingHealAmount())/PS.getMaxHp()*100,0,100)+"%";
+  // v0.18.1 (#20): same preview-overlay patching as the HP bar above, now for Stamina too.
+  const staminaHealPreviewFill=document.getElementById("stat-stamina-heal-preview");
+  if(staminaHealPreviewFill) staminaHealPreviewFill.style.width=clampf((PS.current_stamina+PS.getPendingStaminaHealAmount())/PS.getMaxStamina()*100,0,100)+"%";
   // v0.17 (#3/#8): keep the Poisoned-vs-normal HP text/bar color and the status icon's
   // visibility in sync on every targeted (non-full) refresh too, not just on a full
   // render() -- see statHeader() for the matching source-of-truth markup and the poison
@@ -3084,6 +3544,14 @@ function refreshStatHeaderInPlace(smooth){
     const healPerSec=PS.getHealPerSecond();
     healingText.style.display=healPerSec>0?"inline":"none";
     healingText.textContent=`(healing +${healPerSec.toFixed(1)}/sec)`;
+  }
+  // v0.18.1 (#20): same "(recovering +X.X/sec)" sync for the Stamina row now that stamina
+  // potions heal gradually too.
+  const staminaHealingText=document.getElementById("stat-stamina-healing-text");
+  if(staminaHealingText){
+    const staminaHealPerSec=PS.getStaminaHealPerSecond();
+    staminaHealingText.style.display=staminaHealPerSec>0?"inline":"none";
+    staminaHealingText.textContent=`(recovering +${staminaHealPerSec.toFixed(1)}/sec)`;
   }
   return true;
 }
@@ -3146,7 +3614,14 @@ function render(){
       "Your browser is blocking local storage for this page (this can happen when opening the file directly instead of through a web server or a hosted link). You'll be able to log in and play normally, you'll just need to log in again each time you come back instead of staying signed in. Your character progress itself always lives on the server either way."
     ]));
   }
-  if(!NO_TOPBAR_SCREENS.includes(GF.screen)) app.appendChild(topBar());
+  // v0.18.1 (#29): "Currently playing" now lives at the top of the page, directly under the
+  // top bar, on every screen that shows one -- previously it only rendered inside chatBody(),
+  // which meant it was invisible unless the Global Chat side panel happened to be open,
+  // defeating the point of an at-a-glance "who else is online" line.
+  // v0.18.2 (#7): the community XP-multiplier banner renders right above the "Currently
+  // playing" line -- both always-visible (not just while Global Chat is open), both driven
+  // by the same Net.activePlayersCache fetch, so they naturally stay in sync with each other.
+  if(!NO_TOPBAR_SCREENS.includes(GF.screen)){ app.appendChild(topBar()); app.appendChild(globalXpMultiplierLine()); app.appendChild(activePlayersLine()); }
   const fn=SCREENS[GF.screen]||SCREENS.mainMenuSlots;
   app.appendChild(fn());
   const cp=chatPanel(); if(cp) app.appendChild(cp);
@@ -3254,17 +3729,24 @@ document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==
 window.addEventListener("pageshow",(e)=>{ if(e.persisted) location.reload(); });
 
 const BREW_CRAFT_MS=2000;
-function startBrew(recipe){
-  if(GF.brewing || !PS.canAffordRecipe(recipe)) return;
-  GF.brewing={recipeId:recipe.result_item, startedAt:Date.now(), recipe};
+// v0.18.1 (#8): the Alchemist's new amount-picker lets a player queue several brews of the
+// same recipe in one click -- brewing 5 potions must NOT take 5x as long (5x2s=10s would
+// feel awful), so the total animated brew time is capped at this ceiling no matter how many
+// are queued. A qty of 1-2 still plays out at the normal per-brew pace (2s/4s); qty>=3 is
+// where the cap actually kicks in and the whole batch just finishes faster than "qty x 2s".
+const MULTI_BREW_CAP_MS=5000;
+function startBrew(recipe,qty=1){
+  if(GF.brewing || !PS.canAffordRecipe(recipe,qty)) return;
+  const durationMs=Math.min(BREW_CRAFT_MS*qty, MULTI_BREW_CAP_MS);
+  GF.brewing={recipeId:recipe.result_item, startedAt:Date.now(), recipe, qty, durationMs};
   render();
   GF.brewInterval=setInterval(()=>{
     if(!GF.brewing){ clearInterval(GF.brewInterval); GF.brewInterval=null; return; }
-    if(Date.now()-GF.brewing.startedAt>=BREW_CRAFT_MS){
+    if(Date.now()-GF.brewing.startedAt>=GF.brewing.durationMs){
       clearInterval(GF.brewInterval); GF.brewInterval=null;
-      const rec=GF.brewing.recipe; GF.brewing=null;
+      const rec=GF.brewing.recipe; const q=GF.brewing.qty||1; GF.brewing=null;
       const result=DL.getItem(rec.result_item);
-      if(PS.brewRecipe(rec)){ autosave(); setToast(`Brewed ${result.name}!`); }
+      if(PS.brewRecipe(rec,q)){ autosave(); setToast(q>1?`Brewed ${q}x ${result.name}!`:`Brewed ${result.name}!`); }
       render();
     } else render();
   },100);
@@ -3341,14 +3823,19 @@ function inventoryPreview(){
 // there's no way to tell whether e.g. a +5 damage affix is actually worth chasing.
 function damageLine(){
   const d=PS.getDamageBreakdown();
+  // v0.18.1 (#14): the "Base" figure is a single flat number (average of the class's
+  // base_damage_min/max range plus level/attribute/weapon-skill bonuses), not a range --
+  // per Gwen's spec, a range here read as if the *base* itself rolled randomly each hit,
+  // when in fact only the final "Damage: X-Y" total (below) reflects the actual combat roll.
+  const baseFlat=Math.round((d.baseMin+d.baseMax)/2);
   const gearPart=d.gearBonus>0?`, +${Math.round(d.gearBonus)} from gear`:"";
   // v0.17 (#17c): a 3rd tooltip line, "From skill bonuses", shown only when weaponSkillBonus
   // is actually nonzero -- d.baseMin/baseMax (see getDamageBreakdown()) already folds the
   // weapon-skill bonus into the "Base" line's total, this just breaks that number back out
   // so the player can see how much of it specifically came from weapon proficiency.
   const skillTip=d.weaponSkillBonus>0?`\nFrom skill bonuses: +${Math.round(d.weaponSkillBonus)}`:"";
-  return h("div",{class:"muted tooltip",style:{fontSize:".85em"},"data-tip":`Base (level + attributes): ${Math.round(d.baseMin)}-${Math.round(d.baseMax)}\nFrom equipped gear: +${Math.round(d.gearBonus)}${skillTip}`},[
-    `Damage: ${Math.round(d.totalMin)}-${Math.round(d.totalMax)} (${Math.round(d.baseMin)}-${Math.round(d.baseMax)} base${gearPart})`
+  return h("div",{class:"muted tooltip",style:{fontSize:".85em"},"data-tip":`Base (level + attributes): ${baseFlat}\nFrom equipped gear: +${Math.round(d.gearBonus)}${skillTip}`},[
+    `Damage: ${Math.round(d.totalMin)}-${Math.round(d.totalMax)} (${baseFlat} base${gearPart})`
   ]);
 }
 
@@ -3404,6 +3891,11 @@ function statHeader(opts={}){
         // count, since "Kill streak: 7" on its own didn't tell a player what it was
         // actually doing for them anymore -- see Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL.
         PS.kill_streak>0?h("div",{class:"muted"},[`Kill streak: ${PS.kill_streak} (+${PS.kill_streak*Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL}% Magic Find)`]):null,
+        // v0.18.2 (#6): always visible (unlike Kill Streak's ">0" gate above) -- 0 is itself
+        // a meaningful, common state for this stat, not something worth hiding. Always shows
+        // the CURRENT tier's own reputation, matching whichever forest/town this character is
+        // presently exploring (see PS.getCurrentForestReputation()'s comment).
+        h("div",{class:"muted"},[`Forest Reputation (Tier ${tierRomanNumeral(PS.highest_tier_reached||1)}): ${PS.getCurrentForestReputation()}`]),
         buffIcons.length?h("div",{style:{marginTop:"2px"}},buffIcons):null,
       ]),
       h("div",{class:"row gap",style:{alignItems:"center"}},[
@@ -3429,7 +3921,12 @@ function statHeader(opts={}){
     ]),
     h("div",{class:"row",style:{marginTop:"8px",alignItems:"flex-start",gap:"14px"}},[
       h("div",{class:"col",style:{gap:compact?"3px":"8px",flex:"0 0 33%",maxWidth:"33%",minWidth:"0"}},[
-        h("div",{},[h("span",{class:"xp-text"},[`XP ${PS.xp}/${PS.xp_to_next}`]), PS.xp_buff_encounters_left>0?h("span",{title:`Experience shrine active: bonus XP for ${PS.xp_buff_encounters_left} more battle${PS.xp_buff_encounters_left===1?"":"s"}.`,style:{marginLeft:"4px"}},["✨"]):null]),
+        // v0.18.1 (#18): shrine buff icons now use the game's normal styled .tooltip
+        // component (data-tip, shown via CSS ::after, tap-to-open on mobile thanks to the
+        // shared closestWithClass() click handler) instead of the plain browser `title`
+        // attribute they used before -- title tooltips don't show at all on a touch device,
+        // so mobile players had no way to see the effect/remaining-duration text.
+        h("div",{},[h("span",{class:"xp-text"},[`XP ${PS.xp}/${PS.xp_to_next}`]), PS.xp_buff_encounters_left>0?h("span",{class:"tooltip","data-tip":`Experience shrine active: bonus XP for ${PS.xp_buff_encounters_left} more battle${PS.xp_buff_encounters_left===1?"":"s"}.`,style:{marginLeft:"4px"}},["✨"]):null]),
         // v0.18 (#7): fillId + the bar-fill-xp-grow modifier class let animateXpBarGrowth()
         // (called right after a kill's render()) find this exact node and ease it up to its
         // new width over ~1s instead of the width just snapping to place. See that function's
@@ -3446,7 +3943,10 @@ function statHeader(opts={}){
         h("div",{},[h("span",{id:"stat-hp-text",class:PS.isPoisoned()?"hp-text hp-text-poisoned":"hp-text"},[`HP ${Math.round(PS.current_hp)}/${Math.round(PS.getMaxHp())}`]), PS.isPoisoned()?h("span",{id:"stat-poison-icon",class:"poison-icon",title:`Poisoned: draining ${PS.getPoisonHpPerSec().toFixed(1)} HP/sec for ${formatMsAsMinSec(PS.getPoisonMsLeft())} more (won't drop you below 1 HP on its own).`,style:{marginLeft:"4px",opacity:"1"}},["🤢"]):null,
         // v0.17.1 (#12): Touch of Unicorn (Invulnerability shrine) indicator right at the HP
         // status, per Gwen's exact spec -- a unicorn icon with the remaining round count.
-        PS.isInvulnerable()?h("span",{title:`Touch of Unicorn: immune to damage for ${PS.invuln_rounds_left} more combat round(s).`,style:{marginLeft:"4px"}},["🦄"]):null,
+        // v0.18.1 (#26): wording no longer says "combat round(s)" only -- the same charge
+        // pool now also blocks a maze trap's damage/poison (see onStepMaze()'s "trap" cell
+        // handling), so a round can be spent outside of combat too.
+        PS.isInvulnerable()?h("span",{class:"tooltip","data-tip":`Touch of Unicorn: immune to damage/poison for ${PS.invuln_rounds_left} more round(s) (combat or traps).`,style:{marginLeft:"4px"}},["🦄"]):null,
         // v0.17.3 (#7) BUG FIX: the Quad Damage shrine buff never actually had an icon
         // anywhere in the UI (only the combat log's "(Quad Damage!)" line hinted at it,
         // and only during an active fight) -- once you left combat (e.g. reaching the
@@ -3455,15 +3955,18 @@ function statHeader(opts={}){
         // correctly carried over and still applied in the next fight. Reported as "the
         // icon disappeared" -- it never existed to begin with. Mirrors the Unicorn icon
         // above exactly (same HP-row placement, same round-count tooltip).
-        PS.hasQuadDamage()?h("span",{title:`Quad Damage: 4x damage output for ${PS.quad_dmg_rounds_left} more combat round(s).`,style:{marginLeft:"4px"}},["⚡"]):null,
+        PS.hasQuadDamage()?h("span",{class:"tooltip","data-tip":`Quad Damage: 4x damage output for ${PS.quad_dmg_rounds_left} more combat round(s).`,style:{marginLeft:"4px"}},["⚡"]):null,
         // v0.17.3 (#8): visible feedback that a potion's heal-over-time is actually in
         // progress (otherwise the HP bar just creeps up with no explanation) -- kept in
         // sync on every fast heal sub-tick by refreshStatHeaderInPlace() below, same
         // pattern as the poison/regen indicators above.
         h("span",{id:"stat-healing-text",class:"muted",style:{marginLeft:"4px",display:PS.getHealPerSecond()>0?"inline":"none"}},[`(healing +${PS.getHealPerSecond().toFixed(1)}/sec)`])]),
         hpBar(compact),
-        h("div",{},[h("span",{id:"stat-stamina-text",class:"stamina-text"},[`Stamina ${Math.round(PS.current_stamina)}/${Math.round(PS.getMaxStamina())}`]), PS.stamina_shrine_buff>0?h("span",{title:`Stamina shrine active: ${Math.round(PS.stamina_shrine_buff)} bonus stamina in reserve.`,style:{marginLeft:"4px"}},["✨"]):null]),
-        bar(PS.current_stamina/PS.getMaxStamina()*100,"bar-stamina",compact,"stat-stamina-bar-fill"),
+        h("div",{},[h("span",{id:"stat-stamina-text",class:"stamina-text"},[`Stamina ${Math.round(PS.current_stamina)}/${Math.round(PS.getMaxStamina())}`]), PS.stamina_shrine_buff>0?h("span",{class:"tooltip","data-tip":`Stamina shrine active: ${Math.round(PS.stamina_shrine_buff)} bonus stamina in reserve.`,style:{marginLeft:"4px"}},["✨"]):null,
+        // v0.18.1 (#20): stamina potions now heal gradually too -- same "(recovering +X.X/sec)"
+        // indicator as the HP row above, kept in sync by refreshStatHeaderInPlace().
+        h("span",{id:"stat-stamina-healing-text",class:"muted",style:{marginLeft:"4px",display:PS.getStaminaHealPerSecond()>0?"inline":"none"}},[`(recovering +${PS.getStaminaHealPerSecond().toFixed(1)}/sec)`])]),
+        staminaBar(compact),
       ]),
       inventoryPreview(),
     ]),
@@ -3672,6 +4175,11 @@ function screenMainMenuSlots(){
     h("button",{class:"wide",style:{textAlign:"center",lineHeight:"1.3",padding:"8px 12px",flex:"1"},onClick:()=>{ GF._preHerbalismScreen="mainMenuSlots"; GF.goto("herbalism"); }},[
       h("div",{},["🌿 Herbalism & Alchemy Guide"]),
       h("div",{class:"dim-note",style:{marginTop:"2px"}},["Herbs, where to find them, and recipes"]),
+    ]),
+    // v0.18.2 (#4): new Experience Guide, same row/pattern as the other three guides.
+    h("button",{class:"wide",style:{textAlign:"center",lineHeight:"1.3",padding:"8px 12px",flex:"1"},onClick:()=>{ GF._preExperienceScreen="mainMenuSlots"; GF.goto("experienceGuide"); }},[
+      h("div",{},["📈 Experience Guide"]),
+      h("div",{class:"dim-note",style:{marginTop:"2px"}},["Leveling math, area difficulty, and tier promotion"]),
     ]),
   ]));
   root.appendChild(content);
@@ -3884,7 +4392,9 @@ function screenClassProgression(){
       grid.appendChild(h("div",{class:"tile row",style:{gridColumn:col,gridRow:String(r++),zIndex:"1",alignItems:"center",gap:"0",margin:"0 14px"+(isFinal?" 16px":"")}},[
         h("div",{style:{flex:"0 0 30%",display:"flex",justifyContent:"center"}},[iconBadge(PORTRAITS[classId]||"",42)]),
         h("div",{style:{flex:"1 1 70%",minWidth:"0"}},[
-          h("div",{style:{fontWeight:"bold"}},[`Tier ${c.tier}: ${c.display_name}`]),
+          // v0.18.1 (#30): Roman numeral for the tier number, matching every other tier tag
+          // sitewide -- see tierRomanNumeral().
+          h("div",{style:{fontWeight:"bold"}},[`Tier ${tierRomanNumeral(c.tier)}: ${c.display_name}`]),
           h("div",{class:"muted"},[c.description]),
           h("div",{class:"muted",style:{fontSize:".82em",marginTop:"2px"}},[`Starting attributes: STR ${c.base_str} · DEX ${c.base_dex} · VIT ${c.base_vit} · INT ${c.base_int}`]),
           isFinal?h("div",{style:{color:"#e0b23d",fontWeight:"bold",marginTop:"2px"}},["★ Final tier, wins the season"]):null,
@@ -3900,7 +4410,8 @@ function screenClassProgression(){
 
 /* ================= LEADERBOARD (online only) ================= */
 
-const LEADERBOARD_PAGE_SIZE=12;
+// v0.18.1 (#17): 12 -> 10 per page.
+const LEADERBOARD_PAGE_SIZE=10;
 
 // v0.17.3 (#15): shared magnifying-glass "Inspect Player" button, used by both the Ladder
 // Progression and Skill Progression tabs' rows. Read-only -- see the GET
@@ -3930,17 +4441,20 @@ function screenLeaderboard(){
   // v0.16: Back moved up here instead of below the whole (paginated) list of players.
   root.appendChild(h("button",{style:{marginBottom:"10px"},onClick:()=>GF.goto("mainMenuSlots")},["← Back"]));
 
-  // v0.17.3 (#13/#14): three sub-tabs. Ladder Progression is the original single view
-  // (now with gold removed, see #410); Skill Progression and Gold are new.
+  // v0.17.3 (#13/#14): sub-tabs. Ladder Progression is the original single view (now with
+  // gold removed, see #410); Skill Progression and Gold followed. v0.18.2 (#8) adds a 4th,
+  // Max Killstreak.
   if(GF.leaderboardTab==null) GF.leaderboardTab="ladder";
   root.appendChild(h("div",{class:"row gap",style:{marginBottom:"12px"}},[
     leaderboardTabButton("ladder","Ladder Progression"),
     leaderboardTabButton("skills","Skill Progression"),
     leaderboardTabButton("gold","Gold"),
+    leaderboardTabButton("killstreak","Max Killstreak"),
   ]));
 
   if(GF.leaderboardTab==="skills"){ root.appendChild(leaderboardSkillsTab()); return root; }
   if(GF.leaderboardTab==="gold"){ root.appendChild(leaderboardGoldTab()); return root; }
+  if(GF.leaderboardTab==="killstreak"){ root.appendChild(leaderboardKillstreakTab()); return root; }
   root.appendChild(leaderboardLadderTab());
   return root;
 }
@@ -3998,12 +4512,16 @@ function leaderboardLadderTab(){
     // was hardcore players.
     if(idx===0){ style.border="2px solid #d4af37"; }
     const nameStyle={fontWeight:"bold"};
-    // v0.17.1 (#4): the bridge-step footstep icon + count now sits INSIDE the "(Tier N ...)"
-    // parenthetical instead of off on the far right of the row, since it's a tier-progress
-    // stat, not a separate top-level figure like XP/Gold.
+    // v0.18.1 (#15): the footstep icon read as visual noise and made this line hard to
+    // parse at a glance -- replaced with plain "Step X/N" text, still inside the "(Tier N
+    // ...)" parenthetical established in v0.17.1 (#4).
+    // v0.18.1 (#30): Roman numeral for the tier number everywhere, matching the gear-tile
+    // tier badge -- and per Gwen's exact spec, a bare "(Tier 2)" tag with nothing else in it
+    // collapses all the way to "(II)" (word dropped too), while the tag WITH the Step count
+    // alongside it keeps the "Tier" label since "(II, Step 3/8)" alone would read as unclear.
     const tierNode=(e.last_bridge_steps>0)
-      ? h("span",{},[`(Tier ${e.highest_tier_reached} `, inlineIcon(FOOTSTEP_SVG,13), ` ${e.last_bridge_steps})`])
-      : h("span",{},[`(Tier ${e.highest_tier_reached})`]);
+      ? h("span",{},[`(Tier ${tierRomanNumeral(e.highest_tier_reached)}, Step ${e.last_bridge_steps}/${Balance.BRIDGE_ROWS})`])
+      : h("span",{},[`(${tierRomanNumeral(e.highest_tier_reached)})`]);
     root.appendChild(h("div",{class:"tile row",style},[
       h("div",{},[
         h("span",{class:"muted"},[`#${idx+1} `]),
@@ -4017,15 +4535,26 @@ function leaderboardLadderTab(){
         isDead?h("span",{style:{color:"#e07a7a",fontWeight:"bold"}},[" [Dead]"]):null,
         inspectPlayerButton(e.account_id,e.character_name),
       ]),
-      // v0.17.3 (#14): Gold dropped from this row -- see the new Gold tab (leaderboardGoldTab())
-      // for the account-bound gold total instead.
-      h("div",{class:"muted row",style:{alignItems:"center",gap:"4px",flexWrap:"wrap"},title:e.last_bridge_steps>0?"Bridge steps completed before their most recent Broken Bridge Trial failure":undefined},[
-        h("span",{},[`Lv ${e.level} ${e.class_name} `]), tierNode, h("span",{},[`, ${e.lifetime_xp||0} Experience`]),
+      // v0.18.1 (#34): grouped into one right-hand column (instead of 2 separate flex
+      // children of the outer space-between row) so this text always hugs the right edge
+      // regardless of how long the name/account block on the left happens to be -- before,
+      // 3 siblings sharing space-between let this stats line drift to wherever the leftover
+      // space put it, scattering the Lv/Tier/Exp values inconsistently row to row.
+      h("div",{style:{textAlign:"right"}},[
+        // v0.17.3 (#14): Gold dropped from this row -- see the new Gold tab
+        // (leaderboardGoldTab()) for the account-bound gold total instead.
+        // v0.18.1 (#16): shows e.xp (this character's progress toward ITS current level)
+        // instead of e.lifetime_xp (a monotonic lifetime total that never resets) -- a
+        // character rerolled to Level 1 by a failed Broken Bridge Trial was still showing
+        // its old lifetime total here, which read as a bug ("Lv1 ... 4127 Experience").
+        h("div",{class:"muted row",style:{alignItems:"center",gap:"4px",flexWrap:"wrap",justifyContent:"flex-end"},title:e.last_bridge_steps>0?"Bridge steps completed before their most recent Broken Bridge Trial failure":undefined},[
+          h("span",{},[`Lv ${e.level} ${e.class_name} `]), tierNode, h("span",{},[`, ${e.xp||0} Experience`]),
+        ]),
+        // v0.18 (#17): "Last seen" -- reads leaderboard_bests.updated_at (already stamped
+        // fresh on every character save, same signal #14's "Currently playing" line uses),
+        // exposed by the server as `last_active_at`.
+        h("div",{class:"muted",style:{fontSize:".85em",marginTop:"2px"}},[`Last seen: ${formatLastSeen(e.last_active_at)}`]),
       ]),
-      // v0.18 (#17): "Last seen" -- reads leaderboard_bests.updated_at (already stamped
-      // fresh on every character save, same signal #14's "Currently playing" line uses),
-      // exposed by the server as `last_active_at`.
-      h("div",{class:"muted",style:{fontSize:".85em",marginTop:"2px"}},[`Last seen: ${formatLastSeen(e.last_active_at)}`]),
     ]));
   });
 
@@ -4132,6 +4661,40 @@ function leaderboardGoldTab(){
   return root;
 }
 
+// v0.18.2 (#8): "Max Killstreak" leaderboard tab -- explicitly per-CHARACTER, not per-account
+// (Gwen's spec: "different characters on the same account can have different max killstreak
+// records"), so unlike the Gold tab (one row per account) this lists individual characters
+// same as the Skill Progression tab, complete with its own Inspect Player button. Server
+// already sorts+caps at 50 (see /api/leaderboard/killstreak), so this is a plain render, no
+// client-side ranking math needed (unlike Skill Progression's per-weapon-type breakdown).
+function leaderboardKillstreakTab(){
+  const root=h("div",{});
+  if(Net.leaderboardKillstreakCache===null||Net.leaderboardKillstreakCache===undefined){
+    root.appendChild(h("div",{class:"muted"},["Loading..."]));
+    Net.fetchLeaderboardKillstreak().then(render).catch(()=>{ setToast("Could not load the Max Killstreak leaderboard."); render(); });
+    return root;
+  }
+  const entries=Net.leaderboardKillstreakCache;
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"10px"}},["Top characters by longest Kill Streak ever reached (a lifetime record -- it never resets, even though the streak itself does when you return to Town). Different characters on the same account are ranked separately."]));
+  if(entries.length===0){ root.appendChild(h("div",{class:"muted"},["No kills recorded yet."])); return root; }
+  entries.forEach((e,i)=>{
+    root.appendChild(h("div",{class:"tile row",style:{marginBottom:"6px",justifyContent:"space-between",alignItems:"center"}},[
+      h("div",{style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},[
+        h("span",{class:"muted"},[`#${i+1} `]),
+        h("span",{style:{fontWeight:"bold"}},[e.character_name]),
+        " ",
+        h("span",{class:"muted"},[`(${e.player}) `]),
+        e.is_dead?h("span",{style:{color:"#e07a7a"},title:"Fallen"},["🪦 "]):null,
+      ]),
+      h("div",{class:"row",style:{alignItems:"center",flex:"none",gap:"6px"}},[
+        h("span",{},[`${e.max_kill_streak} kills`]),
+        inspectPlayerButton(e.account_id,e.character_name),
+      ]),
+    ]));
+  });
+  return root;
+}
+
 // v0.17.3 (#15): "Inspect Player" -- a strictly READ-ONLY view of another player's equipped
 // gear, attributes, and skill progression, reached via the magnifying-glass button on the
 // Ladder/Skill Progression tabs. This renders from a plain fetched data object
@@ -4146,7 +4709,7 @@ function inspectEquipSlotTile(slot,snapshot){
   const inst=snapshot.equipped[slot];
   return h("div",{class:"tile"},[
     h("div",{class:"muted"},[IF.slotLabel(slot)]),
-    inst?h("div",{class:"row gap",style:{alignItems:"center"}},[gearIcon(inst,26), h("div",{class:"tooltip rarity-"+inst.rarity,"data-tip":IF.tooltipText(inst)},[IF.displayName(inst)+` (T${inst.tier})`])]):h("div",{class:"muted"},["(empty)"]),
+    inst?h("div",{class:"row gap",style:{alignItems:"center"}},[gearIcon(inst,26), h("div",{class:"tooltip rarity-"+inst.rarity,"data-tip":IF.tooltipText(inst)},[IF.displayName(inst)+` (${tierRomanNumeral(inst.tier)})`])]):h("div",{class:"muted"},["(empty)"]),
   ]);
 }
 
@@ -4175,7 +4738,34 @@ function screenInspectPlayer(){
         s.is_dead?h("span",{style:{color:"#e07a7a",fontWeight:"bold"}},[" [Dead]"]):null,
       ]),
     ]),
-    h("div",{class:"muted"},[`Lv ${s.level} ${s.class_display_name} (Tier ${s.highest_tier_reached})`]),
+    h("div",{class:"muted"},[`Lv ${s.level} ${s.class_display_name} (${tierRomanNumeral(s.highest_tier_reached)})`]),
+  ]));
+
+  // v0.18.1 (#1): a read-only Broken Bridge Trial progress view -- shows how far this
+  // character got before their most recent trial failure (or a full crossing at 10/10).
+  // last_bridge_steps is the exact same value already public on the Leaderboard's
+  // "(Tier N, Step X/10)" row (see leaderboardLadderTab()'s tierNode), just surfaced in its
+  // own section here instead of requiring a trip back to the ladder. There's no per-plank
+  // safe/unsafe history to show (that layout is only ever held in-session client-side, see
+  // getTrialProgress()'s comment), so this is a step-count progress bar, not a full replay.
+  root.appendChild(h("h3",{},["Bridge Progress"]));
+  const bridgeSteps=s.last_bridge_steps||0;
+  root.appendChild(h("div",{class:"panel",style:{marginBottom:"12px"}},[
+    h("div",{class:"row",style:{justifyContent:"space-between",marginBottom:"6px"}},[
+      h("div",{},[`Tier ${tierRomanNumeral(s.highest_tier_reached)}`]),
+      h("div",{class:"muted"},[`Step ${bridgeSteps}/${Balance.BRIDGE_ROWS}`]),
+    ]),
+    bar(bridgeSteps/Balance.BRIDGE_ROWS*100,"bar-gold"),
+  ]));
+
+  // v0.18.2 (#6): read-only Forest Reputation for whichever tier this character is
+  // currently in -- same forest_reputation object PS itself keeps, keyed by tier, exposed
+  // by the server's whitelisted Inspect Player response (see its route comment).
+  root.appendChild(h("h3",{},["Forest Reputation"]));
+  const repMap=s.forest_reputation||{};
+  const currentRep=repMap[s.highest_tier_reached]||0;
+  root.appendChild(h("div",{class:"panel",style:{marginBottom:"12px"}},[
+    h("div",{},[`Tier ${tierRomanNumeral(s.highest_tier_reached)}: ${currentRep}`]),
   ]));
 
   root.appendChild(h("h3",{},["Attributes"]));
@@ -4275,7 +4865,7 @@ function kindleBonfirePanel(){
     : "The bonfire grants everyone in town +1 regeneration rate. But, if you throw Dry Logs into the fire, it surges temporarily, granting +7 increased regeneration rate per second, for 10 minutes.";
 
   return h("div",{class:"row venture-row"},[
-    h("div",{class:"panel venture-card"+(isKindled?"":" venture-clickable"),style:isKindled?{opacity:"0.75",cursor:"default"}:{},onClick:isKindled?null:()=>{
+    h("div",{class:"panel venture-card venture-fill"+(isKindled?"":" venture-clickable"),style:isKindled?{opacity:"0.75",cursor:"default"}:{},onClick:isKindled?null:()=>{
       setToast("Use the log button to feed the fire.");
       render();
     }},[
@@ -4312,7 +4902,7 @@ function screenTown(){
     // top-left: venture (with depth stepper merged in) + rest
     h("div",{class:"col gap"},[
       h("div",{class:"row venture-row"},[
-        h("div",{class:"panel venture-card venture-clickable",onClick:()=>{ PS.resetKillStreak(); GF.goto("maze",{maze_depth: ventureDepth}); }},[
+        h("div",{class:"panel venture-card venture-fill venture-clickable",onClick:()=>{ PS.resetKillStreak(); GF.goto("maze",{maze_depth: ventureDepth}); }},[
           h("div",{class:"venture-title"},["🌳 Venture into the Woods"]),
           h("div",{class:"muted",style:{fontSize:".85em",marginTop:"2px"}},[`Area Level: ${ventureDepth}`]),
         ]),
@@ -4434,13 +5024,16 @@ function generateMaze(depth){
     if(roll<Balance.MAZE_CHEST_CHANCE_PER_TILE){ c.type="chest"; continue; }
     if(roll<Balance.MAZE_CHEST_CHANCE_PER_TILE+Balance.MAZE_SHRINE_CHANCE_PER_TILE){ c.type="shrine"; continue; }
     if(roll<Balance.MAZE_CHEST_CHANCE_PER_TILE+Balance.MAZE_SHRINE_CHANCE_PER_TILE+Balance.MAZE_HERB_CHANCE_PER_TILE){ c.type="herb"; continue; }
-    if(roll<Balance.MAZE_CHEST_CHANCE_PER_TILE+Balance.MAZE_SHRINE_CHANCE_PER_TILE+Balance.MAZE_HERB_CHANCE_PER_TILE+Balance.MAZE_TRAPDOOR_CHANCE_PER_TILE){ c.type="trapdoor"; c.wasHidden=true; continue; }
+    // v0.18.2 (#6): non-moving critter encounters, rolled right alongside the other
+    // per-tile content types above -- see MAZE_CRITTER_CHANCE_PER_TILE's declaration.
+    if(roll<Balance.MAZE_CHEST_CHANCE_PER_TILE+Balance.MAZE_SHRINE_CHANCE_PER_TILE+Balance.MAZE_HERB_CHANCE_PER_TILE+Balance.MAZE_CRITTER_CHANCE_PER_TILE){ c.type="critter"; continue; }
+    if(roll<Balance.MAZE_CHEST_CHANCE_PER_TILE+Balance.MAZE_SHRINE_CHANCE_PER_TILE+Balance.MAZE_HERB_CHANCE_PER_TILE+Balance.MAZE_CRITTER_CHANCE_PER_TILE+Balance.MAZE_TRAPDOOR_CHANCE_PER_TILE){ c.type="trapdoor"; c.wasHidden=true; continue; }
     // v0.17 (#7): the damage/poison ankle-bite trap is no longer hidden once discovered --
     // it deliberately does NOT set wasHidden here (unlike trapdoor just above), so it shows
     // its own distinct icon/color once inside fog-of-war range (see HIDDEN_TILE_TYPES/
     // TILE_GLYPH.trap/TILE_COLOR.trap below), letting players actively route around it.
     // Trapdoors stay exactly as invisible/surprise as before, per Gwen's explicit spec.
-    if(roll<Balance.MAZE_CHEST_CHANCE_PER_TILE+Balance.MAZE_SHRINE_CHANCE_PER_TILE+Balance.MAZE_HERB_CHANCE_PER_TILE+Balance.MAZE_TRAPDOOR_CHANCE_PER_TILE+Balance.TRAP_CHANCE_PER_TILE){ c.type="trap"; }
+    if(roll<Balance.MAZE_CHEST_CHANCE_PER_TILE+Balance.MAZE_SHRINE_CHANCE_PER_TILE+Balance.MAZE_HERB_CHANCE_PER_TILE+Balance.MAZE_CRITTER_CHANCE_PER_TILE+Balance.MAZE_TRAPDOOR_CHANCE_PER_TILE+Balance.TRAP_CHANCE_PER_TILE){ c.type="trap"; }
   }
 
   // v0.18 (#2): roaming mobs spawn AFTER the per-tile content rolls above, on whatever
@@ -4454,7 +5047,12 @@ function generateMaze(depth){
   const openTiles=cells.filter((c,i)=>dist[i]>0 && (c.type==="grass"||c.type==="dirt"));
   shuffle(openTiles);
   const roamers=[];
-  for(let r=0;r<Math.min(Balance.ROAMING_MOB_COUNT_PER_MAZE, openTiles.length);r++){
+  // v0.18.2 (#6): a NEGATIVE Forest Reputation (in the tier this maze's forest belongs to,
+  // see PS.getCurrentForestReputation()) adds one extra roaming mob per point below zero --
+  // "a player can choose his path, go for a large amount of roaming mobs, or be peaceful and
+  // accumulate bonus experience gain" per Gwen's spec. Positive/zero reputation adds none.
+  const roamerCount=Balance.ROAMING_MOB_COUNT_PER_MAZE+PS.getForestReputationExtraRoamers();
+  for(let r=0;r<Math.min(roamerCount, openTiles.length);r++){
     const tile=openTiles[r];
     roamers.push({roamerId:r, idx:idx(tile.x,tile.y), monsterId:DL.pickRandomMonsterForArea(depth).id, defeated:false});
   }
@@ -4584,9 +5182,13 @@ function resetMazePositionToStart(){
 // opposite as of v0.17 (#7): it gets its own glyph/color below so it's visible (once inside
 // fog-of-war range) and a player can choose to walk around it.
 const TILE_GLYPH={start:"🏕",exit:"⬇",chest:"🎁",shrine:"✨",herb:"🌿",boulder:"🪨",grass:"",dirt:"",trap:"⚠️",
-  stronghold_chest:"🔒",stronghold_guardian:"💀",stronghold_fence:"🪵"};
+  stronghold_chest:"🔒",stronghold_guardian:"💀",stronghold_fence:"🪵",
+  // v0.18.2 (#6): visible once discovered, same as chest/herb/shrine/trap -- not hidden like
+  // a trapdoor. There's nothing to ambush you here, so there's no reason to hide it.
+  critter:"🐛"};
 const TILE_COLOR={start:"#2a4a2a",exit:"#3a3a6a",chest:"#5a4a1a",shrine:"#3a5a5a",herb:"#2a4a2a",boulder:"#3a3a34",grass:"#274a1e",dirt:"#4a3a26",trap:"#5a2a1a",
-  stronghold_chest:"#5a4a1a",stronghold_guardian:"#6a1e1e",stronghold_fence:"#4a3a26"};
+  stronghold_chest:"#5a4a1a",stronghold_guardian:"#6a1e1e",stronghold_fence:"#4a3a26",
+  critter:"#3a4a2a"};
 const HIDDEN_TILE_TYPES=["trapdoor"];
 // v0.18 (#2): roaming mobs aren't a cell type (their tile changes every step -- see
 // tickRoamingMobs()), so they're not part of TILE_GLYPH/TILE_COLOR above -- screenMaze()'s
@@ -4668,8 +5270,17 @@ function screenMaze(){
         const hidden=!!cell.wasHidden || HIDDEN_TILE_TYPES.includes(cell.type);
         const displayType=HIDDEN_TILE_TYPES.includes(cell.type)?cell.baseTerrain:cell.type;
         let bg="#050505", label="", border="1px solid #222", opacity="1";
-        if(isPlayer){ bg="#e0c96a"; }
-        else if(isKnown){
+        // v0.18.1 (#21): the player's own tile (and, below, a live roamer's tile) used to be
+        // painted over with a flat highlight color/glyph here, baked directly into whichever
+        // cell index currently held them -- meaning on every step the "player" visually
+        // teleported from one tile div to the next (a brand new DOM node each render(), so
+        // there was nothing for a CSS transition to animate between). Gwen asked for actual
+        // smooth movement instead, so the underlying terrain is now always shown plain (same
+        // as it would be if nobody were standing on it), and a separate .maze-mover overlay
+        // element (added after this loop, positioned absolutely over the grid) represents the
+        // player/each roamer instead -- see animateMazeMovers() for how that overlay actually
+        // glides from its old tile to its new one after a step.
+        if(isKnown){
           bg=TILE_COLOR[displayType]||TILE_COLOR.dirt;
           label=TILE_GLYPH[displayType]||"";
           // v0.16 (#333): fade a trampled grass tile toward the dirt color in 3 gradient
@@ -4679,16 +5290,30 @@ function screenMaze(){
             bg=interpolateHexColor(TILE_COLOR.grass, TILE_COLOR.dirt, Math.min(3,cell.trampleCount)/3);
           }
           if(cell.cleared && !hidden) opacity="0.4"; // hidden tiles never visually change, even once triggered
-          // v0.18 (#2): a live roaming mob overlays whatever plain grass/dirt tile it's
-          // currently standing on -- checked last so it visually takes priority over the
-          // (otherwise empty) grass/dirt glyph/color underneath it.
-          const roamerHere=maze.roamers && maze.roamers.find(r=>!r.defeated && r.idx===i);
-          if(roamerHere){ bg=ROAMING_MOB_COLOR; label=ROAMING_MOB_GLYPH; }
         }
         const inner=h("span",{style:{opacity}},[label]);
         const tile=h("div",{class:"maze-tile",style:{background:bg,display:"flex",alignItems:"center",justifyContent:"center",cursor:isWalkable?"pointer":"default",fontSize:"16px",border}},[inner]);
         if(isWalkable){ tile.addEventListener("click",()=>onStepMaze(maze,i)); }
         grid.appendChild(tile);
+      }
+    }
+    // v0.18.1 (#21): the player marker + one marker per live roamer, absolutely positioned
+    // on top of the plain grid built above (grid has position:relative, see .maze-grid CSS).
+    // Each tile is 34px + a 1px gap, hence the *35 step. These are looked up by id and
+    // animated in animateMazeMovers(), called right after render() by every onStepMaze()
+    // branch that keeps the player on this same maze screen (a branch that instead navigates
+    // away, e.g. into combat or a chest, has no grid left to animate, so it skips the call).
+    grid.appendChild(h("div",{id:"maze-player-marker",class:"maze-mover maze-mover-player",style:{left:(px*35)+"px",top:(py*35)+"px"}}));
+    if(maze.roamers){
+      for(const r of maze.roamers){
+        if(r.defeated) continue;
+        // v0.18.1 (#21): only rendered on an already-discovered tile -- same fog-of-war
+        // gating the old baked-in roamer overlay respected (it lived inside the `if(isKnown)`
+        // branch above), so a roaming mob still can't be spotted through unexplored fog.
+        const rCell=maze.cells[r.idx];
+        if(!(rCell.discovered || rCell.type==="start")) continue;
+        const rx=r.idx%maze.size, ry=Math.floor(r.idx/maze.size);
+        grid.appendChild(h("div",{id:"maze-roamer-marker-"+r.roamerId,class:"maze-mover maze-mover-roamer",style:{left:(rx*35)+"px",top:(ry*35)+"px",background:ROAMING_MOB_COLOR}},[ROAMING_MOB_GLYPH]));
       }
     }
     gridArea=grid;
@@ -4715,6 +5340,14 @@ function screenMaze(){
         // needs to be able to cure it from the maze view itself, not just in town.
         h("button",{disabled:!PS.canUseConsumable("antidote"),onClick:()=>{ PS.useConsumable("antidote"); autosave(); render(); }},["Use Antidote"]),
       ]),
+      // v0.18.2 (#1) (lore phrasing credit: Marudok): regenerates a brand new layout at the
+      // SAME area level -- fog of war, roamer positions, the Stronghold, everything about
+      // this maze instance resets, since none of it is persisted anywhere (see
+      // GF.overworld_snapshot's own comment). Added because a roaming mob (or an unlucky
+      // boulder layout) can occasionally wall off the only path to the exit entirely, and
+      // the only workaround used to be venturing up a level and back down just to force a
+      // regeneration -- this does the same thing directly, without leaving the screen.
+      h("button",{onClick:()=>{ askConfirm("Try a different route through this area? Your current position and any progress on this maze layout (fog of war, cleared chests/shrines, the Stronghold) will be lost -- your area level stays the same.",()=>{ GF.overworld_snapshot=null; GF.goto("maze",{maze_depth:depth}); },{confirmLabel:"Try a Different Route"}); }},["Try a Different Route"]),
       h("button",{onClick:()=>{ resetMazePositionToStart(); GF.goto("town"); }},["← Retreat to Town"]),
     ]),
   ]));
@@ -4738,6 +5371,48 @@ function tickEyesightPotion(){
   }
 }
 
+// v0.18.1 (#21): glides the player marker (and any live roamer markers) from their OLD grid
+// position to their current one, called right after a render() that keeps the player on this
+// same maze screen (see screenMaze()'s comment on the .maze-mover overlay elements this
+// looks up by id). Same snap-old-position-then-restore-transition trick as
+// animateXpBarGrowth() -- a freshly rendered node has no "old" position of its own to
+// transition from, so this forces it there instantly (transition:none), then a moment later
+// (after the browser's had a chance to paint that frame) sets it to its real, current
+// position with the transition restored, so the visible change animates instead of snapping.
+// `prevPlayerIdx`/`prevRoamerPositions` (a {roamerId:idx} map) must be captured BEFORE
+// onStepMaze() mutates maze.playerIdx / ticks roamer movement.
+function animateMazeMovers(prevPlayerIdx, prevRoamerPositions){
+  const maze=GF.overworld_snapshot;
+  if(!maze) return;
+  const cellPx=(idx)=>({x:(idx%maze.size)*35+"px", y:Math.floor(idx/maze.size)*35+"px"});
+  const playerEl=document.getElementById("maze-player-marker");
+  if(playerEl && playerEl.parentNode && prevPlayerIdx!=null && prevPlayerIdx!==maze.playerIdx){
+    const from=cellPx(prevPlayerIdx), to=cellPx(maze.playerIdx);
+    playerEl.style.transition="none";
+    playerEl.style.left=from.x; playerEl.style.top=from.y;
+    setTimeout(()=>{
+      playerEl.style.transition="";
+      playerEl.style.left=to.x; playerEl.style.top=to.y;
+    },20);
+  }
+  if(maze.roamers && prevRoamerPositions){
+    for(const r of maze.roamers){
+      if(r.defeated) continue;
+      const prevIdx=prevRoamerPositions[r.roamerId];
+      if(prevIdx==null || prevIdx===r.idx) continue;
+      const el=document.getElementById("maze-roamer-marker-"+r.roamerId);
+      if(!el || !el.parentNode) continue;
+      const from=cellPx(prevIdx), to=cellPx(r.idx);
+      el.style.transition="none";
+      el.style.left=from.x; el.style.top=from.y;
+      setTimeout(()=>{
+        el.style.transition="";
+        el.style.left=to.x; el.style.top=to.y;
+      },20);
+    }
+  }
+}
+
 function onStepMaze(maze,targetIdx){
   // Exhaustion is checked BEFORE moving, and no longer force-teleports the player to
   // town: that gave no chance to react (e.g. drink a Stamina Potion via the maze's
@@ -4750,6 +5425,12 @@ function onStepMaze(maze,targetIdx){
     render();
     return;
   }
+  // v0.18.1 (#21): captured BEFORE this step mutates maze.playerIdx or tickRoamingMobs()
+  // moves any roamer -- see animateMazeMovers() above, called after every render() below
+  // that keeps the player on this same maze screen.
+  const prevPlayerIdx=maze.playerIdx;
+  const prevRoamerPositions={};
+  if(maze.roamers) for(const r of maze.roamers) prevRoamerPositions[r.roamerId]=r.idx;
   const cell=maze.cells[targetIdx];
   maze.playerIdx=targetIdx; cell.discovered=true; cell.visited=true;
   PS.spendStamina(Balance.STAMINA_COST_PER_STEP);
@@ -4797,6 +5478,16 @@ function onStepMaze(maze,targetIdx){
     cell.cleared=true;
     const nextDepth=maze.depth+Balance.EXIT_DEPTH_BONUS_PER_DESCENT;
     PS.max_maze_depth_reached=Math.max(PS.max_maze_depth_reached||1, nextDepth);
+    // v0.18.2 (#3) BUG FIX: the Town Venture selector (GF.ventureDepth) used to only ever
+    // get bumped by getVentureDepth()'s own "a brand NEW lifetime max was just unlocked"
+    // side effect -- so a player who manually stepped the selector DOWN below their real
+    // max (e.g. Lv3 -> Lv1) and then advanced naturally back up through exits they'd
+    // already unlocked before (nextDepth <= PS.max_maze_depth_reached, so that side effect
+    // never fires) saw the selector stay frozen at 1 even as they visibly climbed back to
+    // 2, then 3. Explicitly tracking "the depth I'm actually standing in right now" here
+    // (and at the trapdoor branch below) means the selector always reflects real current
+    // progress the next time they're back in Town, whether or not it's a new lifetime best.
+    GF.ventureDepth=nextDepth;
     autosave();
     GF.mazeOverlay={text:`Advanced to area level ${nextDepth}!`, andThen:()=>{ GF.overworld_snapshot=null; GF.goto("maze",{maze_depth:nextDepth}); }};
     render();
@@ -4807,8 +5498,12 @@ function onStepMaze(maze,targetIdx){
     const dmg=randRange(Balance.TRAP_DAMAGE_MIN,Balance.TRAP_DAMAGE_MAX);
     PS.current_hp=Math.max(1,PS.current_hp-dmg);
     PS.spendStamina(Balance.TRAP_STAMINA_LOSS);
-    autosave();
     const fallDepth=Math.max(1,maze.depth-Balance.TRAPDOOR_DEPTH_PENALTY);
+    // v0.18.2 (#3): same "keep the Town selector honest" fix as the exit branch above --
+    // a trapdoor fall is also a real, involuntary change to the depth the player is
+    // currently standing in, so the selector needs to follow it back down too.
+    GF.ventureDepth=fallDepth;
+    autosave();
     GF.mazeOverlay={text:"Trapdoor!", andThen:()=>{ GF.overworld_snapshot=null; GF.goto("maze",{maze_depth:fallDepth}); }};
     render();
     return;
@@ -4816,6 +5511,18 @@ function onStepMaze(maze,targetIdx){
   if(cell.type==="trap" && !cell.cleared){
     cell.cleared=true; cell.type=cell.baseTerrain;
     PS.spendStamina(Balance.TRAP_STAMINA_LOSS);
+    // v0.18.1 (#26): Touch of Unicorn (the Invulnerability shrine buff) used to only guard
+    // against combat damage -- an ankle-bite trap's instant damage or poison bite would still
+    // land in full even while "immune to damage" was visibly showing on the HP bar, which
+    // read as a bug/broken promise to players. It now blocks a trap's damage/poison outright,
+    // consuming one round of the buff (same cost as blocking one monster attack in combat via
+    // tickCombatRoundBuffs()) so an active Touch of Unicorn is a single shared pool of
+    // "protected instances" whether they come from combat rounds or maze traps.
+    if(PS.isInvulnerable()){
+      PS.invuln_rounds_left--;
+      mazeLog(`Something bites at your ankle, but the Touch of Unicorn shields you! (${PS.invuln_rounds_left} round${PS.invuln_rounds_left===1?"":"s"} left)`);
+      autosave(); render(); animateMazeMovers(prevPlayerIdx,prevRoamerPositions); return;
+    }
     // v0.17.1 (#11) BUG FIX: a trap used to ALWAYS deal its instant damage AND, on top of
     // that, roll a chance (see Balance.trapShouldPoison()) to ALSO inflict Poison from the
     // very same trigger -- player reports called this an unfair double-punish. A trap is now
@@ -4826,7 +5533,7 @@ function onStepMaze(maze,targetIdx){
     if(Balance.trapShouldPoison(maze.depth)){
       PS.applyPoison(maze.depth);
       mazeLog(`Something bites at your ankle! No wound, but you feel a poison take hold.`);
-      autosave(); render(); return;
+      autosave(); render(); animateMazeMovers(prevPlayerIdx,prevRoamerPositions); return;
     }
     // v0.13: scales with area level now (Gwen's report: a flat 4-12 damage trap was a
     // non-event at area level 13 with 357 HP) and can be outright lethal -- it no longer
@@ -4843,7 +5550,7 @@ function onStepMaze(maze,targetIdx){
     // v0.18 (#10): also show the floating "-X HP" overlay near the player's HP bar, same as
     // any other source of damage, in addition to the existing toast/lore message above.
     spawnFloat("player",`-${Math.round(dmg)} HP`,"float-text-dmg");
-    autosave(); render(); return;
+    autosave(); render(); animateMazeMovers(prevPlayerIdx,prevRoamerPositions); return;
   }
   if(cell.type==="shrine" && !cell.cleared){
     cell.cleared=true;
@@ -4852,13 +5559,19 @@ function onStepMaze(maze,targetIdx){
     const roll=Math.floor(Math.random()*5);
     if(roll===0){ PS.addStaminaShrineBuff(Balance.STAMINA_MAX_BASE*Balance.SHRINE_STAMINA_BUFF_PCT); mazeLog("A quiet shrine restores your stamina and grants a lasting reserve!"); }
     else if(roll===1){ PS.applyXpShrineBuff(); mazeLog("A quiet shrine blesses you, bonus experience for a while!"); }
-    else if(roll===2){ PS.applyInvulnShrineBuff(); mazeLog(`A radiant shrine grants you the Touch of Unicorn -- you are immune to damage for ${Balance.SHRINE_INVULN_ROUNDS} combat rounds!`); }
+    else if(roll===2){ PS.applyInvulnShrineBuff(); mazeLog(`A radiant shrine grants you the Touch of Unicorn -- you are immune to damage/poison from combat or traps for ${Balance.SHRINE_INVULN_ROUNDS} rounds!`); }
     else if(roll===3){ PS.applyQuadDamageShrineBuff(); mazeLog(`A furious shrine quadruples your damage output for ${Balance.SHRINE_QUAD_DAMAGE_ROUNDS} combat rounds!`); }
     else { PS.applyMagicFindShrineBuff(); mazeLog(`A glimmering shrine sharpens your eye for treasure -- +${Balance.SHRINE_MAGIC_FIND_PCT}% Magic Find for a while!`); }
-    autosave(); render(); return;
+    autosave(); render(); animateMazeMovers(prevPlayerIdx,prevRoamerPositions); return;
   }
   if(cell.type==="herb" && !cell.cleared){
     GF.goto("herbEncounter",{maze_depth:maze.depth, herb_cell_idx:targetIdx});
+    return;
+  }
+  if(cell.type==="critter" && !cell.cleared){
+    // v0.18.2 (#6): non-moving critter encounter -- squash it (Forest Reputation -1) or
+    // spare it (+1), see screenCritterEncounter().
+    GF.goto("critterEncounter",{maze_depth:maze.depth, critter_cell_idx:targetIdx});
     return;
   }
   if(cell.type==="chest" && !cell.cleared){
@@ -4908,6 +5621,7 @@ function onStepMaze(maze,targetIdx){
   }
   autosave();
   render();
+  animateMazeMovers(prevPlayerIdx,prevRoamerPositions);
 }
 
 // v0.16 (#332): shared by the keydown handler below AND the on-screen mobile D-pad (see
@@ -5076,7 +5790,11 @@ function mazeLogBox(){
 }
 
 function grantLoot(lootTable, mult){
-  const loot=DL.rollLoot(lootTable);
+  // v0.18.2 (#9): Magic Find now also improves the odds of getting SOME loot at all (see
+  // DL.rollLoot()'s reroll-on-"nothing"), not just which rarity a successful gear roll lands
+  // on -- passed through here so every grantLoot() call site (monster kills, chests) benefits
+  // automatically without each needing its own change.
+  const loot=DL.rollLoot(lootTable, PS.getMagicFind());
   if(loot.type==="gear"){
     const tier=Balance.rollItemTier(GF.maze_depth);
     const inst=IF.generate(tier);
@@ -5164,7 +5882,17 @@ function screenCombat(){
 
   const portraitWrap=h("div",{style:{width:"140px",height:"140px",margin:"0 auto 8px"}});
   portraitWrap.innerHTML=monsterPortrait(cb.monster_id,{slain:cb.defeated});
-  const mobPanel=h("div",{class:"panel",style:{flex:"0 0 50%",maxWidth:"50%"}},[
+  // v0.18.1 (#23): the entire monster tile is now clickable to attack, not just the small
+  // "Attack" button below it -- per Gwen's spec, players expect to be able to click directly
+  // on the monster itself. Only wired up while the fight is still ongoing (cb.defeated is
+  // handled by its own early-return branch further down, before the Attack button even
+  // exists, so this mirrors that same gating). playerTurn() is declared further down in this
+  // same function, but function declarations are hoisted, so it's already callable here.
+  const mobPanel=h("div",{
+    class:"panel",
+    style:{flex:"0 0 50%",maxWidth:"50%",cursor:cb.defeated?"default":"pointer"},
+    onClick:cb.defeated?undefined:()=>playerTurn(),
+  },[
     portraitWrap,
     h("div",{style:{fontWeight:"bold",textAlign:"center"}},[cb.name]),
     h("div",{style:{textAlign:"center"}},[`HP ${Math.round(Math.max(0,cb.hp))}/${Math.round(cb.maxHp)}`]),
@@ -5230,26 +5958,43 @@ function screenCombat(){
     }
     if(!mobBlocked && cb.hp<=0){
       cb.hp=0;
-      // v0.17.3 (#16) AUDIT: gold/XP/loot no longer get a Kill Streak multiplier -- see
-      // Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL's comment. The streak's ONLY remaining
-      // effect is the Magic Find bonus rolled into PS.getMagicFind() (which grantLoot()'s
-      // gear roll already reads through IF.generate() -> Balance.rollRarity()), so a
-      // longer streak still means better loot on average, just via rarity odds instead of
-      // a flat quantity/XP/gold multiplier.
+      // v0.17.3 (#16) AUDIT: gold/XP no longer get a Kill Streak multiplier -- see
+      // Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL's comment. The streak's effect is
+      // entirely via the Magic Find bonus rolled into PS.getMagicFind(), which grantLoot()
+      // reads for BOTH halves of the loot roll: gear rarity (through IF.generate() ->
+      // Balance.rollRarity(), unchanged since v0.17.1) AND, as of v0.18.2 (#9), the odds of
+      // getting a drop at all (see DL.rollLoot()'s reroll-on-"nothing") -- so a longer
+      // streak now means both better AND more loot on average, still with no flat XP/gold
+      // multiplier.
       const gold=randIntRange(cb.goldMin,cb.goldMax);
+      // v0.18.2 (#7): "Currently playing" is now also a community XP buff -- every kill's
+      // XP gets multiplied by the current active-player count (1 = just yourself = no
+      // bonus, 2 = double, 3 = triple, and so on -- see getGlobalXpMultiplier()'s comment).
+      // Applied here, AFTER shrine/guardian/roamer xpMult already baked into cb.xp at
+      // ensureCombat() time, so it stacks multiplicatively on top of those exactly like the
+      // "Currently playing" spec describes ("experience gained is doubled for everyone"),
+      // not folded into cb.xp itself -- cb.xp needs to stay the "base for this kill" number
+      // in case anything else ever reads it before this multiplier is known.
+      // v0.18.2.1 CORRECTION: Forest Reputation's positive bonus is a persistent PERCENTAGE
+      // multiplier (+10% XP gained per point, for as long as you're in that tier's forest),
+      // not the flat +10-XP-per-point bonus originally shipped in v0.18.2 -- it stacks
+      // multiplicatively right alongside the "Currently playing" community multiplier above,
+      // and is only ever a bonus, never a penalty when reputation is negative (see
+      // PS.getForestReputationXpMult()).
+      const xpGained=cb.xp*getGlobalXpMultiplier()*PS.getForestReputationXpMult();
       // v0.18 (#7): captured BEFORE addXp() mutates PS.xp, so animateXpBarGrowth() below
       // (called after this kill's render()) knows where the bar visually started from.
       const preKillXpFraction=PS.xp_to_next>0?(PS.xp/PS.xp_to_next):0;
-      const leveled=PS.addXp(cb.xp);
+      const leveled=PS.addXp(xpGained);
       PS.addGold(gold);
       // v0.18 (#9): "+8 XP" in purple, gold amount in gold color -- both anchored near the
       // player's own stat row/HP bar, same as any other player-side floating text.
-      spawnFloat("player",`+${Math.round(cb.xp)} XP`,"float-text-xp");
+      spawnFloat("player",`+${Math.round(xpGained)} XP`,"float-text-xp");
       spawnFloat("player",`+${gold}g`,"float-text-gold");
       PS.incrementKillStreak();
       const lootMsg=grantLoot(cb.loot_table);
       cb.defeated=true;
-      cb.result_text=`${cb.name} defeated! +${Math.round(cb.xp)} XP, +${Math.round(gold)} gold. ${lootMsg}`;
+      cb.result_text=`${cb.name} defeated! +${Math.round(xpGained)} XP, +${Math.round(gold)} gold. ${lootMsg}`;
       if(cb.isGuardian){
         // v0.12: beating a Stronghold guardian opens the direct path to that Stronghold's
         // chest (any 1 of the 4 is enough), and has its own independent 5% chance to drop
@@ -5271,7 +6016,7 @@ function screenCombat(){
           // them up to open a high-level chest later, per Gwen's stated reason for asking.
           const keyTier=Balance.strongholdKeyTierForAreaLevel(GF.maze_depth);
           PS.addConsumable(Balance.strongholdKeyItemIdForTier(keyTier),1);
-          cb.result_text+=` It drops a Stronghold Key (Tier ${keyTier})!`;
+          cb.result_text+=` It drops a Stronghold Key (Tier ${tierRomanNumeral(keyTier)})!`;
         } else if(keyEligible){
           cb.result_text+=" The path to the Stronghold's chest is open, if you can find a key.";
         } else {
@@ -5378,7 +6123,7 @@ function screenChest(){
     h("div",{},[`Pry it open: ${chest.hits_done}/${chest.hits_required} hits`]),
     bar(chest.hits_done/chest.hits_required*100,"bar-gold"),
   ]));
-  root.appendChild(h("div",{class:"row"},[
+  root.appendChild(h("div",{class:"row",style:{marginTop:"10px"}},[
     h("button",{class:"play",onClick:()=>{
       chest.hits_done++;
       if(chest.hits_done>=chest.hits_required){
@@ -5429,15 +6174,15 @@ function screenStrongholdChest(){
   const requiredKeyId=Balance.strongholdKeyItemIdForTier(requiredTier);
   const keyCount=PS.consumables[requiredKeyId]||0;
   if(keyCount<=0){
-    root.appendChild(h("div",{class:"panel"},[`This chest is sealed tight, you'll need a Tier ${requiredTier} Stronghold Key to open it (this area is Tier ${requiredTier}) -- a key of any other tier won't fit. Guardians have a small chance to drop one matching their own area's tier when defeated.`]));
-    root.appendChild(h("div",{class:"row"},[
+    root.appendChild(h("div",{class:"panel"},[`This chest is sealed tight, you'll need a Tier ${tierRomanNumeral(requiredTier)} Stronghold Key to open it (this area is Tier ${tierRomanNumeral(requiredTier)}) -- a key of any other tier won't fit. Guardians have a small chance to drop one matching their own area's tier when defeated.`]));
+    root.appendChild(h("div",{class:"row",style:{marginTop:"10px"}},[
       h("button",{onClick:()=>{ GF.goto("maze",{maze_depth:GF.maze_depth}); }},["Leave it"]),
     ]));
     return root;
   }
 
-  root.appendChild(h("div",{class:"panel"},[`You have ${keyCount} Tier ${requiredTier} Stronghold Key${keyCount===1?"":"s"}, a match for this area. Use one to open this chest?`]));
-  root.appendChild(h("div",{class:"row"},[
+  root.appendChild(h("div",{class:"panel"},[`You have ${keyCount} Tier ${tierRomanNumeral(requiredTier)} Stronghold Key${keyCount===1?"":"s"}, a match for this area. Use one to open this chest?`]));
+  root.appendChild(h("div",{class:"row",style:{marginTop:"10px"}},[
     h("button",{class:"play",onClick:()=>{
       PS._removeConsumableOne(requiredKeyId);
       const tier=Balance.rollItemTier(GF.maze_depth);
@@ -5521,12 +6266,14 @@ function screenHerbEncounter(){
   root.appendChild(h("div",{class:"row"},[
     h("button",{onClick:()=>{
       node.ticks_done++;
-      // v0.17.1 (#7): every Gather click is one herbalism "strike" and grants exactly 1
-      // permanent herbalism point, regardless of whether this click happens to finish the
-      // node -- so a 2-strike herb nets 2 points total, a 4-strike herb nets 4, matching
-      // Gwen's spec literally. A level-up shows its own toast on top of the gather result.
-      const skillResult=PS.registerHerbalismStrike();
       if(node.ticks_done>=node.ticks_required){
+        // v0.18.1 (#25): herbalism points are now awarded ONLY here, on full completion of
+        // the node -- not per click -- to close an exploit where a player could click
+        // Gather once, then "Leave it" before finishing, and repeat on a fresh node forever
+        // for free points with no herb ever collected. The node's full ticks_required is
+        // credited at once, so a 4-strike herb still nets exactly 4 points overall, same
+        // total as before -- it just can't be farmed piecemeal anymore.
+        const skillResult=PS.registerHerbalismStrike(node.ticks_required);
         // v0.12: herb nodes are rarer than they used to be and cost a few clicks to work,
         // so the payout was bumped from a flat 1 up to a healthy 1-12 per node to make the
         // detour worth it.
@@ -5538,7 +6285,6 @@ function screenHerbEncounter(){
         GF.goto("maze",{maze_depth:GF.maze_depth});
         return;
       }
-      if(skillResult.leveledUp) setToast(`Your Herbalism proficiency reaches level ${skillResult.newLevel}!`);
       render();
     }},["Gather"]),
     h("button",{onClick:()=>{ GF.herbNode=null; GF.goto("maze",{maze_depth:GF.maze_depth}); }},["Leave it"]),
@@ -5546,6 +6292,53 @@ function screenHerbEncounter(){
   return root;
 }
 
+/* ================= CRITTER ENCOUNTER ================= */
+// v0.18.2 (#6): a non-moving critter encounter -- squash it (Forest Reputation -1) or spare
+// it (+1), reusing the exact same hits_done/hits_required progress-bar scaffold chests and
+// herb nodes already use (see Balance.CRITTER_HITS_REQUIRED's comment for why "1 strike =
+// dead" is still expressed as a progress bar, not a single hardcoded action).
+
+function ensureCritter(){
+  if(!GF.critter || GF.critter.cell_idx!==GF.critter_cell_idx){
+    GF.critter={cell_idx:GF.critter_cell_idx, hits_required:Balance.CRITTER_HITS_REQUIRED, hits_done:0};
+  }
+  return GF.critter;
+}
+
+function screenCritterEncounter(){
+  const critter=ensureCritter();
+  const root=h("div",{});
+  root.appendChild(h("h2",{},["A small critter, minding its own business"]));
+  root.appendChild(h("div",{class:"lore"},["It hasn't noticed you. Whatever you decide, it won't fight back."]));
+  root.appendChild(statHeader());
+  root.appendChild(h("div",{class:"panel"},[
+    h("div",{},[`Squash: ${critter.hits_done}/${critter.hits_required}`]),
+    bar(critter.hits_done/critter.hits_required*100,"bar-hp"),
+    h("div",{class:"muted",style:{marginTop:"6px",fontSize:".9em"}},[`Current Forest Reputation (this tier): ${PS.getCurrentForestReputation()}`]),
+  ]));
+  root.appendChild(h("div",{class:"row",style:{marginTop:"10px"}},[
+    h("button",{class:"play",onClick:()=>{
+      critter.hits_done++;
+      if(critter.hits_done>=critter.hits_required){
+        PS.adjustForestReputation(-1);
+        if(GF.overworld_snapshot) GF.overworld_snapshot.cells[critter.cell_idx].cleared=true;
+        GF.critter=null; autosave();
+        setToast(`Squashed. Forest Reputation is now ${PS.getCurrentForestReputation()}.`);
+        GF.goto("maze",{maze_depth:GF.maze_depth});
+        return;
+      }
+      render();
+    }},["Squash the Bug"]),
+    h("button",{onClick:()=>{
+      PS.adjustForestReputation(1);
+      if(GF.overworld_snapshot) GF.overworld_snapshot.cells[critter.cell_idx].cleared=true;
+      GF.critter=null; autosave();
+      setToast(`Spared. Forest Reputation is now ${PS.getCurrentForestReputation()}.`);
+      GF.goto("maze",{maze_depth:GF.maze_depth});
+    }},["Spare Its Life"]),
+  ]));
+  return root;
+}
 
 // v0.17.3 (#10): shared "Comparison" popup shown alongside a gear item's normal tooltip
 // wherever the player is looking at gear they DON'T currently have on (Inventory backpack,
@@ -5553,20 +6346,62 @@ function screenHerbEncounter(){
 // Blacksmith's sell list), so they can tell at a glance whether it beats what's equipped
 // without leaving the screen to check. A ring compares against BOTH ring slots (there's no
 // single "the" equipped ring), everything else maps 1:1 onto its own equip slot.
+// v0.18.1 (#13): sums an item's affixes into a {stat: totalValue} map (an item could in
+// principle roll two affixes of the same stat, so this sums rather than assumes uniqueness)
+// -- used to compute per-stat deltas between the hovered item and whatever's equipped.
+function gearAffixMap(inst){
+  const m={};
+  for(const a of (inst.affixes||[])) m[a.stat]=(m[a.stat]||0)+a.value;
+  return m;
+}
+// Renders the "(+N)"/"(-N)" delta span for one stat, colored green/red -- returns null for
+// a zero delta (nothing to show, the two items tie on that stat).
+function affixDeltaSpan(stat,delta){
+  if(!delta) return null;
+  const isPercent=IF.affixIsPercent(stat);
+  const sign=delta>0?"+":"-";
+  const mag=Math.abs(delta);
+  const text=stat==="regen" ? mag.toFixed(1) : Math.round(mag)+(isPercent?"%":"");
+  return h("span",{class:delta>0?"stat-delta-good":"stat-delta-bad"},[` (${sign}${text})`]);
+}
+// v0.18.1 (#12/#13): shared "Currently Equipped" popup shown alongside a gear item's normal
+// tooltip wherever the player is looking at gear they DON'T currently have on (Inventory
+// backpack, Storage Vault, Auction House, Merchant stock, Blacksmith sell list). Renamed
+// from "Comparison" (v0.17.3 #10) since it always shows what's currently equipped, and now
+// shows a Diablo-3-style colored (+N)/(-N) delta next to each of the equipped item's stats,
+// reflecting how the hovered item (`inst`) compares on that same stat -- green if `inst` is
+// ahead, red if it's behind. A ring compares against BOTH ring slots; everything else maps
+// 1:1 onto its own equip slot.
 function gearComparisonContent(inst){
   const slotsToCompare=inst.slot==="ring"?["ring1","ring2"]:[inst.slot];
-  const nodes=[h("div",{style:{fontWeight:"bold",marginBottom:"4px"}},["Comparison"])];
+  const hoveredMap=gearAffixMap(inst);
+  const nodes=[h("div",{class:"compare-title"},["Currently Equipped"])];
   for(const slotKey of slotsToCompare){
     const equipped=PS.equipped[slotKey];
     const label=IF.slotLabel(slotKey);
     if(!equipped){
       nodes.push(h("div",{class:"muted",style:{marginBottom:"4px"}},[`${label}: (nothing equipped)`]));
-    } else {
-      nodes.push(h("div",{style:{marginBottom:"4px"}},[
-        h("div",{style:{fontWeight:"bold"}},[`${label}: ${IF.displayName(equipped)} (T${equipped.tier})`]),
-        h("div",{style:{whiteSpace:"pre-line"}},[IF.tooltipText(equipped)]),
-      ]));
+      continue;
     }
+    const equippedMap=gearAffixMap(equipped);
+    const statLines=[];
+    for(const a of equipped.affixes){
+      const delta=(hoveredMap[a.stat]||0)-a.value;
+      const deltaNode=affixDeltaSpan(a.stat,delta);
+      statLines.push(h("div",{},deltaNode?[IF.formatAffix(a),deltaNode]:[IF.formatAffix(a)]));
+    }
+    // Stats the hovered item rolls that the equipped item doesn't have at all -- a pure
+    // gain, so always shown green regardless of magnitude.
+    for(const stat in hoveredMap){
+      if(!(stat in equippedMap)){
+        const deltaNode=affixDeltaSpan(stat,hoveredMap[stat]);
+        statLines.push(h("div",{},[`(no ${IF.affixLabel(stat)})`,deltaNode]));
+      }
+    }
+    nodes.push(h("div",{style:{marginBottom:"4px"}},[
+      h("div",{style:{fontWeight:"bold"}},[`${label}: ${IF.displayName(equipped)} (${tierRomanNumeral(equipped.tier)})`]),
+      ...statLines,
+    ]));
   }
   return nodes;
 }
@@ -5588,7 +6423,7 @@ function gearRow(inst, actions){
   return h("div",{class:"tile gear-row",style:{marginBottom:"6px"}},[
     gearIcon(inst),
     h("div",{class:"col",style:{flex:"1",minWidth:"0",gap:"2px"}},[
-      gearCompareWrap(h("div",{class:"tooltip rarity-"+inst.rarity,style:{fontWeight:"bold"},"data-tip":IF.tooltipText(inst)},[IF.displayName(inst)+` (T${inst.tier})`]), inst),
+      gearCompareWrap(h("div",{class:"tooltip rarity-"+inst.rarity,style:{fontWeight:"bold"},"data-tip":IF.tooltipText(inst)},[IF.displayName(inst)+` (${tierRomanNumeral(inst.tier)})`]), inst),
       // v0.14: a plain "Ring"/"Head"/"Weapon"/etc. category subtext under every gear name,
       // so new players don't have to guess an item's slot from its flavorful base name
       // (e.g. "Rare Withered Petal Ring of Fire" -> "Ring").
@@ -5715,7 +6550,10 @@ function shrineBonusPanel(){
     lines.push(`Experience Shrine: +${Math.round((PS.xp_buff_multiplier-1)*100)}% XP for ${PS.xp_buff_encounters_left} more battle${PS.xp_buff_encounters_left===1?"":"s"}.`);
   }
   if(PS.isInvulnerable()){
-    lines.push(`Touch of Unicorn: immune to damage for ${PS.invuln_rounds_left} more combat round${PS.invuln_rounds_left===1?"":"s"}.`);
+    // v0.18.1 (#26): the counter is a shared pool now -- it ticks down whether it blocks a
+    // combat round's attack OR a maze trap's damage/poison, so the copy no longer says
+    // "combat round" specifically.
+    lines.push(`Touch of Unicorn: immune to damage/poison for ${PS.invuln_rounds_left} more round${PS.invuln_rounds_left===1?"":"s"} (combat or traps).`);
   }
   if(PS.hasQuadDamage()){
     lines.push(`Quad Damage: 4x damage output for ${PS.quad_dmg_rounds_left} more combat round${PS.quad_dmg_rounds_left===1?"":"s"}.`);
@@ -5765,7 +6603,7 @@ function equipSlotTile(slot){
   const invalid=PS.isEquippedSlotInvalid(slot);
   return h("div",{class:"tile",style:invalid?{background:"rgba(160,40,40,.28)",borderColor:"#a04a4a"}:{}},[
     h("div",{class:"muted"},[IF.slotLabel(slot)]),
-    inst?h("div",{class:"row gap",style:{alignItems:"center"}},[gearIcon(inst,26), h("div",{class:"tooltip rarity-"+inst.rarity,"data-tip":invalid?`${IF.tooltipText(inst)}\nInvalid: requires Level ${Balance.tierLevelRequirement(inst.tier)}, you are Lv ${PS.level}. Its bonuses are not being applied.`:IF.tooltipText(inst)},[IF.displayName(inst)+` (T${inst.tier})`, invalid?h("span",{style:{color:"#e07a7a",marginLeft:"4px"}},["(Invalid)"]):null])]):h("div",{class:"muted"},["(empty)"]),
+    inst?h("div",{class:"row gap",style:{alignItems:"center"}},[gearIcon(inst,26), h("div",{class:"tooltip rarity-"+inst.rarity,"data-tip":invalid?`${IF.tooltipText(inst)}\nInvalid: ${PS.gearInvalidReason(inst)} Its bonuses are not being applied.`:IF.tooltipText(inst)},[IF.displayName(inst)+` (${tierRomanNumeral(inst.tier)})`, invalid?h("span",{style:{color:"#e07a7a",marginLeft:"4px"}},["(Invalid)"]):null])]):h("div",{class:"muted"},["(empty)"]),
     inst?h("button",{style:{marginTop:"6px"},onClick:()=>{PS.unequipSlot(slot);autosave();render();}},["Unequip"]):null,
   ]);
 }
@@ -5834,7 +6672,7 @@ function backpackGearGrid(){
         else if(GF._bagReorderSrcIdx===i){ GF._bagReorderSrcIdx=null; render(); }
         else { const src=GF._bagReorderSrcIdx; GF._bagReorderSrcIdx=null; backpackSwapSlots(src,i); }
       }:()=>{
-        if(!canEquip){ setToast(`Requires Level ${Balance.tierLevelRequirement(inst.tier)} to equip this (you are Lv ${PS.level}).`); render(); return; }
+        if(!canEquip){ setToast(PS.gearInvalidReason(inst)); render(); return; }
         const label=PS.wouldSwap(inst)?"Swap":"Equip";
         askConfirm(`${label} ${IF.displayName(inst)}?`,()=>{ PS.equipGear(inst.instance_id); autosave(); render(); },{confirmLabel:label,danger:false});
       },
@@ -5979,7 +6817,11 @@ function screenBlacksmith(){
     // value and Reroll cost both scale with an item's Tier and its number of affixes
     // (i.e. its rarity -- Legendary items with more affixes are worth more to salvage AND
     // cost more to reroll), using the same Balance constants the buttons' numbers come from.
-    h("span",{class:"tooltip muted",style:{fontSize:".85em"},"data-tip":`Salvage value = Tier x number of affixes x ${Balance.SALVAGE_MATERIALS_PER_SLOT} materials.\nReroll cost = Salvage value x ${Balance.REROLL_MATERIAL_COST_MULT}.\nHigher tier and higher rarity (more affixes) both mean more materials.`},["(?)"]),
+    // v0.18.2 (#5): updated for the new steeper Tier^1.5 scaling (was flat "Tier x affixes"
+    // linear scaling) -- the v0.14 design principle of always showing exact numbers, not
+    // vague "scales with tier" hand-waving, still applies, so the exact exponent and
+    // constants are spelled out here rather than described qualitatively.
+    h("span",{class:"tooltip muted",style:{fontSize:".85em"},"data-tip":`Salvage value = round(Tier^1.5 x number of affixes x ${Balance.SALVAGE_MATERIALS_PER_SLOT}) materials.\nReroll cost = Salvage value x ${Balance.REROLL_MATERIAL_COST_MULT}.\nHigher tier (steeply) and higher rarity (more affixes) both mean more materials.`},["(?)"]),
   ]));
   if(PS.gear_instances.length===0) root.appendChild(h("div",{class:"muted"},["Bring gear from your backpack to reroll its bonuses."]));
   for(const inst of PS.gear_instances){
@@ -6021,6 +6863,28 @@ function screenBlacksmith(){
 
 /* ================= ALCHEMIST ================= */
 
+// v0.18.1 (#8): how many of a given recipe the player can currently afford to queue at
+// once (limited by both herb stock and gold), used to clamp the Alchemist's amount-picker
+// the same way the Merchant's Consumables tab clamps to what's affordable.
+function maxAffordableRecipeQty(recipe){
+  let max=99;
+  for(const h2 in recipe.herbs){ const have=PS.herbs[h2]||0; max=Math.min(max, Math.floor(have/recipe.herbs[h2])); }
+  if(recipe.gold_cost>0) max=Math.min(max, Math.floor(PS.gold/recipe.gold_cost));
+  return Math.max(1,max);
+}
+// v0.18.1 (#8): same -/N/+ pattern as merchantAmountPicker(), own independent state bag
+// (GF.alchemistBrewQty) so the two screens' picked amounts never collide.
+function alchemistAmountPicker(recipeId,maxQty){
+  if(!GF.alchemistBrewQty) GF.alchemistBrewQty={};
+  const qty=clampi(GF.alchemistBrewQty[recipeId]||1,1,Math.max(1,maxQty));
+  GF.alchemistBrewQty[recipeId]=qty;
+  return h("div",{class:"row",style:{alignItems:"center",gap:"6px"}},[
+    h("button",{style:{padding:"2px 9px"},disabled:qty<=1,onClick:(e)=>{ e.stopPropagation(); GF.alchemistBrewQty[recipeId]=Math.max(1,qty-1); render(); }},["-"]),
+    h("span",{style:{fontWeight:"bold",minWidth:"18px",textAlign:"center"}},[String(qty)]),
+    h("button",{style:{padding:"2px 9px"},disabled:qty>=maxQty,onClick:(e)=>{ e.stopPropagation(); GF.alchemistBrewQty[recipeId]=Math.min(maxQty,qty+1); render(); }},["+"]),
+  ]);
+}
+
 function screenAlchemist(){
   const root=h("div",{});
   root.appendChild(h("div",{class:"row",style:{justifyContent:"space-between",alignItems:"center"}},[
@@ -6036,33 +6900,41 @@ function screenAlchemist(){
 
   root.appendChild(h("h3",{},["Your Herbs"]));
   const herbEntries=Object.keys(PS.herbs).filter(k=>PS.herbs[k]>0);
-  // v0.14 tooltip overhaul: each herb name is individually hoverable, showing exactly
-  // where it's found in the maze (HERBS[id].found_in) -- per Gwen's tester finding that
-  // this kind of thing was taking real time to figure out instead of being instant.
-  root.appendChild(h("div",{class:"muted"},
-    herbEntries.length
-      ? herbEntries.flatMap((id,i)=>[
-          i>0?", ":null,
-          h("span",{class:"tooltip","data-tip":DL.getHerb(id).found_in||""},[`${DL.getHerb(id).name} x${PS.herbs[id]}`]),
-        ]).filter(x=>x!=null)
-      : ["None yet, gather herbs in the woods."]
-  ));
+  // v0.18.1 (#8): each herb now gets its own small icon (herbIcon(), same art already used
+  // in the Vault/Character Sheet herb lists) instead of a bare comma-separated text line --
+  // v0.14's per-herb hover tooltip (found_in location) is preserved.
+  if(!herbEntries.length){
+    root.appendChild(h("div",{class:"muted"},["None yet, gather herbs in the woods."]));
+  } else {
+    root.appendChild(h("div",{class:"row gap",style:{flexWrap:"wrap",marginBottom:"8px"}},
+      herbEntries.map(id=>h("div",{class:"row gap",style:{alignItems:"center"}},[
+        herbIcon(id,20),
+        h("span",{class:"tooltip muted","data-tip":DL.getHerb(id).found_in||""},[`${DL.getHerb(id).name} x${PS.herbs[id]}`]),
+      ]))
+    ));
+  }
 
   root.appendChild(h("h3",{},["Recipes"]));
-  const grid=h("div",{class:"grid3"});
+  // v0.18.1 (#8): switched from a 3-col icon grid to a single-column list (mirrors the
+  // Merchant's Consumables tab exactly) so there's room for an amount-picker alongside the
+  // Brew button -- brewing several of the same potion in one click no longer means clicking
+  // Brew N separate times (see startBrew()'s MULTI_BREW_CAP_MS for how the animated brew
+  // time itself is kept from scaling linearly with the queued amount).
   for(const recipe of RECIPES){
     const result=DL.getItem(recipe.result_item);
-    const can=PS.canAffordRecipe(recipe);
     const brewingThis=GF.brewing && GF.brewing.recipeId===recipe.result_item;
     const herbIds=Object.keys(recipe.herbs);
-    const tileKids=[
+    const maxQty=maxAffordableRecipeQty(recipe);
+    const qty=Math.min(GF.alchemistBrewQty&&GF.alchemistBrewQty[recipe.result_item]||1,maxQty);
+    const can=PS.canAffordRecipe(recipe,qty);
+    const rowKids=[
       h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(recipe.result_item), h("div",{},[
         // v0.14: hovering the potion/scroll's name itself shows exactly what it does,
         // with exact numbers (see DL.itemEffectDescription) -- not just its category.
         h("div",{class:"tooltip",style:{fontWeight:"bold"},"data-tip":DL.itemEffectDescription(recipe.result_item)},[result.name]),
         h("div",{class:"muted",style:{fontSize:".85em"}},[DL.itemCategoryLabel(recipe.result_item)]),
       ])]),
-      h("div",{class:"muted"},
+      h("div",{class:"muted",style:{flex:"1"}},
         herbIds.flatMap((h2,i)=>[
           i>0?", ":null,
           h("span",{class:"tooltip","data-tip":DL.getHerb(h2).found_in||""},[`${DL.getHerb(h2).name} x${recipe.herbs[h2]}`]),
@@ -6071,13 +6943,13 @@ function screenAlchemist(){
     ];
     if(brewingThis){
       const elapsed=Date.now()-GF.brewing.startedAt;
-      tileKids.push(h("div",{style:{marginTop:"6px"}},[bar(Math.min(100,elapsed/BREW_CRAFT_MS*100),"bar-brew")]));
+      rowKids.push(h("div",{style:{minWidth:"120px"}},[bar(Math.min(100,elapsed/GF.brewing.durationMs*100),"bar-brew")]));
     } else {
-      tileKids.push(h("button",{style:{marginTop:"6px"},disabled:!can||!!GF.brewing,onClick:()=>startBrew(recipe)},["Brew"]));
+      rowKids.push(alchemistAmountPicker(recipe.result_item,maxQty));
+      rowKids.push(h("button",{disabled:!can||!!GF.brewing,onClick:()=>startBrew(recipe,qty)},["Brew"]));
     }
-    grid.appendChild(h("div",{class:"tile"},tileKids));
+    root.appendChild(h("div",{class:"tile gear-row",style:{marginBottom:"6px"}},rowKids));
   }
-  root.appendChild(grid);
   return root;
 }
 
@@ -6369,7 +7241,7 @@ function screenVault(){
       // see what an item actually rolled. Consumables/herbs keep their simple name+qty tip,
       // matching what the backpack itself shows for those (no per-stat breakdown exists for
       // non-gear items anywhere in the game yet).
-      if(entry.kind==="gear"){ label=IF.displayName(entry.inst)+` (T${entry.inst.tier})`; icon=gearIcon(entry.inst,24); tip=`${IF.tooltipText(entry.inst)}\n${IF.categoryLabel(entry.inst)}`; }
+      if(entry.kind==="gear"){ label=IF.displayName(entry.inst)+` (${tierRomanNumeral(entry.inst.tier)})`; icon=gearIcon(entry.inst,24); tip=`${IF.tooltipText(entry.inst)}\n${IF.categoryLabel(entry.inst)}`; }
       else if(entry.kind==="consumable"){ label=`${DL.getItem(entry.item_id).name} x${entry.qty}`; icon=itemIcon(entry.item_id,24); tip=`${label}\n${DL.itemCategoryLabel(entry.item_id)}`; }
       else if(entry.kind==="herb"){ label=`${DL.getHerb(entry.herb_id).name} x${entry.qty}`; icon=herbIcon(entry.herb_id,24); tip=label; }
     }
@@ -6500,6 +7372,130 @@ function ensureMerchantStock(){
   return GF.merchantStock;
 }
 
+// v0.18.1 (#9): shared tab-button helper, mirrors leaderboardTabButton()/GF.leaderboardTab
+// exactly (same selected-state styling, same click-to-select-and-render pattern).
+function merchantTabButton(key,label){
+  const selected=GF.merchantTab===key;
+  return h("button",{
+    style:{background:selected?"var(--accent,#3a6a2a)":undefined,borderColor:selected?"#7ac67a":undefined},
+    onClick:()=>{ GF.merchantTab=key; render(); },
+  },[label]);
+}
+// v0.18.1 (#7): a horizontal "- N +" amount-picker for buying several potions/consumables
+// in one click, mirroring the vertical Area-Lv chevron stepper on the Town's Venture card
+// (same -1/+1-per-click, clamped-range pattern, just laid out as a row instead of a column
+// since there's no "current value" label needed here beyond the number itself). State lives
+// in GF.merchantBuyQty, keyed by itemId, so each row remembers its own picked amount
+// independently and it survives re-renders within the session (not persisted -- there's no
+// reason a chosen-but-not-yet-bought quantity needs to survive a reload).
+function merchantAmountPicker(itemId,maxQty){
+  if(!GF.merchantBuyQty) GF.merchantBuyQty={};
+  const qty=clampi(GF.merchantBuyQty[itemId]||1,1,Math.max(1,maxQty));
+  GF.merchantBuyQty[itemId]=qty;
+  return h("div",{class:"row",style:{alignItems:"center",gap:"6px"}},[
+    h("button",{style:{padding:"2px 9px"},disabled:qty<=1,onClick:(e)=>{ e.stopPropagation(); GF.merchantBuyQty[itemId]=Math.max(1,qty-1); render(); }},["-"]),
+    h("span",{style:{fontWeight:"bold",minWidth:"18px",textAlign:"center"}},[String(qty)]),
+    h("button",{style:{padding:"2px 9px"},disabled:qty>=maxQty,onClick:(e)=>{ e.stopPropagation(); GF.merchantBuyQty[itemId]=Math.min(maxQty,qty+1); render(); }},["+"]),
+  ]);
+}
+
+// v0.18.1 (#7): the Merchant's "Consumables" tab (was the old ungrouped "Buy" grid) --
+// switched from a 3-col icon grid to a single-column list (mirrors gearRow()'s layout) so
+// there's room for a subtext line, a right-aligned gold-colored price, and the new amount
+// picker all on one row.
+function merchantConsumablesTab(){
+  const root=h("div",{});
+  for(const itemId in ITEMS){
+    const item=ITEMS[itemId];
+    if(item.type==="bag" || Balance.MERCHANT_EXCLUDED_ITEMS.includes(itemId)) continue;
+    const unitPrice=Balance.itemBuyPrice(item);
+    const maxAffordable=unitPrice>0?Math.max(1,Math.floor(PS.gold/unitPrice)):99;
+    const qty=Math.min(GF.merchantBuyQty&&GF.merchantBuyQty[itemId]||1,Math.max(1,maxAffordable));
+    const totalPrice=unitPrice*qty;
+    root.appendChild(h("div",{class:"tile gear-row",style:{marginBottom:"6px"}},[
+      itemIcon(itemId),
+      h("div",{class:"col",style:{flex:"1",minWidth:"0",gap:"2px"}},[
+        h("div",{style:{fontWeight:"bold"}},[item.name]),
+        h("div",{class:"muted",style:{fontSize:".85em"}},[DL.itemShopSubtext(itemId)]),
+      ]),
+      merchantAmountPicker(itemId,99),
+      // v0.18.1 (#10): gold-colored, right-aligned, sits right next to the Buy button.
+      h("div",{class:"gold-text",style:{fontWeight:"bold",minWidth:"64px",textAlign:"right"}},[`${totalPrice}g`]),
+      // v0.18 (#12): the old "Bought X." toast banner popped in above the whole screen and
+      // shifted the list on every purchase -- replaced with a brief gold-colored "-Ng"
+      // floating overlay near the HP bar (same spawnFloat() infra as combat's gold pickups),
+      // so nothing on this screen ever moves just from buying potions.
+      h("button",{disabled:PS.gold<totalPrice,onClick:()=>{
+        if(PS.buyConsumable(itemId,qty)){ autosave(); spawnFloat("player",`-${totalPrice}g`,"float-text-gold"); }
+        render();
+      }},["Buy"]),
+    ]));
+  }
+  return root;
+}
+
+// v0.18.1 (#9): the Merchant's "Equippable gear" tab (was "Gear for Sale") -- unchanged
+// gearRow()-based layout, just moved under its own tab and reordered per Gwen's spec.
+// Pricing now also folds in the v0.18.1 (#11) rarity-based discount, see
+// Balance.merchantGearPrice()'s own comment.
+function merchantGearTab(){
+  const root=h("div",{});
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px",fontSize:".9em"}},["Six items, freshly rolled. This stock won't change until you've attempted a Broken Bridge Trial (win or lose)."]));
+  const stock=ensureMerchantStock();
+  if(stock.length===0){
+    root.appendChild(h("div",{class:"muted",style:{marginBottom:"12px"}},["Sold out for now -- come back after your next Broken Bridge Trial attempt."]));
+    return root;
+  }
+  for(const inst of stock){
+    const price=Balance.merchantGearPrice(inst);
+    root.appendChild(gearRow(inst,[h("button",{disabled:PS.gold<price,onClick:()=>{
+      PS.gold-=price;
+      const willAutoEquip=PS.canAutoEquip(inst);
+      const fit=PS.addGearAutoEquip(inst);
+      if(!fit){ PS.gold+=price; setToast("Your bags are full -- make room and try again."); render(); return; }
+      const idx=GF.merchantStock.indexOf(inst); if(idx!==-1) GF.merchantStock.splice(idx,1);
+      autosave();
+      setToast(willAutoEquip?`Bought and equipped ${IF.displayName(inst)}!`:`Bought ${IF.displayName(inst)}.`);
+      render();
+    }},[`Buy (${price}g)`])]));
+  }
+  return root;
+}
+
+// v0.18.1 (#9): the Merchant's "Containers" tab (was "Buy Bags") -- same list-view/gold-
+// price treatment as Consumables, minus the amount picker (bags are equip-slot-limited, so
+// buying several in one click isn't a meaningful use case the way potion stacks are).
+function merchantContainersTab(){
+  const root=h("div",{});
+  for(const itemId in ITEMS){
+    const item=ITEMS[itemId]; if(item.type!=="bag") continue;
+    const price=Balance.bagBuyPrice(item.capacity);
+    root.appendChild(h("div",{class:"tile gear-row",style:{marginBottom:"6px"}},[
+      itemIcon(itemId),
+      h("div",{class:"col",style:{flex:"1",minWidth:"0",gap:"2px"}},[
+        h("div",{style:{fontWeight:"bold"}},[item.name]),
+        h("div",{class:"muted",style:{fontSize:".85em"}},[`+${item.capacity} inventory capacity while equipped.`]),
+      ]),
+      h("div",{class:"gold-text",style:{fontWeight:"bold",minWidth:"64px",textAlign:"right"}},[`${price}g`]),
+      h("button",{disabled:PS.gold<price||PS.equipped_bags.length>=Balance.MAX_BAG_SLOTS,onClick:()=>{
+        const r=PS.buyBag(itemId); if(r.success){autosave(); setToast(`Bought ${item.name}!`);} else setToast(r.reason); render();
+      }},["Buy"]),
+    ]));
+  }
+  return root;
+}
+
+// v0.18.1 (#9): the Merchant's "Sell items" tab (was "Sell Gear") -- unchanged behavior,
+// just moved under its own tab and reordered per Gwen's spec.
+function merchantSellTab(){
+  const root=h("div",{});
+  if(PS.gear_instances.length===0) root.appendChild(h("div",{class:"muted"},["Nothing to sell."]));
+  for(const inst of PS.gear_instances){
+    root.appendChild(gearRow(inst,[h("button",{onClick:()=>{PS.sellGear(inst.instance_id);PS.saveGame();render();}},[`Sell (+${Balance.sellValue(inst.tier,IF.slotCount(inst))}g)`])]));
+  }
+  return root;
+}
+
 function screenMerchant(){
   const root=h("div",{});
   root.appendChild(h("div",{class:"row gap"},[iconBadge(`<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="19" fill="#6a4a20"/><circle cx="20" cy="24" r="10" fill="#c99a50"/></svg>`,52),h("div",{},[h("h2",{},[`${Balance.NPC_MERCHANT_NAME} the Merchant`]),h("div",{class:"flavor"},["\"Best prices this side of the treeline. Probably.\""])])]));
@@ -6508,65 +7504,21 @@ function screenMerchant(){
   const t=toastBox(); if(t) root.appendChild(t);
   root.appendChild(statHeader());
 
-  root.appendChild(h("h3",{},["Gear for Sale"]));
-  root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px",fontSize:".9em"}},["Six items, freshly rolled. This stock won't change until you've attempted a Broken Bridge Trial (win or lose)."]));
-  const stock=ensureMerchantStock();
-  if(stock.length===0){
-    root.appendChild(h("div",{class:"muted",style:{marginBottom:"12px"}},["Sold out for now -- come back after your next Broken Bridge Trial attempt."]));
-  } else {
-    for(const inst of stock){
-      const price=Balance.merchantGearPrice(inst);
-      root.appendChild(gearRow(inst,[h("button",{disabled:PS.gold<price,onClick:()=>{
-        PS.gold-=price;
-        const willAutoEquip=PS.canAutoEquip(inst);
-        const fit=PS.addGearAutoEquip(inst);
-        if(!fit){ PS.gold+=price; setToast("Your bags are full -- make room and try again."); render(); return; }
-        const idx=GF.merchantStock.indexOf(inst); if(idx!==-1) GF.merchantStock.splice(idx,1);
-        autosave();
-        setToast(willAutoEquip?`Bought and equipped ${IF.displayName(inst)}!`:`Bought ${IF.displayName(inst)}.`);
-        render();
-      }},[`Buy (${price}g)`])]));
-    }
-  }
+  // v0.18.1 (#9): 4 tabs, reordered per Gwen's spec -- Consumables (was Buy) first,
+  // Equippable gear (was Gear for Sale) second, Containers (was Buy Bags) third, Sell
+  // items (was Sell Gear) fourth. Mirrors the Leaderboard's tab pattern exactly.
+  if(GF.merchantTab==null) GF.merchantTab="consumables";
+  root.appendChild(h("div",{class:"row gap",style:{marginBottom:"12px",flexWrap:"wrap"}},[
+    merchantTabButton("consumables","Consumables"),
+    merchantTabButton("gear","Equippable gear"),
+    merchantTabButton("containers","Containers"),
+    merchantTabButton("sell","Sell items"),
+  ]));
 
-  root.appendChild(h("h3",{},["Buy"]));
-  const grid=h("div",{class:"grid3"});
-  for(const itemId in ITEMS){
-    const item=ITEMS[itemId];
-    if(item.type==="bag" || Balance.MERCHANT_EXCLUDED_ITEMS.includes(itemId)) continue;
-    const price=Balance.itemBuyPrice(item);
-    grid.appendChild(h("div",{class:"tile"},[
-      h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId), h("div",{},[h("div",{style:{fontWeight:"bold"}},[item.name]), h("div",{class:"muted",style:{fontSize:".85em"}},[DL.itemCategoryLabel(itemId)])])]),
-      h("div",{class:"muted"},[`${price} gold`]),
-      // v0.18 (#12): the old "Bought X." toast banner popped in above the whole screen and
-      // shifted the potion grid on every purchase -- replaced with a brief gold-colored
-      // "-Ng" floating overlay near the HP bar (same spawnFloat() infra as combat's gold
-      // pickups), so nothing on this screen ever moves just from buying a potion.
-      h("button",{style:{marginTop:"6px"},disabled:PS.gold<price,onClick:()=>{ if(PS.buyConsumable(itemId)){autosave(); spawnFloat("player",`-${price}g`,"float-text-gold");} render(); }},["Buy"]),
-    ]));
-  }
-  root.appendChild(grid);
-
-  root.appendChild(h("h3",{},["Buy Bags"]));
-  const bagGrid=h("div",{class:"grid3"});
-  for(const itemId in ITEMS){
-    const item=ITEMS[itemId]; if(item.type!=="bag") continue;
-    const price=Balance.bagBuyPrice(item.capacity);
-    bagGrid.appendChild(h("div",{class:"tile"},[
-      h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId), h("div",{},[h("div",{style:{fontWeight:"bold"}},[item.name]), h("div",{class:"muted",style:{fontSize:".85em"}},["Bag"])])]),
-      h("div",{class:"muted"},[`Capacity +${item.capacity}, ${price} gold`]),
-      h("button",{style:{marginTop:"6px"},disabled:PS.gold<price||PS.equipped_bags.length>=Balance.MAX_BAG_SLOTS,onClick:()=>{
-        const r=PS.buyBag(itemId); if(r.success){autosave(); setToast(`Bought ${item.name}!`);} else setToast(r.reason); render();
-      }},["Buy"]),
-    ]));
-  }
-  root.appendChild(bagGrid);
-
-  root.appendChild(h("h3",{},["Sell Gear"]));
-  if(PS.gear_instances.length===0) root.appendChild(h("div",{class:"muted"},["Nothing to sell."]));
-  for(const inst of PS.gear_instances){
-    root.appendChild(gearRow(inst,[h("button",{onClick:()=>{PS.sellGear(inst.instance_id);PS.saveGame();render();}},[`Sell (+${Balance.sellValue(inst.tier,IF.slotCount(inst))}g)`])]));
-  }
+  if(GF.merchantTab==="gear"){ root.appendChild(merchantGearTab()); return root; }
+  if(GF.merchantTab==="containers"){ root.appendChild(merchantContainersTab()); return root; }
+  if(GF.merchantTab==="sell"){ root.appendChild(merchantSellTab()); return root; }
+  root.appendChild(merchantConsumablesTab());
   return root;
 }
 
@@ -6592,7 +7544,7 @@ function screenAuctionHouse(){
   // 1g per 100g bracket of the asking price.
   root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px",fontSize:".9em"}},["Listing fee: 1g for a 1-99g price, 2g for 100-199g, 3g for 200-299g, and so on -- charged upfront when you list."]));
   const gearOptions=[h("option",{value:""},["-- choose gear to sell --"])].concat(
-    PS.gear_instances.map(inst=>h("option",{value:inst.instance_id,selected:GF._auctionSellPreviewId===inst.instance_id},[`${IF.displayName(inst)} (T${inst.tier})`]))
+    PS.gear_instances.map(inst=>h("option",{value:inst.instance_id,selected:GF._auctionSellPreviewId===inst.instance_id},[`${IF.displayName(inst)} (${tierRomanNumeral(inst.tier)})`]))
   );
   // v0.17.1 (#9): a native <select> can only ever show plain text per option, so it used
   // to be impossible to see an item's actual rolled stats before choosing a price for it --
@@ -6678,7 +7630,21 @@ function screenAuctionHouse(){
   } else if(Net.auctionCache.length===0){
     root.appendChild(h("div",{class:"muted"},["The block is empty right now, be the first to list something."]));
   } else {
-    for(const listing of Net.auctionCache){
+    // v0.18.1 (#32): unlike the Storage Vault's filter (which only visually MUTES
+    // non-matching gear, see gearFilterOpacity()'s comment), Gwen asked for the Auction
+    // House's filter to actually HIDE anything that doesn't match, with an explicit
+    // empty-result message when the active filter leaves nothing to show -- a shared
+    // marketplace listing feed benefits from cutting the noise outright, where the
+    // Vault's own inventory benefits more from a "still there, just muted" contrast (you
+    // might still want to see/reach an item you own even if it doesn't match).
+    const visibleListings=Net.auctionCache.filter(listing=>{
+      const isGear=listing.type==="gear" && listing.item;
+      return !gearFilterActive(GF._ahFilter) || gearMatchesFilter(isGear?listing.item:null, GF._ahFilter);
+    });
+    if(visibleListings.length===0){
+      root.appendChild(h("div",{class:"muted"},["No listings match your filters."]));
+    }
+    for(const listing of visibleListings){
       const isMine=listing.seller_username===Net.username;
       const label=listing.quantity>1?`${listing.display_name} x${listing.quantity}`:listing.display_name;
       // v0.13: gear listings get the same hover tooltip (full stat breakdown) the
@@ -6693,9 +7659,7 @@ function screenAuctionHouse(){
       // same reasoning as the gear/consumable rows elsewhere -- buyers browsing the block
       // shouldn't have to guess what a flavorful item name actually is.
       const categoryLabel=isGear?IF.categoryLabel(listing.item):(listing.type==="herb"?"Herb":DL.itemCategoryLabel(listing.item_key));
-      // v0.17.3 (#11): mute (not hide) any listing that doesn't match the active filter.
-      const filterOpacity=gearFilterOpacity(isGear?listing.item:null, GF._ahFilter);
-      root.appendChild(h("div",{class:"tile row",style:{marginBottom:"6px",justifyContent:"space-between",opacity:String(filterOpacity)}},[
+      root.appendChild(h("div",{class:"tile row",style:{marginBottom:"6px",justifyContent:"space-between"}},[
         h("div",{},[labelEl, categoryLabel?h("span",{class:"muted",style:{fontSize:".85em"}},[` (${categoryLabel})`]):null, h("span",{class:"muted"},[`, listed by ${listing.seller_character_name} (${listing.seller_username})`])]),
         h("div",{class:"row gap"},[
           h("span",{class:"gold-text"},[`${listing.price}g`]),
@@ -6775,7 +7739,7 @@ function screenGamblingGoblin(){
       const inst=GF.gambleReveal.item;
       root.appendChild(h("div",{class:"panel"},[
         gearIcon(inst,40),
-        h("div",{class:"tooltip rarity-"+inst.rarity,style:{fontWeight:"bold",marginTop:"6px"}},[IF.displayName(inst)+` (T${inst.tier})`]),
+        h("div",{class:"tooltip rarity-"+inst.rarity,style:{fontWeight:"bold",marginTop:"6px"}},[IF.displayName(inst)+` (${tierRomanNumeral(inst.tier)})`]),
         h("div",{class:"muted",style:{fontSize:".85em"}},[IF.categoryLabel(inst)]),
         h("div",{class:"muted"},[IF.affixSummary(inst)]),
       ]));
@@ -6852,6 +7816,18 @@ function screenMasterTrial(){
 
   root.appendChild(h("div",{class:"panel",style:{marginBottom:"10px"}},[
     h("div",{class:"flavor",style:{margin:"0"}},["Tread carefully, a wrong step is a costly investment."]),
+  ]));
+
+  // v0.18.1 (#4): players (especially Hardcore ones, understandably) keep asking whether a
+  // failed Broken Bridge Trial attempt can kill their character -- it can't, by design: a
+  // fall only demotes you to Level 1 at this tier (see the reroll logic in resolveMasterTrial
+  // below), it never touches PS.current_hp or routes through the death/Graveyard flow the way
+  // a maze/combat death does. Surface that explicitly right where the decision to attempt (or
+  // retreat from) the trial gets made, called out most prominently for Hardcore characters
+  // since that's who actually worries about it, but the same fact holds for everyone.
+  root.appendChild(h("div",{class:"panel",style:{marginBottom:"10px",borderColor:PS.hardcore?"#5ac67a":"var(--border)"}},[
+    h("div",{style:{color:"#5ac67a",fontWeight:"bold",marginBottom:PS.hardcore?"4px":"0"}},["✔ This trial cannot kill your character."]),
+    PS.hardcore?h("div",{class:"muted",style:{fontSize:".9em"}},["Even in Hardcore mode, falling from the bridge only resets you to Level 1 at this tier -- it does not send you to the Graveyard."]):null,
   ]));
 
   // v0.17.3 (#3): tell the player up front that failing isn't pure loss -- every fall
@@ -7012,7 +7988,7 @@ function screenAdminPanel(){
               entry.hardcore?h("span",{style:{color:"#e0b23d",fontWeight:"bold"}},[" [Hardcore]"]):null,
               entry.is_dead?h("span",{style:{color:"#e0b23d",fontWeight:"bold"}},[" [Dead]"]):null,
             ]),
-            h("div",{class:"muted"},[`Lv ${entry.level} ${entry.class_name} (Tier ${entry.highest_tier_reached}), ${entry.lifetime_xp} Experience, ${entry.gold} Gold, updated ${new Date(entry.updated_at).toLocaleString()}`]),
+            h("div",{class:"muted"},[`Lv ${entry.level} ${entry.class_name} (${tierRomanNumeral(entry.highest_tier_reached)}), ${entry.lifetime_xp} Experience, ${entry.gold} Gold, updated ${new Date(entry.updated_at).toLocaleString()}`]),
           ]),
           h("button",{class:"danger",onClick:()=>{
             askConfirm(`Remove "${entry.character_name}" (${entry.player}) from the leaderboard? This cannot be undone.`,async ()=>{
@@ -7030,6 +8006,45 @@ function screenAdminPanel(){
     }
   }
 
+  root.appendChild(h("h3",{style:{marginTop:"18px"}},["Account List"]));
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},[
+    "Every registered account, read-only -- when it was created, its optional email, and when it was last active (the most recent autosave across any of its character slots).",
+  ]));
+  root.appendChild(h("div",{class:"row gap",style:{marginBottom:"8px"}},[
+    h("button",{onClick:async ()=>{
+      GF.admin_accounts_error="";
+      try{
+        GF.admin_accounts_cache=await Net.fetchAdminAccounts(GF.admin_token||"");
+      }catch(e){
+        GF.admin_accounts_error=e.message||"Could not load the account list.";
+        GF.admin_accounts_cache=null;
+      }
+      render();
+    }},["Load Accounts"]),
+  ]));
+  if(GF.admin_accounts_error) root.appendChild(h("div",{class:"muted",style:{color:"#e07a7a",marginBottom:"8px"}},[GF.admin_accounts_error]));
+  if(GF.admin_accounts_cache){
+    if(GF.admin_accounts_cache.length===0){
+      root.appendChild(h("div",{class:"muted"},["No accounts."]));
+    } else {
+      for(const acc of GF.admin_accounts_cache){
+        root.appendChild(h("div",{class:"tile row",style:{justifyContent:"space-between",alignItems:"center",marginBottom:"6px",gap:"10px"}},[
+          h("div",{},[
+            h("div",{},[
+              h("span",{style:{fontWeight:"bold"}},[acc.username]),
+              h("span",{class:"muted"},[` (acct #${acc.account_id})`]),
+            ]),
+            h("div",{class:"muted"},[acc.email?acc.email:"No email on file"]),
+          ]),
+          h("div",{style:{textAlign:"right"}},[
+            h("div",{class:"muted"},[`Created ${new Date(acc.created_at).toLocaleDateString()}`]),
+            h("div",{class:"muted",style:{fontSize:".85em",marginTop:"2px"}},[`Last active: ${formatLastSeen(acc.last_active_at)}`]),
+          ]),
+        ]));
+      }
+    }
+  }
+
   root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
   return root;
 }
@@ -7039,6 +8054,56 @@ function screenAdminPanel(){
 // Kept brief on purpose -- players don't need the internal blow-by-blow, just the
 // highlights per version, most recent first.
 const CHANGELOG=[
+  { version:"v0.18.2.1", notes:[
+    "CORRECTION to Forest Reputation's positive bonus: it was shipped in v0.18.2 as a flat +10 XP per point. It's now a persistent +10% bonus to ALL experience gained per point, for as long as you're exploring that tier's forest -- stacking multiplicatively with every other XP bonus (Community XP, shrines, gear) instead of being a one-off flat add. Squashing/sparing critters, and the -1/+1 reputation shift, are unchanged.",
+  ]},
+  { version:"v0.18.2", notes:[
+    "New \"Try a Different Route\" button lets you abandon the maze you're currently in and generate a brand new one at the same area level, instead of being stuck with a bad layout. Thanks to Marudok for the lore phrasing.",
+    "Stronghold Key drop rate tripled (3x).",
+    "Fixed a bug where manually decreasing your Venture area level selector could get permanently stuck and refuse to go back up.",
+    "New Experience Guide page explaining how XP, level curves, and the various XP bonuses (shrines, Kill Streak, Community XP, Forest Reputation) all stack together.",
+    "Blacksmith salvage value now scales with an item's Tier instead of a single flat amount regardless of how strong the gear was.",
+    "New critter encounters in the maze: occasionally you'll stumble on a small, harmless creature that won't fight back -- squash it or spare its life. Each choice shifts your new Forest Reputation (tracked separately per class tier, since your tier determines which forest you're exploring) by -1 or +1. A positive Forest Reputation grants bonus XP per point on every kill (see the v0.18.2.1 correction just above for the exact mechanic); a negative one adds extra roaming mobs to that tier's mazes instead -- play it however you like. Your current tier's standing is shown on the Character Sheet and on Inspect Player.",
+    "The \"Currently playing\" active-player count now doubles as a community XP buff: everyone's kill XP is multiplied by the number of players active in the last 5 minutes (2 players = 2x XP for all, 3 = 3x, and so on), shown as a banner above the Currently Playing line.",
+    "New \"Max Killstreak\" Leaderboard tab, ranking every character by the longest Kill Streak they've ever reached -- a permanent record that survives even after the streak itself resets back in Town.",
+    "Audited and fixed Magic Find: it was only ever affecting loot RARITY odds. It now also improves your chance of turning a \"nothing\" roll into an actual item, so higher Magic Find means more loot showing up, not just better loot when it does.",
+  ]},
+  { version:"v0.18.1", notes:[
+    "Screen navigation now eases in with a quick fade instead of snapping instantly into view.",
+    "Admin Dev Tools: new read-only Account List (created date, email, last active) for support/moderation use.",
+    "Inspect Player now shows a read-only Bridge Progress section (Tier + Step X/10), the same information already public on the Leaderboard.",
+    "New class-based weapon restrictions: wands and staves are Wizard/Sorcerer-only, swords/axes/bows are Thornguard/Windrider-chain-only, and Daggers remain usable by every class -- shown right in the item tooltip.",
+    "Confirmed and documented: the Broken Bridge Trial has always been non-lethal for hardcore characters, even on a hard-fail plank -- a failed attempt demotes/resets your level like normal, it never counts as a hardcore death.",
+    "Renamed the 'Uncommon' rarity tier to 'Common' everywhere it appears (the old 'Common' tier below it keeps its own distinct low-quality wording).",
+    "Merchant Consumables tab reworked into a compact list view with an amount picker, instead of one row per item per quantity.",
+    "Alchemist reworked into the same compact list view as the Merchant, with an amount picker and herb icons.",
+    "Merchant is now split into four tabs: Consumables, Equippable Gear, Containers, and Sell Items, instead of one long mixed list.",
+    "Merchant gold prices now right-align in a consistent gold-colored style across every list view.",
+    "Merchant prices now scale down by rarity (Crude/Common -75%, Magical -50%, Rare -25%) so lower-rarity stock is meaningfully cheaper.",
+    "Renamed the gear 'Comparison' box to 'Currently Equipped' with a clearer, styled title.",
+    "The item Comparison box now colors each stat delta green or red (Diablo-3-style +N/-N) depending on whether the hovered item improves or falls behind what you have equipped.",
+    "The player tile's damage tooltip now shows a single flat Base damage number instead of a range.",
+    "Leaderboard: removed the footstep icon next to the Tier/Step text in favor of plain text.",
+    "Fixed the Leaderboard's Experience column showing a stale lifetime total instead of your character's actual current-level XP.",
+    "Leaderboard page size reduced from 12 to 10 entries per page.",
+    "The 4 shrine buff icons (XP, Stamina, Invulnerability, Quad Damage) now use the game's normal tap/hover tooltip component instead of a browser-only hover title, so their effect and remaining duration are reachable on mobile too.",
+    "Combat screen layout: the combat log moved back to the right side, with Attack/Flee/potion controls now sitting below the monster grid.",
+    "Stamina Potions now refill gradually over time, matching the same smooth heal-over-time behavior Health Potions already had.",
+    "Roaming mobs and your own player marker now animate smoothly between tiles in the maze instead of snapping instantly.",
+    "Fixed the HP bar's floating hit-overlay getting visually clipped inside the bar instead of floating above it.",
+    "The entire monster tile in combat is now clickable to attack, not just the Attack button.",
+    "Fixed a small margin gap missing above the chest's 'pry it open' button row.",
+    "Fixed a herb-gathering exploit: Herbalism proficiency points are now awarded once, on fully clearing a herb node, instead of once per individual Gather click.",
+    "Touch of Unicorn (the Invulnerability shrine buff) now also blocks maze trap damage and poison, not just combat hits -- consuming one charge per blocked trap, same as a blocked combat round.",
+    "Fixed a Health Potion bug where drinking multiple potions back-to-back could stack their heal-over-time speed instead of just extending the duration.",
+    "Fixed the Poison status effect visibly snapping the HP bar down once a second -- it now drains in smooth sub-ticks, matching how potion heals already animate.",
+    "The 'Currently playing' active-player list is now always visible at the top of every screen (next to the top bar), instead of only showing while the Global Chat panel happened to be open.",
+    "Tier numbers now render as Roman numerals everywhere (gear tags, class tiers, Stronghold Keys, the Leaderboard, Inspect Player, Dev Tools) for a consistent look with the existing gear-tile Tier badge -- e.g. \"(Tier 2)\" is now \"(II)\", and a bare tag with nothing else in it drops the word \"Tier\" entirely.",
+    "Item tooltips now show a plain divider line between the item's name/tier/requirements and its actual stat bonuses, making the two sections easier to tell apart at a glance.",
+    "Auction House filtering now actually hides listings that don't match the active Tier/Type/Stat filter (instead of just dimming them), with a clear \"No listings match your filters.\" message when a filter excludes everything.",
+    "Fixed the Kindle-the-Bonfire card shrinking narrower than the Venture card above it while actively kindled -- the two cards (and their Area Lv / Logs chevron sidebars) now always match widths and line up cleanly.",
+    "Fixed the Leaderboard's Lv/Tier/Experience block rendering centered instead of right-aligned after the Last Seen column was added.",
+  ]},
   { version:"v0.18", notes:[
     "Fixed a bug where failing a Broken Bridge Trial at a later step could reroll your new Level 1 at the wrong class tier's level curve (e.g. a Tier 2 step-2 failure landing you at Level 16 instead of Level 1).",
     "Roaming mobs now wander the maze on their own, not just fixed grass-tile encounters -- a stumbled-into fight is now a real possibility anywhere they've wandered to.",
@@ -7279,6 +8344,21 @@ function screenItemization(){
   });
   root.appendChild(rarityPanel);
 
+  // v0.18.1 (#3): class-based weapon-type restrictions reference table -- every weapon type
+  // that appears in IF.WEAPON_TYPE_CLASS_RESTRICTIONS is listed with the exact classes
+  // allowed to equip it; any type NOT in that lookup (currently just Dagger) is called out
+  // separately as unrestricted, rather than silently omitted.
+  root.appendChild(h("h3",{},["Weapon Class Requirements"]));
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},["Each weapon type can only be equipped by certain classes. Trying to equip a weapon your class can't use shows an explanation instead, and an equipped weapon that becomes class-invalid (e.g. after a Broken Bridge Trial promotion) is flagged just like an under-level item -- its bonuses stop applying until you unequip or swap it."]));
+  const weaponClassPanel=h("div",{class:"panel",style:{marginBottom:"16px"}});
+  weaponClassPanel.appendChild(gridRow(["Weapon Type","Allowed Classes"],{cols:"1fr 2fr",header:true}));
+  IF.WEAPON_TYPE_LIST.forEach((wt,i)=>{
+    const allowedIds=IF.WEAPON_TYPE_CLASS_RESTRICTIONS[wt];
+    const allowedText=allowedIds?allowedIds.map(id=>DL.getClass(id).display_name||id).join(", "):"Every class";
+    weaponClassPanel.appendChild(gridRow([IF.WEAPON_TYPE_LABELS[wt]||wt,allowedText],{cols:"1fr 2fr",noBorder:i===IF.WEAPON_TYPE_LIST.length-1}));
+  });
+  root.appendChild(weaponClassPanel);
+
   root.appendChild(h("h3",{},["Max Affix Rolls Per Tier"]));
   root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},["Every affix rolls between 1 and the max shown below for its own stat and tier -- each stat's max always scales up linearly with tier (Tier N's max = N x that stat's Tier 1 max). Weapons roll a further +40% on any Damage affix they get. Mana and Spell Power affixes are planned for a future update."]));
   const affixPanel=h("div",{class:"panel",style:{marginBottom:"16px",overflowX:"auto"}});
@@ -7337,7 +8417,7 @@ function screenHerbalismGuide(){
   root.appendChild(h("h3",{},["Herbalism Proficiency"]));
   root.appendChild(h("div",{class:"panel",style:{marginBottom:"16px"}},[
     h("div",{},[`You are currently Herbalism Lv ${PS.getHerbalismLevel()}.`]),
-    h("div",{class:"muted",style:{marginTop:"6px"}},[`Every time you click Gather while working a herb node, you earn 1 permanent Herbalism point -- so a herb that takes 2 strikes to gather nets 2 points, one that takes 4 strikes nets 4, whether or not you finish gathering it. Herbalism starts at Lv 0 (0/${Balance.HERBALISM_POINT_STEP} points); reaching Lv 1 takes ${Balance.herbalismCumulativePointsForLevel(1)} points, Lv 2 takes ${Balance.herbalismCumulativePointsForLevel(2)} total, Lv 3 takes ${Balance.herbalismCumulativePointsForLevel(3)} total, and so on, ${Balance.HERBALISM_POINT_STEP} more per level. Progress is permanent and shown on your Character Sheet's Skill Bonuses card.`]),
+    h("div",{class:"muted",style:{marginTop:"6px"}},[`Fully harvesting a herb node earns you permanent Herbalism points equal to the number of strikes it took -- so a herb that takes 2 strikes to gather nets 2 points, one that takes 4 strikes nets 4, awarded all at once when the node is completed. Walking away early via "Leave it" earns nothing. Herbalism starts at Lv 0 (0/${Balance.HERBALISM_POINT_STEP} points); reaching Lv 1 takes ${Balance.herbalismCumulativePointsForLevel(1)} points, Lv 2 takes ${Balance.herbalismCumulativePointsForLevel(2)} total, Lv 3 takes ${Balance.herbalismCumulativePointsForLevel(3)} total, and so on, ${Balance.HERBALISM_POINT_STEP} more per level. Progress is permanent and shown on your Character Sheet's Skill Bonuses card.`]),
   ]));
 
   root.appendChild(h("h3",{},["Potion Recipes"]));
@@ -7374,12 +8454,72 @@ function screenGameplayGuide(){
   root.appendChild(h("div",{class:"panel",style:{marginBottom:"16px"}},[
     h("div",{style:{marginBottom:"8px"}},[`You Venture out from Town into a maze full of grass, obstacles, chests, shrines, and the occasional Stronghold. Fights happen on grass tiles as you explore. Somewhere in the maze is an exit tile -- like every other tile, it's hidden by the fog of war until you actually stumble across it, so finding it is a real discovery, not a beeline. Stepping onto it advances you to the next area level (a tougher, freshly generated maze) and is how you gain levels along the way.`]),
     h("div",{style:{marginBottom:"8px"}},[`Once you reach Level ${Balance.trialLevelRequirement(1)} on your current class, the Broken Bridge Trial opens up back in Town. Cross it, and you're promoted to Level 1 of the next class tier on your path (see the Player Classes page for the full chain). Fall off a plank, and you're instead rerolled back to Level 1 of your CURRENT class tier -- but the bridge remembers every safe (and every broken) plank you've already found, so a retry never has to repeat a mistake, and eventually the last untried plank at a step is guaranteed safe.`]),
-    h("div",{},[`Failing an attempt isn't pure loss: every failure permanently adds +1 to the starting stat points your next Level 1 begins with (base ${Balance.STARTING_STAT_POINTS}, see the Broken Bridge Trial screen for your current running total), so repeated attempts at a tough tier make each retry a little stronger. That bonus resets back down to the base ${Balance.STARTING_STAT_POINTS} the moment you finally cross.`]),
+    h("div",{style:{marginBottom:"8px"}},[`Failing an attempt isn't pure loss: every failure permanently adds +1 to the starting stat points your next Level 1 begins with (base ${Balance.STARTING_STAT_POINTS}, see the Broken Bridge Trial screen for your current running total), so repeated attempts at a tough tier make each retry a little stronger. That bonus resets back down to the base ${Balance.STARTING_STAT_POINTS} the moment you finally cross.`]),
+    // v0.18.1 (#4): the single most common question from Hardcore players about this
+    // mechanic -- answered directly here, not just on the trial screen itself, since a
+    // player deciding whether to even try Hardcore in the first place may read this guide
+    // before ever seeing the trial screen's own reassurance.
+    h("div",{style:{color:"#5ac67a"}},[`A failed attempt CANNOT kill your character, even in Hardcore mode -- falling only resets you to Level 1 at your current tier, it never sends you to the Graveyard.`]),
   ]));
 
   root.appendChild(h("h3",{},["Kill Streak"]));
+  root.appendChild(h("div",{class:"panel",style:{marginBottom:"16px"}},[
+    h("div",{style:{marginBottom:"8px"}},[`Every monster you defeat without returning to Town extends your Kill Streak by 1, shown right on your Character Sheet stat panel. Its only effect is +${Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL}% Magic Find per kill in the streak -- better odds at higher-rarity gear drops, AND (as of v0.18.2) better odds of getting a drop at all on a kill that would otherwise have come up empty. It does NOT make monsters tougher or change how much gold or XP you get per kill. You'll see the current bonus tick up next to the streak count after every kill, for as long as you keep venturing without heading back to Town.`]),
+  ]));
+
+  root.appendChild(h("h3",{},["Community XP Bonus"]));
+  root.appendChild(h("div",{class:"panel",style:{marginBottom:"16px"}},[
+    h("div",{style:{marginBottom:"8px"}},[`Right under the top bar on every screen, a banner tracks how many Wandrian accounts have been active in the last few minutes -- the same headcount the "Currently playing" line uses. That count is also a shared XP multiplier for everyone currently playing: alone, there's no bonus; with 2 players active, everyone's kill XP is doubled; with 3, tripled; and so on, one whole multiple per additional player online at the same time. There's no way to lose this bonus other than everyone else logging off -- it only ever helps, never hurts, and it applies automatically to every kill without anything you need to do.`]),
+  ]));
+
+  root.appendChild(h("h3",{},["Critters & Forest Reputation"]));
   root.appendChild(h("div",{class:"panel"},[
-    h("div",{style:{marginBottom:"8px"}},[`Every monster you defeat without returning to Town extends your Kill Streak by 1, shown right on your Character Sheet stat panel. Its only effect is +${Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL}% Magic Find per kill in the streak (better odds at higher-rarity gear drops) -- it does NOT make monsters tougher or change how much gold, XP, or loot quantity you get per kill. You'll see the current bonus tick up next to the streak count after every kill, for as long as you keep venturing without heading back to Town.`]),
+    h("div",{style:{marginBottom:"8px"}},[`Occasionally you'll come across a small, harmless critter in the maze -- it won't fight back. You choose: squash it, or spare its life. Each choice moves your Forest Reputation for your CURRENT class tier by 1 (squashing: -1, sparing: +1) -- it starts at 0 and can go negative, and it's tracked separately per tier, since your class tier determines which forest (and town) you're exploring. Your current tier's reputation is always shown on your Character Sheet.`]),
+    h("div",{style:{marginBottom:"8px"}},[`A POSITIVE reputation grants a persistent +${Balance.FOREST_REPUTATION_XP_PCT_PER_POINT}% bonus to all experience gained per point, for as long as you're exploring that tier's forest -- it stacks multiplicatively on top of every other XP bonus (Community XP, shrines, gear) and applies to every kill automatically, no need to re-earn it each fight. A NEGATIVE reputation doesn't touch your XP at all, but adds 1 extra roaming mob to that forest's mazes per point below zero. Play it however you like: rack up roaming mobs to farm kills, or stay peaceful and let the bonus XP add up -- the choice, and its consequences, are entirely yours.`]),
+  ]));
+
+  return root;
+}
+
+// v0.18.2 (#4): a dedicated guide covering how leveling and area difficulty actually
+// interact -- previously the closest existing explanation was scattered across the
+// Gameplay Guide (core loop) and Player Classes page (promotion requirements), with
+// nothing walking through the actual XP math or explaining WHY farming a trivial area
+// eventually stops being worth it. Every number below is pulled live from Balance so this
+// page can never drift out of sync with the real formulas.
+function screenExperienceGuide(){
+  const root=h("div",{});
+  root.appendChild(h("h2",{},["Experience Guide"]));
+  root.appendChild(h("div",{class:"lore"},["How leveling, monster area levels, and class tier promotion actually work under the hood -- with real numbers, not just vibes."]));
+  root.appendChild(h("button",{style:{marginBottom:"10px"},onClick:()=>{ GF.goto(GF._preExperienceScreen||"mainMenuSlots"); }},["← Back"]));
+
+  root.appendChild(h("h3",{},["Area Levels vs. Character Level"]));
+  root.appendChild(h("div",{class:"panel",style:{marginBottom:"16px"}},[
+    h("div",{style:{marginBottom:"8px"}},[`Every maze has its own "area level," independent of your character's own level. Deeper area levels have tougher, more rewarding monsters (see below) -- reaching an area's exit advances you to the next one. You can Venture into any area level you've already unlocked at any time, including one far below or far above your current character level; nothing stops you, but both extremes come with real tradeoffs (see "Playing outside your level range" below).`]),
+    h("div",{},[`From area level ${Balance.LATE_GAME_MONSTER_GROWTH_START_LEVEL} onward, monsters also get an extra flat difficulty bump on top of the normal per-level scaling (+${Math.round(Balance.LATE_GAME_MONSTER_GROWTH_PER_LEVEL*100)} percentage points of HP/damage per area level past ${Balance.LATE_GAME_MONSTER_GROWTH_START_LEVEL-1}) -- by area level 20 that alone is roughly +${Math.round((Balance.lateGameMonsterGrowthMult(20)-1)*100)}% HP/damage on top of everything else, and by area level 60 it's roughly +${Math.round((Balance.lateGameMonsterGrowthMult(60)-1)*100)}%.`]),
+  ]));
+
+  root.appendChild(h("h3",{},["Experience: How Much You Need, How Much You Get"]));
+  root.appendChild(h("div",{class:"panel",style:{marginBottom:"16px"}},[
+    h("div",{style:{marginBottom:"8px"}},[`Leveling up costs more XP at higher character levels: roughly ${Balance.KILLS_PER_LEVEL_TARGET} same-level kills' worth per level, growing steeper as you climb. At Level 1 that's ${Balance.xpRequiredForLevel(1)} XP to hit Level 2; by Level 10 it's ${Balance.xpRequiredForLevel(10)} XP; by Level 30 it's ${Balance.xpRequiredForLevel(30)} XP; by Level ${Balance.LEVEL_CAP} it's ${Balance.xpRequiredForLevel(Balance.LEVEL_CAP)} XP.`]),
+    h("div",{style:{marginBottom:"8px"}},[`A monster's XP reward scales with the AREA level it's fought in, not your character level. A monster with a base reward of ${Balance.MONSTER_BASE_XP} XP grants about ${Math.round(Balance.monsterXpReward(Balance.MONSTER_BASE_XP,1))} XP at area level 1, ${Math.round(Balance.monsterXpReward(Balance.MONSTER_BASE_XP,10))} XP at area level 10, ${Math.round(Balance.monsterXpReward(Balance.MONSTER_BASE_XP,30))} XP at area level 30, and ${Math.round(Balance.monsterXpReward(Balance.MONSTER_BASE_XP,60))} XP at area level 60.`]),
+    h("div",{},[`These are two DIFFERENT curves on purpose -- what you need to level climbs by your character level, what monsters pay out climbs by the area's level. That's the entire reason farming a low area eventually stops working (next section).`]),
+  ]));
+
+  root.appendChild(h("h3",{},["Playing Outside Your Level Range"]));
+  root.appendChild(h("div",{class:"panel",style:{marginBottom:"16px"}},[
+    h("div",{style:{marginBottom:"8px"}},[`Farming an area well BELOW your character level: the monsters there still pay out XP based on THEIR area level, not yours -- so as your own Level-up cost keeps climbing on its own steeper curve, a trivial area's monsters contribute less and less toward your next level, even though they're still just as easy to kill. There's no explicit "penalty" applied -- it's simply that the two curves above drift apart the further behind the area level falls.`]),
+    h("div",{},[`Venturing into an area well ABOVE your character level: monsters there hit much harder and have much more HP (the normal per-area-level growth, plus the level-${Balance.LATE_GAME_MONSTER_GROWTH_START_LEVEL}+ difficulty bump from the section above) -- real risk of a bad fight, not just a wasted trip. The XP and loot on offer scale up to match, so it can be worth it with good gear and healing on hand, but it's genuinely dangerous rather than free extra experience.`]),
+  ]));
+
+  root.appendChild(h("h3",{},["Class Tier Promotion Levels"]));
+  root.appendChild(h("div",{class:"panel"},[
+    h("div",{style:{marginBottom:"8px"}},[`The Broken Bridge Trial (promotion to your path's next class tier) unlocks once you reach a set level on your CURRENT tier:`]),
+    h("div",{},[`Tier ${tierRomanNumeral(1)}: reach Level ${Balance.trialLevelRequirement(1)} to attempt promotion to Tier ${tierRomanNumeral(2)}.`]),
+    h("div",{},[`Tier ${tierRomanNumeral(2)}: reach Level ${Balance.trialLevelRequirement(2)} to attempt promotion to Tier ${tierRomanNumeral(3)}.`]),
+    h("div",{},[`Tier ${tierRomanNumeral(3)}: reach Level ${Balance.trialLevelRequirement(3)} to attempt promotion to Tier ${tierRomanNumeral(4)}.`]),
+    h("div",{},[`Tier ${tierRomanNumeral(4)}: reach Level ${Balance.trialLevelRequirement(4)} to attempt promotion to Tier ${tierRomanNumeral(5)}.`]),
+    h("div",{style:{marginTop:"8px"}},[`Tier ${tierRomanNumeral(5)} is the final rank on every path -- there's no further promotion trial beyond it. Every class can keep leveling all the way to the level cap (${Balance.LEVEL_CAP}) once there.`]),
   ]));
 
   return root;
@@ -7403,6 +8543,7 @@ const SCREENS={
   chestEncounter: screenChest,
   strongholdChest: screenStrongholdChest,
   herbEncounter: screenHerbEncounter,
+  critterEncounter: screenCritterEncounter,
   inventory: screenInventory,
   blacksmith: screenBlacksmith,
   alchemist: screenAlchemist,
@@ -7416,6 +8557,7 @@ const SCREENS={
   itemization: screenItemization,
   herbalism: screenHerbalismGuide,
   gameplayGuide: screenGameplayGuide,
+  experienceGuide: screenExperienceGuide,
   settings: screenSettings,
 };
 
@@ -7479,22 +8621,27 @@ setInterval(()=>{
 // can detect that one "just expired" tick and still call refreshStatHeaderInPlace() once
 // more to kick off the fade -- intentionally a plain closure variable, NOT stored on PS,
 // so it's never written into save data.
+// v0.18.1 (#28): now sub-ticks at Balance.POISON_TICK_MS (200ms, 5x/sec) instead of a single
+// lump once every 1000ms, so the HP bar visibly creeps down in small smooth steps instead of
+// snapping -- exact same fix/reasoning as the Health/Stamina Potion heal-over-time ticks
+// below. `poisonSaveCounter` throttles PS.saveGame() to roughly once a second (every 5th
+// sub-tick) even though the drain itself now happens 5x as often.
 let poisonWasActive=false;
+let poisonSaveCounter=0;
 setInterval(()=>{
   if(PS.current_slot<0) return;
   const poisoned=PS.isPoisoned();
-  if(poisoned && PS.current_hp>1){
-    // v0.17.1 (#10): PS.getPoisonHpPerSec() is now the single source of truth (% of max HP,
-    // scaled by the mob tier that inflicted this poison) -- see its declaration for why.
-    const dps=PS.getPoisonHpPerSec();
-    if(dps>0){ PS.current_hp=Math.max(1,PS.current_hp-dps); PS.saveGame(); }
+  const applied=PS.tickPoisonDrain();
+  if(applied){
+    poisonSaveCounter++;
+    if(poisonSaveCounter%5===0) PS.saveGame();
   }
   const justExpired=poisonWasActive && !poisoned;
   poisonWasActive=poisoned;
   if(poisoned || justExpired){
     if(!refreshStatHeaderInPlace()) render();
   }
-},1000);
+},Balance.POISON_TICK_MS);
 
 // v0.17.3 (#8): Health Potion heal-over-time tick. Deliberately NOT gated to
 // REGEN_ACTIVE_SCREENS (unlike the campfire regen tick above) -- a potion drunk mid-combat
@@ -7521,12 +8668,31 @@ setInterval(()=>{
   }
 },Balance.POTION_HEAL_TICK_MS);
 
-// v0.18 (#14): refresh "Currently playing" every 30s while the chat panel is actually open --
-// no point polling it while the panel is closed and no one can see the result, and 30s is
-// frequent enough to feel live against a 5-minute activity window without hammering the
-// server every render like the once-a-second regen/poison ticks do.
+// v0.18.1 (#20): Stamina Potion heal-over-time tick -- exact mirror of the Health Potion
+// interval immediately above (same cadence, same throttled-save reasoning, own independent
+// save counter so the two ticks' throttling schedules don't have to line up).
+let staminaHealSaveCounter=0;
 setInterval(()=>{
-  if(!GF.chatOpen || !Net.online) return;
+  if(PS.current_slot<0) return;
+  if(!PS.active_stamina_heals || !PS.active_stamina_heals.length) return;
+  const hadHeals=PS.active_stamina_heals.length>0;
+  const changed=PS.tickActiveStaminaHeals();
+  const stillHealing=PS.active_stamina_heals.length>0;
+  staminaHealSaveCounter++;
+  if((staminaHealSaveCounter%5===0) || (hadHeals && !stillHealing)) PS.saveGame();
+  if(changed){
+    if(!refreshStatHeaderInPlace()) render();
+  }
+},Balance.POTION_HEAL_TICK_MS);
+
+// v0.18 (#14) / v0.18.1 (#29): refresh "Currently playing" every 30s. Used to also require
+// GF.chatOpen (no point polling while the line was hidden inside the closed chat panel), but
+// the line is now always visible at the top of the page (see render()/activePlayersLine()),
+// so the only real gate left is being logged in at all. 30s is frequent enough to feel live
+// against a 5-minute activity window without hammering the server every render like the
+// once-a-second regen/poison ticks do.
+setInterval(()=>{
+  if(!Net.online) return;
   Net.fetchActivePlayers().then(render).catch(()=>{});
 },30000);
 
