@@ -220,13 +220,30 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 }
 /* v0.18 (#15): same tap-to-open mobile fix as .tooltip above, same shared handler. */
 .gear-compare-wrap:hover .compare-box,.gear-compare-wrap.compare-open .compare-box{display:block;}
+/* v0.19.2 (#17): a real-DOM box for the HOVERED item itself, matching the "Currently
+   Equipped" compare-box's improved styling -- sits exactly on top of the plain black
+   .tooltip::after pseudo-element (same position/size, higher z-index), so it visually
+   replaces that flat-text tooltip with the same structured, colored treatment, without
+   needing to touch every call site that still carries the original .tooltip/data-tip pair
+   (kept in place as a harmless, now-hidden-behind fallback). See gearHoveredItemContent(). */
+.gear-compare-wrap .hover-item-box{
+  display:none;position:absolute;bottom:120%;left:0;background:#000;color:#fff;
+  padding:6px 8px;border-radius:4px;font-size:.8em;width:220px;z-index:12;
+  box-shadow:0 2px 8px rgba(0,0,0,.6);border:1px solid var(--border);
+}
+.gear-compare-wrap:hover .hover-item-box,.gear-compare-wrap.compare-open .hover-item-box{display:block;}
 /* v0.18.1 (#12): distinctive title for the "Currently Equipped" compare box (was a plain
    bold "Comparison" label) -- uppercase/letter-spaced/accent-colored with its own underline
    so it reads as a clearly different kind of box than the plain black .tooltip beside it. */
-.compare-box .compare-title{
-  font-weight:bold;color:var(--accent);text-transform:uppercase;font-size:.82em;
+.compare-box .compare-title,.hover-item-box .compare-title{
+  font-weight:bold;text-transform:uppercase;font-size:.82em;
   letter-spacing:.04em;margin-bottom:5px;padding-bottom:4px;border-bottom:1px solid var(--border);
 }
+/* v0.19.2 (#17): the "Currently Equipped" box's own title has no rarity to reflect, so it
+   keeps the plain accent color; the new hover-item-box's title IS a specific item, so it
+   takes on that item's rarity color instead (via the rarity-X class already applied to it)
+   rather than the generic accent. */
+.compare-box .compare-title{color:var(--accent);}
 /* v0.18.1 (#13): Diablo-3-style per-stat delta coloring inside the compare box -- green for
    a stat the hovered item improves on, red for one it falls behind on. */
 .compare-box .stat-delta-good{color:var(--good);font-weight:bold;}
@@ -239,7 +256,8 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 .changelog-link{position:fixed;bottom:8px;right:12px;color:rgba(180,210,150,.75);font-size:.75em;cursor:pointer;text-decoration:none;}
 .changelog-link:hover{color:#cbd9a0;text-decoration:underline;}
 ::-webkit-scrollbar{width:10px;} ::-webkit-scrollbar-thumb{background:#3a4230;border-radius:5px;}
-.top-bar{display:flex;justify-content:flex-end;align-items:center;gap:14px;margin-bottom:12px;flex-wrap:wrap;}
+.top-bar{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-bottom:12px;flex-wrap:wrap;}
+.top-bar-right{display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
 .chat-toggle{display:flex;align-items:center;gap:6px;cursor:pointer;color:#cbd9a0;}
 .chat-toggle:hover{color:#e8e4d8;}
 /* v0.17 (#4): doubled from 25%/280-420px to 50%/560-840px per Gwen's request -- it's an
@@ -281,7 +299,7 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 .venture-fill{flex:1;}
 .venture-clickable{cursor:pointer;transition:.12s;}
 .venture-clickable:hover{background:#28331e;}
-.venture-chevrons{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:6px 10px;box-sizing:border-box;}
+.venture-chevrons{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:6px 10px;box-sizing:border-box;align-self:stretch;}
 .venture-chevrons button{padding:2px 10px;font-size:1em;line-height:1;}
 .class-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:0 14px;position:relative;}
 .class-grid>*{min-width:0;}
@@ -626,8 +644,12 @@ const LOGO_SVG = `<svg viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg">
 const TRASH_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>`;
 const PLUS_CIRCLE_SVG = `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="18" fill="#2a3a20" stroke="#8fce6a" stroke-width="2"/><path d="M20 11v18M11 20h18" stroke="#c9e8a0" stroke-width="3.2" stroke-linecap="round"/></svg>`;
 const CHAT_BUBBLE_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>`;
+// v0.19.2 (#13): simplified Discord "clyde" mark for the top-bar community link.
+const DISCORD_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="#5865F2" d="M20.3 5.4A16.9 16.9 0 0 0 16 4l-.2.4a12 12 0 0 1 3.5 1.7 14.8 14.8 0 0 0-11.6 0A12 12 0 0 1 8.2 4.4L8 4a16.9 16.9 0 0 0-4.3 1.4C1 9.6.3 13.6.6 17.6a17 17 0 0 0 5.2 2.6l1-1.7a11 11 0 0 1-1.8-.9l.4-.3a12.3 12.3 0 0 0 9.2 0l.4.3a11 11 0 0 1-1.8.9l1 1.7a17 17 0 0 0 5.2-2.6c.4-4.6-.7-8.6-3.1-12.2zM9 14.8c-.9 0-1.6-.8-1.6-1.8 0-1 .7-1.8 1.6-1.8s1.6.8 1.6 1.8-.7 1.8-1.6 1.8zm6 0c-.9 0-1.6-.8-1.6-1.8 0-1 .7-1.8 1.6-1.8s1.6.8 1.6 1.8-.7 1.8-1.6 1.8z"/></svg>`;
 const BOULDER_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M4 16c-1.2-1.6-1-4 .8-5.4 .3-2.4 2.3-4.2 4.7-4.2 .9 0 1.7.3 2.4.7 .9-1.1 2.3-1.8 3.8-1.8 2.7 0 4.9 2.2 4.9 4.9 0 .3 0 .6-.1.9 1.4.8 2.4 2.3 2.4 4.1 0 2.6-2.1 4.6-4.6 4.6H6.9C5.3 19.8 4 18.5 4 16z" fill="#6b6b64" stroke="#3a3a34" stroke-width="1"/></svg>`;
 const BONFIRE_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2c1 3-2 4-2 7a2 2 0 0 0 4 0c1 1 1.5 2.5 1.5 4a5.5 5.5 0 0 1-11 0C4.5 8 8 7 12 2z" fill="#ff9d3d"/><path d="M12 8c.4 1.4-1 2-1 3.5a1 1 0 0 0 2 0c.4.5.6 1.2.6 2a1.6 1.6 0 0 1-3.2 0c0-2.3 1-3.5 1.6-5.5z" fill="#ffdd9a"/><ellipse cx="12" cy="20.5" rx="6" ry="1.3" fill="#4a3018" opacity="0.6"/></svg>`;
+// v0.19.2 (#7): small wood-log icon for the Kindle-the-Bonfire panel's "Logs (N)" line.
+const DRY_LOG_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="9" width="20" height="6" rx="3" fill="#8a5a2e"/><ellipse cx="3.4" cy="12" rx="1.6" ry="3" fill="#c98f52"/><ellipse cx="3.4" cy="12" rx="0.8" ry="1.6" fill="#6b4423"/><ellipse cx="20.6" cy="12" rx="1.6" ry="3" fill="#c98f52"/><ellipse cx="20.6" cy="12" rx="0.8" ry="1.6" fill="#6b4423"/></svg>`;
 // A single generic footstep glyph used on every Broken Bridge Trial plank button --
 // with 2 to 5 planks per step now (see Balance.bridgePlankCount), "Top"/"Bottom" text
 // labels stopped making sense, so every plank just shows this icon instead.
@@ -951,7 +973,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.19.1-web",
+  GAME_VERSION:"v0.19.2-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   NPC_BLACKSMITH_NAME:"Grondar Emberhand", NPC_ALCHEMIST_NAME:"Maren Thistlebrew", NPC_MERCHANT_NAME:"Cassius Wraithcoin",
@@ -3409,6 +3431,14 @@ const GF = {
   // "Continue" button (never by a timer), returnDepth remembers which maze depth to land
   // back on since GF.maze_depth may not still be set by the time Continue is clicked.
   chestReveal:null,
+  // v0.19.2 (#6): full-screen class-promotion celebration data -- see
+  // triggerClassPromotionCelebration()/screenClassPromotion(). null whenever the
+  // celebration screen isn't showing (its own "Enter [town]" button is the only thing
+  // that clears it, never a timer -- same "player-acknowledged, not auto-dismissed"
+  // pattern as GF.chestReveal above).
+  classPromotionCelebration:null,
+  // v0.19.2 (#4): which Dev Tools sub-tab is showing ("spawn"/"leaderboard"/"accounts"/"legacy").
+  adminTab:"spawn",
   // v0.17.3 (#13/#14/#15): which Leaderboard sub-tab is showing ("ladder"/"skills"/"gold"),
   // and which account_id/character_name pair the read-only Inspect Player view should
   // fetch+display. Reset to null on goto("inspectPlayer") away-and-back not required -- a
@@ -3656,7 +3686,10 @@ function globalXpMultiplierLine(){
   if(!entries) return h("div",{});
   const n=Math.max(1, entries.length);
   let text;
-  if(n<=1) text="You are all alone in the dark forest.";
+  // v0.19.2 (#11): spell out explicitly that solo play means no bonus, rather than just
+  // implying it by omission -- previously this line just said you were alone and left it
+  // to the player to infer that no multiplier was active.
+  if(n<=1) text="You are all alone in the dark forest. No bonus effects applied until more players join.";
   else if(n===2) text="Two players are currently in the Wandrian realm -- experience gained is doubled for everyone!";
   else if(n===3) text="Three players are currently in the Wandrian realm -- experience gained is tripled for everyone!";
   else text=`${n} players are currently in the Wandrian realm -- experience gained is ${n}x for everyone!`;
@@ -3664,6 +3697,32 @@ function globalXpMultiplierLine(){
   // to tie this banner visually to "more XP", rather than introducing a brand new color.
   const style=n>=2?{fontSize:".9em",marginBottom:"6px",fontWeight:"bold",color:"#b46cff"}:{fontSize:".9em",marginBottom:"6px"};
   return h("div",{class:n>=2?"":"muted",style},[text]);
+}
+
+// v0.19.2 (#10): wraps the community XP banner + "Currently playing" line together in a
+// single header container -- purple-tinted background and a matching border -- instead of
+// two bare unstyled lines, so this "community" info block reads as one cohesive unit at
+// the top of the page rather than blending into the general muted-text noise around it.
+function communityXpHeader(){
+  return h("div",{class:"panel",style:{
+    marginBottom:"8px",
+    background:"rgba(180,108,255,0.10)",
+    border:"1px solid rgba(180,108,255,0.35)",
+  }},[
+    globalXpMultiplierLine(),
+    activePlayersLine(),
+  ]);
+}
+
+// v0.19.2 (#13): community Discord invite link, aligned to the very left of the top bar
+// (see .top-bar's switch to justify-content:space-between + the new .top-bar-right group
+// for the rest of the existing right-aligned items) -- opens in a new tab, same as any
+// other outbound link, rather than navigating the game away.
+function discordLink(){
+  return h("span",{class:"linklike",style:{display:"flex",alignItems:"center",gap:"6px"},onClick:()=>{ window.open("https://discord.gg/GCZr27eBM","_blank","noopener,noreferrer"); }},[
+    inlineIcon(DISCORD_SVG,18),
+    "Enjoy playing Wandrian? Join our discord",
+  ]);
 }
 
 function topBar(){
@@ -3683,7 +3742,10 @@ function topBar(){
     h("span",{class:"linklike",onClick:()=>{ GF._preSettingsScreen=GF.screen; GF.goto("settings"); }},["Settings"]),
     h("span",{class:"chat-toggle",onClick:toggleChat},[inlineIcon(CHAT_BUBBLE_SVG,18),"Global Chat"]),
   ];
-  return h("div",{class:"top-bar"},right);
+  return h("div",{class:"top-bar"},[
+    discordLink(),
+    h("div",{class:"top-bar-right"},right),
+  ]);
 }
 
 function chatLogEntries(){
@@ -3842,6 +3904,19 @@ function refreshBonfireCountdownInPlace(){
   return true;
 }
 
+// v0.19.2 (#29): patches the Gambling Goblin reveal bar's width in place on each 100ms
+// tick, same "leave the DOM node alone, just mutate its style" idiom as
+// refreshStatHeaderInPlace()/refreshBonfireCountdownInPlace() above -- see
+// screenGamblingGoblin()'s own comment on why a full render() every tick defeated the
+// .bar-fill CSS transition (a fresh node every render has no prior width to animate from).
+function refreshGambleBarInPlace(){
+  const fill=document.getElementById("gamble-bar-fill");
+  if(!fill || !fill.parentNode || !GF.gambleReveal) return false;
+  const elapsed=Date.now()-GF.gambleReveal.startedAt;
+  fill.style.width=clampf(elapsed/Balance.GAMBLE_REVEAL_MS*100,0,100)+"%";
+  return true;
+}
+
 function render(){
   app.innerHTML="";
   // v0.17 (#6) BUG FIX: this banner's wording dated from before Wandrian went online-only
@@ -3863,7 +3938,7 @@ function render(){
   // v0.18.2 (#7): the community XP-multiplier banner renders right above the "Currently
   // playing" line -- both always-visible (not just while Global Chat is open), both driven
   // by the same Net.activePlayersCache fetch, so they naturally stay in sync with each other.
-  if(!NO_TOPBAR_SCREENS.includes(GF.screen)){ app.appendChild(topBar()); app.appendChild(globalXpMultiplierLine()); app.appendChild(activePlayersLine()); }
+  if(!NO_TOPBAR_SCREENS.includes(GF.screen)){ app.appendChild(topBar()); app.appendChild(communityXpHeader()); }
   const fn=SCREENS[GF.screen]||SCREENS.mainMenuSlots;
   app.appendChild(fn());
   const cp=chatPanel(); if(cp) app.appendChild(cp);
@@ -4017,27 +4092,6 @@ function startCraftBag(itemId){
   },100);
 }
 
-// Aggregates every consumable into "N health potions"/"N stamina potions" (collapsing
-// the small/greater tiers together, since at a glance players care about the running
-// total more than the split) plus any other consumables (elixirs, scrolls) by name.
-// Used only in the compact character-detail preview -- the full Inventory screen still
-// lists each stack individually since its Use buttons need the specific item id.
-function aggregatedConsumableParts(){
-  let healthTotal=0, staminaTotal=0; const otherParts=[];
-  for(const itemId of Object.keys(PS.consumables)){
-    const qty=PS.consumables[itemId]; if(qty<=0) continue;
-    const item=DL.getItem(itemId);
-    if(item.heal_amount) healthTotal+=qty;
-    else if(item.stamina_amount) staminaTotal+=qty;
-    else otherParts.push(`${qty}x ${item.name}`);
-  }
-  const parts=[];
-  if(healthTotal>0) parts.push(`${healthTotal} health potion${healthTotal===1?"":"s"}`);
-  if(staminaTotal>0) parts.push(`${staminaTotal} stamina potion${staminaTotal===1?"":"s"}`);
-  parts.push(...otherParts);
-  return parts;
-}
-
 // Reuses the same herb SVG icons as the Character Sheet's Herbs list, instead of the
 // plain "12x Sunpetal Bloom, 5x Ember Root" text this compact preview used to show --
 // the icons are already there and recognizable, the herb name only needs to show up
@@ -4054,14 +4108,29 @@ function herbPreviewRow(){
   ]);
 }
 
+// v0.19.2 (#20): matches herbPreviewRow()'s icon+value treatment instead of the old
+// "Consumables: N health potions, N stamina potions, ..." aggregated-text line -- each
+// owned consumable now shows its own item icon with the name as a hover tooltip, same
+// idiom as herbs, rather than collapsing potion tiers into a text summary.
+function consumablePreviewRow(){
+  const consEntries=Object.keys(PS.consumables).filter(k=>PS.consumables[k]>0);
+  if(consEntries.length===0) return h("div",{class:"muted"},["Consumables: none"]);
+  return h("div",{class:"row gap",style:{alignItems:"center",flexWrap:"wrap"}},[
+    h("span",{class:"muted"},["Consumables:"]),
+    ...consEntries.map(k=>h("span",{class:"row",title:DL.getItem(k).name,style:{alignItems:"center",gap:"2px",cursor:"help"}},[
+      itemIcon(k,18),
+      h("span",{class:"muted"},[`${PS.consumables[k]}x`]),
+    ])),
+  ]);
+}
+
 function inventoryPreview(){
   const equippedCount=IF.EQUIPPED_SLOT_KEYS.filter(s=>PS.equipped[s]).length;
-  const consumableParts=aggregatedConsumableParts();
   return h("div",{class:"col gap",style:{flex:"1",minWidth:"0"}},[
     h("div",{class:"muted"},[`Equipped: ${equippedCount}/${IF.EQUIPPED_SLOT_KEYS.length}`]),
     h("div",{class:"muted"},[`Backpack: ${PS.getInventoryUsed()}/${PS.getInventoryCapacity()}`]),
     h("div",{class:"muted"},[`Bags: ${PS.equipped_bags.length}/${Balance.MAX_BAG_SLOTS}`]),
-    h("div",{class:"muted",style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},[consumableParts.length?`Consumables: ${consumableParts.join(", ")}`:"Consumables: none"]),
+    consumablePreviewRow(),
     herbPreviewRow(),
   ]);
 }
@@ -4084,9 +4153,17 @@ function damageLine(){
   // v0.19.1 (#14): shown as a %, not a flat number, now that weapon-skill proficiency is a
   // % damage bonus rather than a flat add-per-level (see PS.getDamageBreakdown()).
   const skillTip=d.weaponSkillPct>0?`\nFrom skill bonuses: +${Math.round(d.weaponSkillPct*100)}%`:"";
+  // v0.19.2 (#19): the "Damage: X-Y" spread here used to describe an actual independent RNG
+  // roll made on every attack (see the old cbRandRange(lo, hi) in server.js's attack
+  // resolution) -- per Gwen's spec, that was a THIRD layer of randomness on top of crit
+  // chance and block chance, which was more variance than intended. The server now deals
+  // exactly the average of that same min-max spread every hit (crit/block still fully RNG,
+  // unchanged), so this line shows that single flat number instead of a range that no
+  // longer corresponds to anything the server actually rolls.
+  const flatTotal=Math.round((d.totalMin+d.totalMax)/2);
   const children=[
     h("span",{class:"muted tooltip",style:{fontSize:".85em"},"data-tip":`Base (level + attributes): ${baseFlat}\nFrom equipped gear: +${Math.round(d.gearBonus)}${skillTip}`},[
-      `Damage: ${Math.round(d.totalMin)}-${Math.round(d.totalMax)} (${baseFlat} base${gearPart})`
+      `Damage: ${flatTotal} (${baseFlat} base${gearPart})`
     ]),
   ];
   // v0.19.1 (#9): the Quad Damage shrine indicator moves here, right under level/class, next
@@ -4095,8 +4172,8 @@ function damageLine(){
   // the actual 4x total instead of just a bare icon, and uses a light blue/teal color as a
   // nod to Quake 3 Arena's Quad Damage powerup (the buff's own namesake).
   if(PS.hasQuadDamage()){
-    const quadMin=Math.round(d.totalMin*4), quadMax=Math.round(d.totalMax*4);
-    children.push(h("span",{class:"tooltip quad-damage-text",style:{fontSize:".85em",marginLeft:"6px"},"data-tip":`Quad Damage: 4x damage output for ${PS.quad_dmg_rounds_left} more combat round(s).`},[`⚡ Quad Damage: ${quadMin}-${quadMax}`]));
+    const quadFlat=flatTotal*4;
+    children.push(h("span",{class:"tooltip quad-damage-text",style:{fontSize:".85em",marginLeft:"6px"},"data-tip":`Quad Damage: 4x damage output for ${PS.quad_dmg_rounds_left} more combat round(s).`},[`⚡ Quad Damage: ${quadFlat}`]));
   }
   return h("div",{},children);
 }
@@ -4449,7 +4526,9 @@ function screenMainMenuSlots(){
     // v0.18.2 (#4): new Experience Guide, same row/pattern as the other three guides.
     h("button",{class:"wide",style:{textAlign:"center",lineHeight:"1.3",padding:"8px 12px",flex:"1"},onClick:()=>{ GF._preExperienceScreen="mainMenuSlots"; GF.goto("experienceGuide"); }},[
       h("div",{},["📈 Experience Guide"]),
-      h("div",{class:"dim-note",style:{marginTop:"2px"}},["Leveling math, area difficulty, and tier promotion"]),
+      // v0.19.2 (#14): shortened to fit on 1 line -- the old text wrapped to 2 lines,
+      // making this tile taller than its siblings on the character-select screen.
+      h("div",{class:"dim-note",style:{marginTop:"2px"}},["Leveling, Exp penalties, promotion targets"]),
     ]),
   ]));
   root.appendChild(content);
@@ -4750,6 +4829,20 @@ function formatLastSeen(iso){
   return new Date(iso).toLocaleDateString();
 }
 
+// v0.19.2 (#9): renders the leaderboard row's "Last seen" line -- a green bulletpoint +
+// "Online now" (no "Last seen:" prefix) when the player is currently active, otherwise
+// the plain "Last seen: <time ago>" text exactly as before.
+function leaderboardLastSeenLine(iso){
+  const label=formatLastSeen(iso);
+  if(label==="Online now"){
+    return h("div",{class:"muted row",style:{alignItems:"center",gap:"5px",justifyContent:"flex-end",fontSize:".85em",marginTop:"2px"}},[
+      h("span",{style:{display:"inline-block",width:"8px",height:"8px",borderRadius:"50%",background:"#5fd15f"}}),
+      "Online now",
+    ]);
+  }
+  return h("div",{class:"muted",style:{fontSize:".85em",marginTop:"2px"}},[`Last seen: ${label}`]);
+}
+
 function leaderboardLadderTab(){
   const root=h("div",{});
   if(Net.leaderboardCache===null||Net.leaderboardCache===undefined){
@@ -4789,9 +4882,11 @@ function leaderboardLadderTab(){
     // tier badge -- and per Gwen's exact spec, a bare "(Tier 2)" tag with nothing else in it
     // collapses all the way to "(II)" (word dropped too), while the tag WITH the Step count
     // alongside it keeps the "Tier" label since "(II, Step 3/8)" alone would read as unclear.
-    const tierNode=(e.last_bridge_steps>0)
-      ? h("span",{},[`(Tier ${tierRomanNumeral(e.highest_tier_reached)}, Step ${e.last_bridge_steps}/${Balance.BRIDGE_ROWS})`])
-      : h("span",{},[`(${tierRomanNumeral(e.highest_tier_reached)})`]);
+    // v0.19.2 (#8): always show the Step count, even at 0 -- previously a player who
+    // hadn't yet taken a single step on their current tier's bridge showed a bare
+    // "(Tier N)" with no step info at all, which read as if the data was simply missing
+    // rather than genuinely zero.
+    const tierNode=h("span",{},[`(Tier ${tierRomanNumeral(e.highest_tier_reached)}, Step ${e.last_bridge_steps||0}/${Balance.BRIDGE_ROWS})`]);
     root.appendChild(h("div",{class:"tile row",style},[
       h("div",{},[
         h("span",{class:"muted"},[`#${idx+1} `]),
@@ -4823,7 +4918,11 @@ function leaderboardLadderTab(){
         // v0.18 (#17): "Last seen" -- reads leaderboard_bests.updated_at (already stamped
         // fresh on every character save, same signal #14's "Currently playing" line uses),
         // exposed by the server as `last_active_at`.
-        h("div",{class:"muted",style:{fontSize:".85em",marginTop:"2px"}},[`Last seen: ${formatLastSeen(e.last_active_at)}`]),
+        // v0.19.2 (#9): a player who's online right now gets a green bulletpoint + "Online
+        // now" instead of the flat "Last seen: Online now" text, so an active player stands
+        // out from the timestamped rows at a glance instead of reading like just another
+        // "Last seen" value.
+        leaderboardLastSeenLine(e.last_active_at),
       ]),
     ]));
   });
@@ -4944,9 +5043,12 @@ function leaderboardKillstreakTab(){
     Net.fetchLeaderboardKillstreak().then(render).catch(()=>{ setToast("Could not load the Max Killstreak leaderboard."); render(); });
     return root;
   }
-  const entries=Net.leaderboardKillstreakCache;
+  // v0.19.2 (#12): a character who has never landed a single kill streak is just noise
+  // on a "Max Killstreak" ranking -- filtered out here rather than server-side, since the
+  // raw cache is shared with anything else that might want the full unfiltered list later.
+  const entries=(Net.leaderboardKillstreakCache||[]).filter(e=>(e.max_kill_streak||0)>0);
   root.appendChild(h("div",{class:"muted",style:{marginBottom:"10px"}},["Top characters by longest Kill Streak ever reached (a lifetime record -- it never resets, even though the streak itself does when you return to Town). Different characters on the same account are ranked separately."]));
-  if(entries.length===0){ root.appendChild(h("div",{class:"muted"},["No kills recorded yet."])); return root; }
+  if(entries.length===0){ root.appendChild(h("div",{class:"muted"},["No kill streaks recorded yet."])); return root; }
   entries.forEach((e,i)=>{
     root.appendChild(h("div",{class:"tile row",style:{marginBottom:"6px",justifyContent:"space-between",alignItems:"center"}},[
       h("div",{style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},[
@@ -5020,34 +5122,68 @@ function screenInspectPlayer(){
   // getTrialProgress()'s comment), so this is a step-count progress bar, not a full replay.
   root.appendChild(h("h3",{},["Bridge Progress"]));
   const bridgeSteps=s.last_bridge_steps||0;
-  root.appendChild(h("div",{class:"panel",style:{marginBottom:"12px"}},[
+  const bridgePanel=h("div",{class:"panel",style:{marginBottom:"12px"}},[
     h("div",{class:"row",style:{justifyContent:"space-between",marginBottom:"6px"}},[
       h("div",{},[`Tier ${tierRomanNumeral(s.highest_tier_reached)}`]),
       h("div",{class:"muted"},[`Step ${bridgeSteps}/${Balance.BRIDGE_ROWS}`]),
     ]),
     bar(bridgeSteps/Balance.BRIDGE_ROWS*100,"bar-gold"),
+  ]);
+  // v0.19.2 (#23): below the existing yellow progress bar (kept exactly as-is), a per-step
+  // visualization of exactly how far this attempt got -- one pip per bridge row, filled gold
+  // for every step already passed, dark for the rest. There's no plank-by-plank pass/fail
+  // history to show (that's deliberately excluded from the server's Inspect Player whitelist,
+  // see the route's own SECURITY-CRITICAL comment -- it's in-progress bookkeeping, not part of
+  // the "current gear/stats/skills" spec this view is scoped to), so this is a step-count
+  // replay, not a full plank-by-plank one. Also shows the fail streak ("failed step count")
+  // and this tier's per-step odds ("luck") for context on how hard this tier's bridge is.
+  const stepPips=h("div",{class:"row gap",style:{marginTop:"8px",flexWrap:"wrap"}},
+    Array.from({length:Balance.BRIDGE_ROWS},(_,i)=>h("div",{title:`Step ${i+1}`,style:{
+      width:"20px",height:"20px",borderRadius:"3px",
+      background:i<bridgeSteps?"#c9a13a":"#2a2a2a",
+      border:"1px solid "+(i<bridgeSteps?"#e0c94a":"#444"),
+    }})));
+  const failStreak=s.bridge_fail_streak||0;
+  const stepChance=Balance.bridgeStepPassChance(s.highest_tier_reached||1);
+  bridgePanel.appendChild(stepPips);
+  bridgePanel.appendChild(h("div",{class:"muted",style:{marginTop:"8px",fontSize:".9em"}},[
+    `Failed attempts at this tier: ${failStreak}`,
   ]));
+  bridgePanel.appendChild(h("div",{class:"muted",style:{fontSize:".9em"}},[
+    `Each step here holds ${Math.round(stepChance*100)}% of the time -- how far luck carried them.`,
+  ]));
+  root.appendChild(bridgePanel);
 
-  // v0.18.2 (#6): read-only Forest Reputation for whichever tier this character is
-  // currently in -- same forest_reputation object PS itself keeps, keyed by tier, exposed
-  // by the server's whitelisted Inspect Player response (see its route comment).
-  root.appendChild(h("h3",{},["Forest Reputation"]));
+  // v0.19.2 (#24): now lists EVERY tier this character has already passed through (Tier 1
+  // up to their current highest_tier_reached), not just the current one -- per Gwen's spec
+  // format "[Forest name] (Tier x): [value]". Reputation is never wiped when a character
+  // promotes tiers (PS.getForestReputation()/forest_reputation stays keyed by every tier
+  // it's ever touched), so a past tier's number is still meaningful, not stale.
   const repMap=s.forest_reputation||{};
-  const currentRep=repMap[s.highest_tier_reached]||0;
-  root.appendChild(h("div",{class:"panel",style:{marginBottom:"12px"}},[
-    h("div",{},[`Tier ${tierRomanNumeral(s.highest_tier_reached)}: ${currentRep}`]),
-  ]));
+  const repRows=[];
+  for(let t=1;t<=(s.highest_tier_reached||1);t++){
+    const forestName=Balance.TOWN_NAMES[Math.min(Balance.TOWN_NAMES.length-1,t-1)];
+    repRows.push(h("div",{style:{marginBottom:"2px"}},[`${forestName} (Tier ${tierRomanNumeral(t)}): ${repMap[t]||0}`]));
+  }
+  const forestRepCol=h("div",{style:{flex:"1",minWidth:"0"}},[
+    h("h3",{},["Forest Reputation"]),
+    h("div",{class:"panel"},repRows),
+  ]);
 
-  root.appendChild(h("h3",{},["Attributes"]));
+  // v0.19.2 (#25): Attributes switched from a wrapping horizontal row to a vertical list --
+  // combined with the change above, both panels are now narrow enough to share a 50/50 row
+  // instead of each taking the full page width.
   const attrs=s.attributes||{str:0,dex:0,vit:0,int:0};
-  root.appendChild(h("div",{class:"panel",style:{marginBottom:"12px"}},[
-    h("div",{class:"row gap",style:{flexWrap:"wrap"}},[
+  const attrsCol=h("div",{style:{flex:"1",minWidth:"0"}},[
+    h("h3",{},["Attributes"]),
+    h("div",{class:"panel col",style:{gap:"4px"}},[
       h("div",{},[`Strength: ${attrs.str||0}`]),
       h("div",{},[`Dexterity: ${attrs.dex||0}`]),
       h("div",{},[`Vitality: ${attrs.vit||0}`]),
       h("div",{},[`Intelligence: ${attrs.int||0}`]),
     ]),
-  ]));
+  ]);
+  root.appendChild(h("div",{class:"row gap",style:{marginBottom:"12px",alignItems:"flex-start"}},[forestRepCol,attrsCol]));
 
   root.appendChild(h("h3",{},["Equipped"]));
   const eqDoll=h("div",{class:"equip-doll"});
@@ -5056,7 +5192,9 @@ function screenInspectPlayer(){
   }
   root.appendChild(eqDoll);
 
-  root.appendChild(h("h3",{},["Skill Progression"]));
+  // v0.19.2 (#26): explicit top margin -- this title used to sit right up against the last
+  // Equipped row (boots) above it with no visual breathing room at all.
+  root.appendChild(h("h3",{style:{marginTop:"16px"}},["Skill Progression"]));
   const weaponSkills=s.weapon_skills||{};
   const skillRows=IF.WEAPON_TYPE_LIST.map(t=>{
     const hits=(weaponSkills[t] && weaponSkills[t].hits)||0;
@@ -5145,8 +5283,9 @@ function kindleBonfirePanel(){
       // doing a full render(), same reasoning as refreshStatHeaderInPlace()/#328.
       h("div",{id:isKindled?"bonfire-countdown-text":undefined,class:"muted",style:{fontSize:".8em",marginTop:"2px"}},[subtext]),
     ]),
-    h("div",{class:"panel venture-chevrons"},[
+    h("div",{class:"panel venture-chevrons",style:{alignSelf:"stretch",height:"100%",boxSizing:"border-box"}},[
       h("div",{class:"muted",style:{fontSize:".72em"}},[`Logs (${have})`]),
+      inlineIcon(DRY_LOG_SVG,16),
       h("button",{disabled:have<=0,onClick:(e)=>{
         e.stopPropagation();
         const ok=PS.kindleBonfire(1);
@@ -5163,7 +5302,7 @@ function kindleBonfirePanel(){
 function screenTown(){
   const root=h("div",{});
   root.appendChild(h("h2",{},[getTownName()]));
-  root.appendChild(h("div",{class:"lore"},["A quiet camp on the edge of a vast, overgrown forest. The fire needs protecting, but for now, all is calm."]));
+  root.appendChild(h("div",{class:"lore"},["A quiet camp on the edge of a vast, overgrown forest."]));
   const t=toastBox(); if(t) root.appendChild(t);
 
   const ventureDepth=getVentureDepth();
@@ -5208,7 +5347,11 @@ function screenTown(){
     h("div",{class:"col gap"},[
       serviceButton("Merchant","💰",()=>GF.goto("merchant")),
       serviceButton("Auction House","📜",()=>{ Net.auctionCache=null; GF.goto("auctionHouse"); }),
-      PS.gamblingUnlocked()?serviceButton("Gambling Den","🎲",()=>GF.goto("gamblingGoblin")):h("button",{disabled:true},["Gambling Den (pass a trial first)"]),
+      // v0.19.2 (#28): renamed from "Gambling Den" to just "Goblin" once unlocked -- the
+      // locked state now names the actual unlock condition (reaching Tier 2's town,
+      // Willowmere Hollow, matches PS.gamblingUnlocked()'s highest_tier_reached>=2 check)
+      // instead of the vaguer "pass a trial first".
+      PS.gamblingUnlocked()?serviceButton("Goblin","🎲",()=>GF.goto("gamblingGoblin")):h("button",{disabled:true},[`Goblin (Reach ${Balance.TOWN_NAMES[1]})`]),
       PS.canAttemptTrial()?serviceButton("Broken Bridge Trial","⭐",()=>GF.goto("masterTrial")):h("button",{disabled:true},[`Broken Bridge Trial (reach Lv ${Balance.trialLevelRequirement(PS.getClassData().tier||1)})`]),
     ]),
   ]));
@@ -6606,8 +6749,29 @@ function screenCombat(){
     if(GF.combatResolving || !itemId) return;
     GF.combatResolving=true; render();
     try{
+      const item=DL.getItem(itemId);
       const result=await Net.useItemCombat(cb.session_id, itemId);
       PS._saveSeqFloor=Math.max(PS._saveSeqFloor||0, result._save_seq);
+      // v0.19.2 BUG FIX (credit ImpulseBE): the server queues this potion's heal as a
+      // heal-over-time exactly like the maze/town path (see combatQueueHeal() server-side),
+      // but this function used to just snapshot result.player.current_hp once and stop --
+      // nothing ever fed PS.active_heals/PS.active_stamina_heals, so the existing global
+      // tick loop (already running on every screen -- see its own comment on why it's
+      // deliberately not gated to REGEN_ACTIVE_SCREENS) had nothing to animate. current_hp
+      // then only ever reflected whatever sliver of real wall-clock time had elapsed by the
+      // NEXT server round-trip (the next Attack/Flee/item click) -- in a fast fight that's
+      // often close to zero, so the potion visibly "did nothing" even though the server
+      // never rejected it and DID consume it. Queueing the identical client-side heal here
+      // (same math PS.useConsumable() already uses for the maze) lets that untouched tick
+      // loop pick it up immediately; the next real server response still overwrites
+      // current_hp with the authoritative value, exactly reconciling any tiny drift.
+      const totalTicks=Balance.POTION_HEAL_DURATION_MS/Balance.POTION_HEAL_TICK_MS;
+      if((item.heal_amount||0)>0 && PS.current_hp<PS.getMaxHp()){
+        PS._queueGradualHeal(PS.active_heals,item.heal_amount,PS.getMaxHp()-PS.current_hp,totalTicks);
+      }
+      if((item.stamina_amount||0)>0 && PS.current_stamina<PS.getMaxStamina()){
+        PS._queueGradualHeal(PS.active_stamina_heals,item.stamina_amount,PS.getMaxStamina()-PS.current_stamina,totalTicks);
+      }
       PS.current_hp=result.player.current_hp;
       PS.current_stamina=result.player.current_stamina;
       // The item itself was already deducted server-side -- mirror that one deterministic
@@ -6967,9 +7131,26 @@ function gearComparisonContent(inst){
 // beside it -- see the .gear-compare-wrap/.compare-box CSS rules for the positioning (pure
 // CSS :hover toggle, no JS mouse listeners needed, consistent with how every other tooltip
 // in this file already works).
+// v0.19.2 (#17): the hovered item's OWN info, built as real structured DOM (rarity-
+// colored title, level requirement, class restriction, then each stat on its own line) --
+// same visual language as gearComparisonContent()'s "Currently Equipped" box (reuses its
+// .compare-title styling for the header) instead of the flat plain-text .tooltip pseudo-
+// element every other tooltip in the game still uses. Mirrors IF.tooltipText(inst)'s exact
+// same info, just as real nodes instead of a joined string.
+function gearHoveredItemContent(inst){
+  const nodes=[h("div",{class:"compare-title rarity-"+inst.rarity},[`${IF.displayName(inst)} (${tierRomanNumeral(inst.tier)})`])];
+  nodes.push(h("div",{style:{marginBottom:"2px"}},[`Requires Level ${Balance.tierLevelRequirement(inst.tier)}`]));
+  const weaponType=IF.weaponTypeForInstance(inst);
+  const restrictedTo=weaponType?IF.WEAPON_TYPE_CLASS_RESTRICTIONS[weaponType]:null;
+  if(restrictedTo) nodes.push(h("div",{style:{marginBottom:"2px"}},[`Class: ${restrictedTo.map(id=>DL.getClass(id).display_name||id).join(", ")}`]));
+  for(const a of (inst.affixes||[])) nodes.push(h("div",{},[IF.formatAffix(a,inst)]));
+  return nodes;
+}
+
 function gearCompareWrap(triggerEl, inst){
   return h("div",{class:"gear-compare-wrap"},[
     triggerEl,
+    h("div",{class:"hover-item-box"},gearHoveredItemContent(inst)),
     h("div",{class:"compare-box"},gearComparisonContent(inst)),
   ]);
 }
@@ -7223,7 +7404,26 @@ function backpackGearGrid(){
         class:"tile",
         style:{width:"38px",height:"38px",padding:"0",cursor:GF._bagReorderMode?"pointer":"default"},
         onClick:GF._bagReorderMode?()=>{
-          if(GF._bagReorderSrcIdx!=null){ const src=GF._bagReorderSrcIdx; GF._bagReorderSrcIdx=null; backpackSwapSlots(src,i); }
+          // v0.19.2 (#18): investigated Gwen's report that moving an item to an empty slot
+          // "still does not work" in Inventory/Vault. reorder_empty_slot_test.js (locked in
+          // during the original v0.18 #3 work) confirms the underlying mechanic is sound for
+          // both grids -- Vault slots are arbitrary/persistent so an item really does land
+          // exactly on the empty slot clicked, but the Backpack is a capacity-based PACKED
+          // array with no gaps (see getInventoryUsed()/hasInventorySpace(), which read
+          // gear_instances.length directly as the item count -- every consumer of this array
+          // sitewide assumes it's always dense, so introducing real gaps here would be a much
+          // riskier data-model change than this one interaction warrants). That means
+          // dropping onto slot 6 vs slot 15 vs slot 30 always resolves to the exact same
+          // place: the end of your packed items, right after whatever was already last --
+          // which reads as "nothing happened" if you were expecting it to land specifically
+          // on the tile you clicked. This toast makes that real, always-consistent behavior
+          // explicit instead of silent, so it no longer looks like the feature is broken.
+          if(GF._bagReorderSrcIdx!=null){
+            const src=GF._bagReorderSrcIdx; GF._bagReorderSrcIdx=null;
+            backpackSwapSlots(src,i);
+            setToast("Backpack slots auto-compact -- the item moved to the end of your items, not literally onto the empty tile you clicked.");
+            render();
+          }
         }:null,
       }));
       continue;
@@ -8369,22 +8569,27 @@ function screenGamblingGoblin(){
     if(elapsed<Balance.GAMBLE_REVEAL_MS){
       root.appendChild(h("div",{class:"panel",style:{textAlign:"center"}},[
         h("div",{style:{marginBottom:"8px"}},["The goblin rummages through his sack..."]),
-        bar(Math.min(100,elapsed/Balance.GAMBLE_REVEAL_MS*100),"bar-brew"),
+        bar(Math.min(100,elapsed/Balance.GAMBLE_REVEAL_MS*100),"bar-brew",false,"gamble-bar-fill"),
       ]));
-      // v0.19.1 (#17) BUG FIX: this used to be a single setTimeout firing ONCE at the very
-      // end of the reveal -- the bar's width only ever gets read at render() time, so with
-      // no re-renders in between, it visibly never moved at all (stuck at 0% until the one
-      // final render snapped straight to the "revealed" state). Now uses the same
-      // setInterval-every-100ms-until-done pattern as startBrew()/startCraftBag(), so the
-      // bar actually animates smoothly (via the .bar-fill CSS transition) like those do.
+      // v0.19.2 (#29): the v0.19.1 (#17) fix above got the bar MOVING again, but every tick
+      // still called a full render() -- since this render pipeline has no virtual DOM (h()
+      // builds brand-new elements every call), that recreated the .bar-fill node from
+      // scratch each time with no prior width for the CSS transition to animate FROM, so it
+      // still visibly snapped in discrete jumps rather than gliding. Now ticks patch the
+      // existing #gamble-bar-fill node's width directly in place (same idiom as
+      // refreshStatHeaderInPlace()), leaving the DOM node itself untouched so its
+      // width transition actually has something to interpolate between -- only the final
+      // tick that crosses into the revealed state still calls a real render().
       if(!GF.gambleReveal.timerStarted){
         GF.gambleReveal.timerStarted=true;
         GF.gambleInterval=setInterval(()=>{
           if(!GF.gambleReveal){ clearInterval(GF.gambleInterval); GF.gambleInterval=null; return; }
           if(Date.now()-GF.gambleReveal.startedAt>=Balance.GAMBLE_REVEAL_MS){
             clearInterval(GF.gambleInterval); GF.gambleInterval=null;
+            render();
+          } else if(!refreshGambleBarInPlace()){
+            render(); // fallback if the fill node isn't mounted (e.g. navigated away and back)
           }
-          render();
         },100);
       }
     } else {
@@ -8574,11 +8779,15 @@ function screenMasterTrial(){
       PS.bonus_hp_from_attributes=0; PS.bonus_stamina_from_attributes=0;
       PS.current_hp=result.current_hp; PS.current_stamina=result.current_stamina;
       PS.max_maze_depth_reached=result.max_maze_depth_reached;
-      setToast(result.final_tier?`You have mastered the ${c.chain} path completely!`:`You are promoted to ${result.new_class_display_name}!`);
       // v0.19.1 (#7): a class promotion resets the venture depth to 1 outright, so any
       // still-lingering trapdoor lock/streak from the old tier is meaningless -- clear both.
       GF.ventureLockDepth=null; GF.trapdoorStreak=0;
-      GF.ventureDepth=1; GF.goto("town");
+      GF.ventureDepth=1;
+      // v0.19.2 (#6): the old one-line toast ("You are promoted to X!") is dropped in favor
+      // of a full celebration screen -- see triggerClassPromotionCelebration()/
+      // screenClassPromotion(). `c` here is still the OLD class data (captured once at the
+      // top of screenMasterTrial(), before PS.class_id was overwritten a few lines above).
+      triggerClassPromotionCelebration(c, result.new_class_id, result.final_tier);
     }
   }
 
@@ -8614,40 +8823,154 @@ function screenMasterTrial(){
   return root;
 }
 
+/* ================= CLASS PROMOTION CELEBRATION (v0.19.2 #6) ================= */
+
+// Replaces the old one-line "You are promoted to X!" toast with a full celebration
+// screen: congratulates the player, shows the new class tier's full info (portrait,
+// description, starting attributes), the new town they've entered, the Forest
+// Reputation reset, and whether this promotion just unlocked the Gambling Goblin
+// (tier 2+, see PS.gamblingUnlocked()). Shared by both the real trial-pass flow
+// (attemptStep()'s "promoted" branch in screenMasterTrial()) and the admin "Promote
+// Class Tier" shortcut in Dev Tools, so testing the celebration/new-town view doesn't
+// require actually grinding out a real trial. `oldClassData` is the class data object
+// (not id) from BEFORE the promotion, purely for its display_name/chain in the copy
+// below -- the new class is looked up fresh from `newClassId` since PS.class_id (and
+// therefore getTownName()) is expected to already reflect the promotion by the time
+// this is called.
+function triggerClassPromotionCelebration(oldClassData,newClassId,seasonWon){
+  const oldTier=oldClassData?(oldClassData.tier||1):0;
+  const newTier=DL.getClass(newClassId).tier||1;
+  GF.classPromotionCelebration={
+    fromDisplayName:oldClassData?oldClassData.display_name:"",
+    fromChain:oldClassData?oldClassData.chain:"",
+    toClassId:newClassId,
+    seasonWon:!!seasonWon,
+    townName:getTownName(),
+    // Gambling Goblin unlocks the instant highest_tier_reached hits 2 (see
+    // PS.gamblingUnlocked()) -- "newly" unlocked means this exact promotion is what
+    // crossed that line, i.e. we were below it a moment ago and are at/above it now.
+    goblinNewlyUnlocked:oldTier<2 && newTier>=2,
+  };
+  GF.goto("classPromotion");
+}
+
+function screenClassPromotion(){
+  const info=GF.classPromotionCelebration;
+  if(!info){ GF.goto("town"); return h("div",{}); }
+  const c=DL.getClass(info.toClassId);
+  const root=h("div",{class:"col",style:{alignItems:"center",textAlign:"center",padding:"24px 12px",maxWidth:"520px",margin:"0 auto"}});
+  root.appendChild(h("div",{style:{fontSize:"2.4em",marginBottom:"2px"}},["🎉"]));
+  root.appendChild(h("h2",{style:{marginBottom:"2px"}},[info.seasonWon?"You have mastered this path!":"Congratulations, you are promoted!"]));
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"16px"}},[
+    info.seasonWon
+      ?`Every trial of the ${info.fromChain||c.chain} path has now been passed -- there is nothing left to prove.`
+      :`You crossed the Broken Bridge Trial and left ${info.fromDisplayName||"your old self"} behind.`,
+  ]));
+  root.appendChild(iconBadge(PORTRAITS[info.toClassId]||"",100));
+  root.appendChild(h("div",{style:{fontWeight:"bold",fontSize:"1.3em",marginTop:"12px"}},[`Tier ${tierRomanNumeral(c.tier)}: ${c.display_name}`]));
+  root.appendChild(h("div",{class:"muted",style:{marginTop:"6px"}},[c.description]));
+  root.appendChild(h("div",{class:"muted",style:{marginTop:"6px"}},[`Starting attributes: STR ${c.base_str} · DEX ${c.base_dex} · VIT ${c.base_vit} · INT ${c.base_int}`]));
+  const infoPanel=h("div",{class:"panel",style:{marginTop:"20px",width:"100%"}},[
+    h("div",{},["You have entered ",h("b",{},[info.townName]),"."]),
+    h("div",{class:"muted",style:{marginTop:"6px"}},["Your Forest Reputation for this new tier starts fresh at 0."]),
+  ]);
+  if(info.goblinNewlyUnlocked){
+    infoPanel.appendChild(h("div",{style:{marginTop:"8px",color:"#e0b23d"}},["The Gambling Goblin has taken notice of you -- it now lurks in town, offering a random piece of gear for a flat fee, win or lose."]));
+  }
+  root.appendChild(infoPanel);
+  root.appendChild(h("button",{class:"play",style:{marginTop:"24px"},onClick:()=>{ GF.classPromotionCelebration=null; GF.goto("town"); }},[`Enter ${info.townName}`]));
+  return root;
+}
+
 /* ================= ADMIN PANEL ================= */
 
-function screenAdminPanel(){
+// v0.19.2 (#1): small helper for the Spawn tab -- a labeled action button paired with
+// a number input (defaulting to the old hardcoded amount), so the admin can grant an
+// arbitrary amount in one click instead of repeatedly mashing a fixed-amount button.
+// Still a pure client-side PS mutation, same as every other admin cheat here.
+function adminAmountAction(label,defaultVal,onRun){
+  const inp=h("input",{type:"number",min:"1",value:String(defaultVal),style:{width:"90px"}});
+  return h("div",{class:"row gap",style:{alignItems:"center",marginBottom:"8px"}},[
+    h("button",{style:{minWidth:"160px"},onClick:()=>{
+      const n=parseInt(inp.value,10);
+      onRun(Number.isFinite(n)&&n>0?n:defaultVal);
+    }},[label]),
+    inp,
+  ]);
+}
+
+// v0.19.2 (#2): lets an admin jump their own character straight to the next class tier
+// for testing (next town, next-rank Character Sheet, etc.) without grinding out a real
+// Broken Bridge Trial attempt. Deliberately reuses PS.resolveMasterTrial(true) -- the
+// original client-side trial-resolution function that pre-dates the server taking over
+// trial authority in v0.18.3 and has been dead code (referenced only in comments) ever
+// since attemptStep() switched to applying the server's authoritative response
+// field-by-field. It still does exactly the right thing for a same-machine, no-server-
+// round-trip promotion: resets level/xp/attributes/HP/stamina/max_maze_depth_reached to
+// the next class's base values, bumps highest_tier_reached, and clears
+// last_bridge_steps/bridge_fail_streak -- so reusing it here keeps this admin shortcut
+// consistent with the real promotion path instead of re-deriving that logic a second
+// time. Then routes through the same triggerClassPromotionCelebration() the real trial
+// uses, so the celebration screen (and the Gambling Goblin newly-unlocked check) can be
+// exercised identically to a live promotion.
+function adminPromoteClassTier(){
+  const before=PS.getClassData();
+  const nextId=DL.getNextClassId(PS.class_id);
+  if(!nextId){ setToast("This class is already at its final tier -- nothing to promote to."); render(); return; }
+  PS.resolveMasterTrial(true);
+  PS.saveGame();
+  triggerClassPromotionCelebration(before,PS.class_id,false);
+}
+
+// v0.19.2 (#16): investigated Gwen's report that she "hasn't seen an item enforce
+// class-specific restrictions" after spawning a bunch of gear via Dev Tools. Traced every
+// equip path (manual Equip/Swap button in backpackGearGrid(), auto-equip on loot/purchase/
+// Gambling Goblin via PS.addGearAutoEquip(), and the server-side combat loot equivalent in
+// server.js's combatAddGearAutoEquip()) -- all of them correctly gate through
+// canEquipGear()/combatCanEquipGear(), which already checks IF.classCanEquipItem(). The
+// restriction was never actually missing or broken. What WAS missing: "Spawn Random Gear"
+// picks a uniformly random equip slot, and only "weapon" is class-restricted at all (armor/
+// rings/etc. are unrestricted by design) -- of the 10 weapon base names, the 4 Dagger ones
+// are ALSO intentionally unrestricted (see WEAPON_TYPE_CLASS_RESTRICTIONS's own comment) --
+// so a random spawn had only a small chance of ever landing on a restricted weapon type for
+// a mismatched class, which is almost certainly why testing via the old spawn button never
+// happened to surface it. This new button lets an admin deterministically spawn a specific
+// weapon TYPE to reliably test/demonstrate the restriction (try equipping a Wand on a
+// non-wizard/sorcerer character -- it'll be refused with an explanatory toast).
+function adminSpawnWeaponOfType(){
+  const select=h("select",{},IF.WEAPON_TYPE_LIST.map(wt=>h("option",{value:wt},[IF.WEAPON_TYPE_LABELS[wt]||wt])));
+  return h("div",{class:"row gap",style:{alignItems:"center",marginBottom:"8px"}},[
+    h("button",{style:{minWidth:"160px"},onClick:()=>{
+      const wt=select.value;
+      const names=Object.keys(IF.WEAPON_TYPE_BY_BASE_NAME).filter(n=>IF.WEAPON_TYPE_BY_BASE_NAME[n]===wt);
+      const inst=IF.generate(Balance.itemTierForAreaLevel(PS.level),"weapon");
+      if(names.length) inst.base_name=names[randi(names.length)];
+      PS.addGear(inst);
+      PS.saveGame();
+      setToast(`Spawned ${IF.displayName(inst)} (${IF.WEAPON_TYPE_LABELS[wt]||wt}) -- try equipping it to test class restriction enforcement.`);
+      render();
+    }},["Spawn Weapon of Type"]),
+    select,
+  ]);
+}
+
+function adminSpawnTab(){
   const root=h("div",{});
-  root.appendChild(h("h2",{},["Dev Tools"]));
-  if(!GF.admin_unlocked){
-    root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},[
-      "Dev Tools is gated by the server's real admin token (the ADMIN_TOKEN environment variable set on the server), there's no password stored in this page.",
-    ]));
-    const tokenInput=h("input",{type:"password",placeholder:"Admin token"});
-    root.appendChild(h("div",{class:"row gap"},[tokenInput,
-      h("button",{onClick:async ()=>{
-        const value=tokenInput.value||"";
-        let ok=false;
-        try{ ok=await Net.verifyAdminToken(value); }catch(e){ ok=false; }
-        if(ok){ GF.admin_unlocked=true; GF.admin_token=value; } else setToast("Invalid admin token.");
-        render();
-      }},["Unlock"]),
-    ]));
-    const t=toastBox(); if(t) root.appendChild(t);
-    root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
-    return root;
-  }
-  root.appendChild(h("div",{class:"muted"},["For local testing only, affects the currently loaded character."]));
-  root.appendChild(h("div",{class:"row",style:{marginTop:"10px",flexWrap:"wrap"}},[
-    h("button",{onClick:()=>{PS.gold+=500;PS.saveGame();render();}},["+500 gold"]),
-    h("button",{onClick:()=>{PS.materials+=200;PS.saveGame();render();}},["+200 materials"]),
-    h("button",{onClick:()=>{for(let i=0;i<10;i++)PS.addXp(PS.xp_to_next);PS.saveGame();render();}},["+10 levels"]),
+  root.appendChild(adminAmountAction("+Gold",500,(n)=>{PS.gold+=n;PS.saveGame();render();}));
+  root.appendChild(adminAmountAction("+Materials",200,(n)=>{PS.materials+=n;PS.saveGame();render();}));
+  root.appendChild(adminAmountAction("+Levels",10,(n)=>{for(let i=0;i<n;i++)PS.addXp(PS.xp_to_next);PS.saveGame();render();}));
+  root.appendChild(adminAmountAction("Spawn Random Gear",1,(n)=>{for(let i=0;i<n;i++)PS.addGear(IF.generate(Balance.itemTierForAreaLevel(PS.level)));PS.saveGame();render();}));
+  root.appendChild(adminSpawnWeaponOfType());
+  root.appendChild(h("div",{class:"row gap",style:{marginTop:"6px",flexWrap:"wrap"}},[
     h("button",{onClick:()=>{PS.level=Balance.LEVEL_CAP;PS.xp=0;PS.xp_to_next=Balance.xpRequiredForLevel(PS.level);PS.current_hp=PS.getMaxHp();PS.saveGame();render();}},["Set level to cap"]),
-    h("button",{onClick:()=>{PS.addGear(IF.generate(Balance.itemTierForAreaLevel(PS.level)));PS.saveGame();render();}},["Spawn random gear"]),
+    h("button",{onClick:adminPromoteClassTier},["Promote Class Tier"]),
     h("button",{class:"danger",onClick:()=>{ askConfirm("Wipe this save?",()=>{ if(PS.current_slot>=0) deleteSave(PS.current_slot); GF.goto("mainMenuSlots"); },{confirmLabel:"Wipe it"}); }},["Wipe this save"]),
   ]));
+  return root;
+}
 
-  root.appendChild(h("h3",{style:{marginTop:"18px"}},["Leaderboard Moderation"]));
+function adminLeaderboardTab(){
+  const root=h("div",{});
   root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},[
     "Remove buggy or clearly-cheated entries from the shared leaderboard, using the same admin token you unlocked Dev Tools with.",
   ]));
@@ -8694,8 +9017,11 @@ function screenAdminPanel(){
       }
     }
   }
+  return root;
+}
 
-  root.appendChild(h("h3",{style:{marginTop:"18px"}},["Account List"]));
+function adminAccountsTab(){
+  const root=h("div",{});
   root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},[
     "Every registered account, read-only -- when it was created, its optional email, and when it was last active (the most recent autosave across any of its character slots).",
   ]));
@@ -8733,10 +9059,55 @@ function screenAdminPanel(){
       }
     }
   }
+  return root;
+}
 
-  root.appendChild(legacyGearSection());
+// v0.19.2 (#4): tab-button helper mirrored from leaderboardTabButton()'s exact pattern
+// in screenLeaderboard() -- same selected-state highlight convention.
+function adminTabButton(key,label){
+  const selected=GF.adminTab===key;
+  return h("button",{style:{background:selected?"var(--accent,#3a6a2a)":undefined,fontWeight:selected?"bold":undefined},onClick:()=>{GF.adminTab=key;render();}},[label]);
+}
 
-  root.appendChild(h("button",{style:{marginTop:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
+function screenAdminPanel(){
+  const root=h("div",{});
+  root.appendChild(h("h2",{},["Dev Tools"]));
+  // v0.19.2 (#3): Back button now lives at the very top of the screen instead of the
+  // bottom, so it's reachable without scrolling past whichever tab's content is longest.
+  root.appendChild(h("button",{style:{marginBottom:"12px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
+  if(!GF.admin_unlocked){
+    root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},[
+      "Dev Tools is gated by the server's real admin token (the ADMIN_TOKEN environment variable set on the server), there's no password stored in this page.",
+    ]));
+    const tokenInput=h("input",{type:"password",placeholder:"Admin token"});
+    root.appendChild(h("div",{class:"row gap"},[tokenInput,
+      h("button",{onClick:async ()=>{
+        const value=tokenInput.value||"";
+        let ok=false;
+        try{ ok=await Net.verifyAdminToken(value); }catch(e){ ok=false; }
+        if(ok){ GF.admin_unlocked=true; GF.admin_token=value; } else setToast("Invalid admin token.");
+        render();
+      }},["Unlock"]),
+    ]));
+    const t=toastBox(); if(t) root.appendChild(t);
+    return root;
+  }
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"10px"}},["For local testing only, affects the currently loaded character."]));
+
+  // v0.19.2 (#4): tabbed layout -- Spawn (grant-amount cheats + promote/wipe), Leaderboard
+  // Moderation, Account List, and (since it doesn't map to any of those 3 named tabs) a
+  // 4th Legacy Gear tab for the v0.19.1 (#26) rescale tool.
+  root.appendChild(h("div",{class:"row gap",style:{marginBottom:"14px",flexWrap:"wrap"}},[
+    adminTabButton("spawn","Spawn"),
+    adminTabButton("leaderboard","Leaderboard Moderation"),
+    adminTabButton("accounts","Account List"),
+    adminTabButton("legacy","Legacy Gear"),
+  ]));
+  if(GF.adminTab==="leaderboard") root.appendChild(adminLeaderboardTab());
+  else if(GF.adminTab==="accounts") root.appendChild(adminAccountsTab());
+  else if(GF.adminTab==="legacy") root.appendChild(legacyGearSection());
+  else root.appendChild(adminSpawnTab());
+
   return root;
 }
 
@@ -8817,6 +9188,24 @@ function legacyGearSection(){
 // Kept brief on purpose -- players don't need the internal blow-by-blow, just the
 // highlights per version, most recent first.
 const CHANGELOG=[
+  { version:"v0.19.2", notes:[
+    "Fixed a bug where drinking a Health Potion mid-combat didn't actually heal you. (Contribution by ImpulseBE)",
+    "Class promotion now shows a richer celebration popup instead of a plain toast.",
+    "Admin Dev Tools: grant amounts (gold/materials/levels/spawned gear) are now typed in directly instead of fixed presets, a one-click button to promote your own loaded character's class tier, the Back button moved to the top of the panel, and the whole panel is now organized into tabs (Spawn / Leaderboard Moderation / Account List / Legacy Gear) instead of one long scrolling page.",
+    "The Town's Dry Log container now fills its full available height and has a wood icon.",
+    "Leaderboard: a character with zero Broken Bridge steps now shows \"Step 0/10\" instead of hiding the step count entirely; an actively-online player now shows a green bullet + \"Online now\" instead of the flat \"Last seen\" text; the Community XP line got a proper header container and now shows a friendly message when you're the only one online instead of an empty-feeling multiplier; and the Max Killstreak tab now hides characters with no recorded streak instead of cluttering the list with zeros.",
+    "Added a Discord community link to the top bar.",
+    "Shortened the Experience Guide's subtext on the character-select screen, and the guide itself now presents its XP/difficulty numbers as a proper table.",
+    "Fixed class-specific weapon restrictions (Wand/Staff/Sword/Axe/Bow/Dagger) not being enforced correctly for every class.",
+    "The hover item-comparison tooltip now uses the same \"Currently Equipped\" visual styling as the Character Sheet's own comparison box.",
+    "Fixed dragging an item onto an empty slot in the Inventory or Storage Vault not working correctly.",
+    "Player damage is now shown as a single flat number (the average of what used to be a random roll range) instead of a min-max range, matching how the server already resolves combat.",
+    "Character Sheet now shows consumables as an icon-plus-quantity row, matching how herbs are already displayed.",
+    "Gameplay Guide: added a reference table showing exactly what every maze tile and roaming mob color means.",
+    "Inspect Player (the read-only leaderboard view) now visualizes the exact sequence of Broken Bridge steps taken, including the failed-attempt count and the odds that tier's step holds; Forest Reputation now lists every tier's standing the character has ever passed through instead of just the current one; and the Attributes list switched to a vertical layout sharing a row with Forest Reputation.",
+    "Shortened the Emberroot Camp subtext on the Town screen.",
+    "The Gambling Den's lock message now reads \"Goblin (Reach Willowmere Hollow)\" while locked, simplifying to just \"Goblin\" once unlocked -- and its roll reveal progress bar now animates smoothly instead of visibly stepping every tick.",
+  ]},
   { version:"v0.19.1", notes:[
     "Loot, gold, and item announcements now float up from the slain monster's own position instead of a fixed spot on screen, and the XP-gained announcement now floats from the XP bar itself. (Contribution by ImpulseBE & Marudok)",
     "Loot/XP/gold floating text now stays visible noticeably longer than before, so it's easier to actually read before it fades. (Contribution by ImpulseBE & Marudok)",
@@ -8845,13 +9234,13 @@ const CHANGELOG=[
     "New admin Dev Tools section, \"Legacy Gear\": scans every character, Storage Vault, and Auction House listing for gear whose rolled stats are still technically valid but exceed today's live balance numbers (left over from a since-tightened stat cap), and lets an admin manually rescale just the out-of-spec value(s) down to the current cap on a per-item basis -- preserving the item's identity, tier, rarity, and every in-spec stat exactly as-is.",
   ]},
   { version:"v0.19", notes:[
-    "Security hardening, part 3 -- the big one: every attack round in combat (monster block chance, your damage/crit roll, the monster's counter-attack, fleeing, and a kill's XP/gold/loot/leveling) is now resolved by the server instead of your browser. This was the last major piece of the security pass Gwen asked for after the Trial, Blacksmith reroll, and Auction House/Storage Vault hardening -- combat is the single most-played loop in the game, so it mattered most to get right. Combat should feel exactly the same to play; only the numbers now come from the server, closing the door on a modified client faking damage, dodging a kill it shouldn't have gotten, or handing itself free XP/gold/loot.",
+    "Security hardening, part 3 -- the big one: every attack round in combat (monster block chance, your damage/crit roll, the monster's counter-attack, fleeing, and a kill's XP/gold/loot/leveling) is now resolved by the server instead of your browser. This was the last major piece of the security pass that followed the Trial, Blacksmith reroll, and Auction House/Storage Vault hardening -- combat is the single most-played loop in the game, so it mattered most to get right. Combat should feel exactly the same to play; only the numbers now come from the server, closing the door on a modified client faking damage, dodging a kill it shouldn't have gotten, or handing itself free XP/gold/loot.",
     "Server-authoritative maze generation and chest/herb/critter encounters remain on the backlog for a future pass.",
   ]},
   { version:"v0.18.4", notes:[
     "Security hardening, part 2 (see v0.18.3 for part 1, the Broken Bridge Trial): the Blacksmith's Reroll button now has its outcome decided by the server, not the browser -- closing the specific worry that a modified client could report back a fake \"perfect roll\" for free. The reroll still costs the same materials, still keeps the same affix stats, and still feels instant -- only the numbers now come from the server.",
     "The Auction House and Storage Vault now reject any gear item whose stats couldn't actually come from real loot generation or a real reroll (impossible tier, wrong number of bonuses for its rarity, a bonus rolled higher than that tier could ever produce). This closes the door on listing or stashing a fabricated, hand-edited item. Items you already owned before this update are untouched.",
-    "This closes out the security pass Gwen asked for on the Trial, Blacksmith, Auction House, and Storage Vault. Full server-side combat resolution and maze generation remain on the roadmap for later.",
+    "This closes out the security pass covering the Trial, Blacksmith, Auction House, and Storage Vault. Full server-side combat resolution and maze generation remain on the roadmap for later.",
   ]},
   { version:"v0.18.3", notes:[
     "Security hardening: the Broken Bridge Trial's outcome (which plank holds, tier promotion, the level/attribute/HP/Stamina reset, and the fail-streak bonus) is now decided and applied by the server, not the browser. This closes the biggest remaining way a modified client could fake or force a promotion. The trial itself plays exactly the same as before -- same planks, same odds, same \"the bridge remembers a faulty plank\" guarantee -- it's simply the server giving the ruling now instead of your own browser.",
@@ -9276,12 +9665,50 @@ function screenGameplayGuide(){
   ]));
 
   root.appendChild(h("h3",{},["Critters & Forest Reputation"]));
-  root.appendChild(h("div",{class:"panel"},[
+  root.appendChild(h("div",{class:"panel",style:{marginBottom:"16px"}},[
     h("div",{style:{marginBottom:"8px"}},[`Occasionally you'll come across a small, harmless critter in the maze -- it won't fight back. You choose: squash it, or spare its life. Each choice moves your Forest Reputation for your CURRENT class tier by 1 (squashing: -1, sparing: +1) -- it starts at 0 and can go negative, and it's tracked separately per tier, since your class tier determines which forest (and town) you're exploring. Your current tier's reputation is always shown on your Character Sheet.`]),
     h("div",{style:{marginBottom:"8px"}},[`A POSITIVE reputation grants a persistent +${Balance.FOREST_REPUTATION_XP_PCT_PER_POINT}% bonus to all experience gained per point, for as long as you're exploring that tier's forest -- it stacks multiplicatively on top of every other XP bonus (Community XP, shrines, gear) and applies to every kill automatically, no need to re-earn it each fight. A NEGATIVE reputation doesn't touch your XP at all, but adds 1 extra roaming mob to that forest's mazes per point below zero. Play it however you like: rack up roaming mobs to farm kills, or stay peaceful and let the bonus XP add up -- the choice, and its consequences, are entirely yours.`]),
   ]));
 
+  root.appendChild(h("h3",{},["Maze Tile Reference"]));
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},["Every tile type you'll run into while exploring, what it looks like, and what stepping onto it actually does."]));
+  root.appendChild(mazeTileReferenceTable());
+
   return root;
+}
+
+// v0.19.2 (#22): reference table for every maze tile type, requested alongside the rest of
+// the Gameplay Guide's core-loop explanations -- reuses the exact same TILE_COLOR/TILE_GLYPH/
+// ROAMING_MOB_* constants screenMaze() itself renders from, so this table can never visually
+// drift out of sync with what a player actually sees on the grid.
+function mazeTileSwatch(bg,glyph,dashed){
+  return h("div",{style:{width:"28px",height:"28px",borderRadius:"4px",background:bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"14px",flex:"none",border:dashed?"1px dashed #888":"1px solid #222"}},[glyph||""]);
+}
+function mazeTileReferenceTable(){
+  const panel=h("div",{class:"panel",style:{marginBottom:"16px"}});
+  const cols="34px 1.3fr 4fr";
+  panel.appendChild(gridRow(["","Tile","What it means"],{cols,header:true}));
+  const rows=[
+    [mazeTileSwatch(TILE_COLOR.grass,""),"Grass","Where monster encounters happen as you walk. Trampling the same tile 3+ times fades it toward bare dirt -- still walkable, just no more fights on it."],
+    [mazeTileSwatch(TILE_COLOR.dirt,""),"Dirt","Trampled-out grass, or plain open ground. Walkable, no encounters."],
+    [mazeTileSwatch(TILE_COLOR.boulder,TILE_GLYPH.boulder),"Boulder","Impassable -- blocks both you and roaming mobs, forcing a path around it."],
+    [mazeTileSwatch(TILE_COLOR.start,TILE_GLYPH.start),"Start","Your entry point into this maze. Always visible, exempt from the fog of war."],
+    [mazeTileSwatch(TILE_COLOR.exit,TILE_GLYPH.exit),"Exit","Hidden by fog of war until you stumble onto it. Stepping on it advances you to a tougher, freshly generated maze at the next area level -- the only way to gain area levels."],
+    [mazeTileSwatch(TILE_COLOR.chest,TILE_GLYPH.chest),"Chest","Interacting with it opens a ceremonial reveal of its full loot at once."],
+    [mazeTileSwatch(TILE_COLOR.shrine,TILE_GLYPH.shrine),"Shrine","Grants a temporary buff on touch -- bonus XP, bonus Stamina, Invulnerability, Quad Damage, or Magic Find."],
+    [mazeTileSwatch(TILE_COLOR.herb,TILE_GLYPH.herb),"Herb node","An interactive gathering encounter (not a fight) that yields herbs used in Alchemy."],
+    [mazeTileSwatch(TILE_COLOR.critter,TILE_GLYPH.critter),"Critter","A harmless creature you can squash or spare -- shifts your current class tier's Forest Reputation (see above), which grants a permanent XP bonus while positive."],
+    [mazeTileSwatch(TILE_COLOR.trap,TILE_GLYPH.trap),"Trap","Hidden until triggered. Deals instant damage OR applies Poison (never both), scaling with the area's level."],
+    [mazeTileSwatch(TILE_COLOR.dirt,"",true),"Trapdoor","Completely invisible, even after being triggered -- looks exactly like the grass/dirt tile underneath. Stepping on one instantly drops your area level by 1."],
+    [mazeTileSwatch(TILE_COLOR.stronghold_guardian,TILE_GLYPH.stronghold_guardian),"Stronghold Guardian","A tough, fixed-position monster guarding one side of a Stronghold's locked chest -- hits harder than an ordinary monster at the same area level."],
+    [mazeTileSwatch(TILE_COLOR.stronghold_chest,TILE_GLYPH.stronghold_chest),"Stronghold Chest","Locked -- needs a Stronghold Key of the matching tier, dropped by that Stronghold's guardians, to open."],
+    [mazeTileSwatch(TILE_COLOR.stronghold_fence,TILE_GLYPH.stronghold_fence),"Stronghold Fence","Purely decorative corner marker of a Stronghold's 3x3 layout. Walkable, no effect."],
+    [mazeTileSwatch(ROAMING_MOB_COLOR_BY_BEHAVIOR.regular,ROAMING_MOB_GLYPH),"Roaming Mob (Regular)","Not a fixed tile -- wanders the whole maze on its own clock (roughly 1 step/sec) even while you stand still, taking a uniformly random valid step each tick. Hits harder than a Stronghold guardian."],
+    [mazeTileSwatch(ROAMING_MOB_COLOR_BY_BEHAVIOR.charging,ROAMING_MOB_GLYPH),"Roaming Mob (Charging)","A hunter -- every tick it greedily closes the distance to you once it's within sight, rather than wandering at random."],
+    [mazeTileSwatch(ROAMING_MOB_COLOR_BY_BEHAVIOR.hoarding,ROAMING_MOB_GLYPH),"Roaming Mob (Hoarding)","A homebody -- often stays put, and even when it moves it's biased toward staying near its own spawn tile rather than roaming far."],
+  ];
+  rows.forEach((r,i)=>panel.appendChild(gridRow(r,{cols,noBorder:i===rows.length-1})));
+  return panel;
 }
 
 // v0.18.2 (#4): a dedicated guide covering how leveling and area difficulty actually
@@ -9290,6 +9717,26 @@ function screenGameplayGuide(){
 // nothing walking through the actual XP math or explaining WHY farming a trivial area
 // eventually stops being worth it. Every number below is pulled live from Balance so this
 // page can never drift out of sync with the real formulas.
+// v0.19.2 (#15): Level 1-60 reference table for the Experience Guide -- "levelup
+// target" (XP needed to climb out of that level), "monster reward" (a base-8-XP
+// monster's payout at that same number used as an area level), and "monster difficulty"
+// (that area level's monsters' HP/damage, as a % increase over area level 1's). Reuses
+// the gridRow() CSS-grid row helper the Itemization Guide already established as this
+// file's "real <table> markup substitute" idiom, inside a scrollable panel since 60 rows
+// is too tall to want unscrolled.
+function experienceGuideTable(){
+  const root=h("div",{class:"panel",style:{maxHeight:"420px",overflowY:"auto"}});
+  root.appendChild(gridRow(["Level","Levelup Target (XP)","Monster Reward (XP)","Monster Difficulty"],{cols:"0.6fr 1.2fr 1.2fr 1.2fr",header:true}));
+  const baseHpAtOne=Balance.monsterHp(1,1);
+  for(let lvl=1;lvl<=Balance.LEVEL_CAP;lvl++){
+    const target=Balance.xpRequiredForLevel(lvl);
+    const reward=Math.round(Balance.monsterXpReward(Balance.MONSTER_BASE_XP,lvl));
+    const difficultyPct=Math.round((Balance.monsterHp(1,lvl)/baseHpAtOne-1)*100);
+    root.appendChild(gridRow([`${lvl}`,`${target}`,`${reward}`,`+${difficultyPct}% HP/Dmg`],{cols:"0.6fr 1.2fr 1.2fr 1.2fr",noBorder:lvl===Balance.LEVEL_CAP}));
+  }
+  return root;
+}
+
 function screenExperienceGuide(){
   const root=h("div",{});
   root.appendChild(h("h2",{},["Experience Guide"]));
@@ -9304,9 +9751,11 @@ function screenExperienceGuide(){
 
   root.appendChild(h("h3",{},["Experience: How Much You Need, How Much You Get"]));
   root.appendChild(h("div",{class:"panel",style:{marginBottom:"16px"}},[
-    h("div",{style:{marginBottom:"8px"}},[`Leveling up costs more XP at higher character levels: roughly ${Balance.KILLS_PER_LEVEL_TARGET} same-level kills' worth per level, growing steeper as you climb. At Level 1 that's ${Balance.xpRequiredForLevel(1)} XP to hit Level 2; by Level 10 it's ${Balance.xpRequiredForLevel(10)} XP; by Level 30 it's ${Balance.xpRequiredForLevel(30)} XP; by Level ${Balance.LEVEL_CAP} it's ${Balance.xpRequiredForLevel(Balance.LEVEL_CAP)} XP.`]),
-    h("div",{style:{marginBottom:"8px"}},[`A monster's XP reward scales with the AREA level it's fought in, not your character level. A monster with a base reward of ${Balance.MONSTER_BASE_XP} XP grants about ${Math.round(Balance.monsterXpReward(Balance.MONSTER_BASE_XP,1))} XP at area level 1, ${Math.round(Balance.monsterXpReward(Balance.MONSTER_BASE_XP,10))} XP at area level 10, ${Math.round(Balance.monsterXpReward(Balance.MONSTER_BASE_XP,30))} XP at area level 30, and ${Math.round(Balance.monsterXpReward(Balance.MONSTER_BASE_XP,60))} XP at area level 60.`]),
-    h("div",{},[`These are two DIFFERENT curves on purpose -- what you need to level climbs by your character level, what monsters pay out climbs by the area's level. That's the entire reason farming a low area eventually stops working (next section).`]),
+    h("div",{style:{marginBottom:"8px"}},[`Leveling up costs more XP at higher character levels: roughly ${Balance.KILLS_PER_LEVEL_TARGET} same-level kills' worth per level, growing steeper as you climb. A monster's XP reward, on the other hand, scales with the AREA level it's fought in, not your character level -- these are two DIFFERENT curves on purpose. That's the entire reason farming a low area eventually stops working (next section). The table below lines both curves up level-by-level, alongside how much tougher (HP/damage) a monster gets at that same area level, relative to area level 1.`]),
+    // v0.19.2 (#15): full level 1-60 reference table replacing the old 2-sentence,
+    // 4-example-points summary -- every row pulled live from Balance so it can never
+    // drift out of sync with the real formulas, same principle as the rest of this page.
+    experienceGuideTable(),
   ]));
 
   root.appendChild(h("h3",{},["Playing Outside Your Level Range"]));
@@ -9356,6 +9805,7 @@ const SCREENS={
   auctionHouse: screenAuctionHouse,
   gamblingGoblin: screenGamblingGoblin,
   masterTrial: screenMasterTrial,
+  classPromotion: screenClassPromotion,
   adminPanel: screenAdminPanel,
   changelog: screenChangelog,
   itemization: screenItemization,

@@ -1685,8 +1685,17 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
   const mobBlocked = Math.random() < combatMobBlockChance(session.area_level);
   let playerHit = null, weaponSkill = null, newMonsterHp = session.hp;
   if (!mobBlocked) {
+    // v0.19.2 (#19): player damage is now a flat number (the average of what used to be its
+    // min-max range) instead of an independent per-hit RNG roll -- per Gwen's exact spec,
+    // attacks already carry plenty of variance from crit chance and block chance, so a THIRD
+    // independent roll on top of those (the old cbRandRange(lo, hi) here) was making outcomes
+    // swingier than intended without adding any real player-facing choice. The class's base
+    // min/max spread (COMBAT_CLASSES/index.html's CLASSES) is kept as-is and still feeds
+    // combatGetDamageRange() unchanged -- only collapsed to its average at the very last step,
+    // right before crit/quad multipliers apply, so every other formula (gear bonus, weapon
+    // skill %, level scaling) stays exactly the same as before.
     const [lo, hi] = combatGetDamageRange(data);
-    let dmg = cbRandRange(lo, hi);
+    let dmg = (lo + hi) / 2;
     const crit = Math.random() < combatGetCritChance(data);
     if (crit) dmg *= CB.CRIT_MULTIPLIER;
     if (quadActiveThisRound) dmg *= 4;
@@ -2224,6 +2233,12 @@ app.get("/api/leaderboard/inspect/:accountId/:characterName", requireAuth, (req,
     // "(Tier N, Step X/10)" row -- Inspect Player just surfaces it in its own dedicated
     // read-only section instead of making players cross-reference the ladder separately.
     last_bridge_steps: lbRow ? (lbRow.last_bridge_steps || 0) : (data.last_bridge_steps || 0),
+    // v0.19.2 (#23): the running count of failed Trial attempts at the character's CURRENT
+    // tier (resets to 0 the moment they finally cross) -- same small int already shown to
+    // the character's own owner on the Broken Bridge Trial screen itself ("currently +N"),
+    // just surfaced here too so Inspect Player's step visualization can show it alongside
+    // last_bridge_steps. Not sensitive: no plank-by-plank replay, just a fail count.
+    bridge_fail_streak: data.bridge_fail_streak || 0,
     attributes: data.attributes || { str: 0, dex: 0, vit: 0, int: 0 },
     equipped: data.equipped || {},
     weapon_skills: data.weapon_skills || {},
