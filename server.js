@@ -927,8 +927,11 @@ const ITEM_AFFIX_POOL = [
   "damage", "hp", "crit", "armor", "regen", "gold_find", "xp_find", "stamina_max",
   "strength", "dexterity", "vitality", "intelligence", "poison_resist", "magic_find",
 ];
+// v0.19.1 (#15): xp_find raised from a T1 max of 1 back up to 5 (5/10/15/20/25% across
+// T1-T5) -- mirrors index.html's Balance.AFFIX_TIER1_MAX. Still well within
+// ITEM_AFFIX_TIER1_MAX_CEILING's xp_find:10 below, so no ceiling change is needed.
 const ITEM_AFFIX_TIER1_MAX = {
-  damage: 5, hp: 15, crit: 5, armor: 20, regen: 5, gold_find: 10, xp_find: 1,
+  damage: 5, hp: 15, crit: 5, armor: 20, regen: 5, gold_find: 10, xp_find: 5,
   stamina_max: 15, strength: 5, dexterity: 5, vitality: 5, intelligence: 5, poison_resist: 5,
   magic_find: 10,
 };
@@ -1233,7 +1236,9 @@ const CB = {
   LATE_GAME_MONSTER_GROWTH_START_LEVEL: 10, LATE_GAME_MONSTER_GROWTH_PER_LEVEL: 0.10,
   STRONGHOLD_GUARDIAN_HP_MULT: 3.0, STRONGHOLD_GUARDIAN_XP_MULT: 1.5, STRONGHOLD_KEY_DROP_CHANCE: 0.15,
   ROAMING_MOB_HP_MULT: 4.0, ROAMING_MOB_DAMAGE_MULT: 1.5, ROAMING_MOB_XP_MULT: 2.0,
-  WEAPON_SKILL_HIT_STEP: 100, WEAPON_SKILL_DAMAGE_PER_LEVEL: 1,
+  // v0.19.1 (#14): % damage per level now, not a flat +1/level -- must stay in sync with
+  // Balance.WEAPON_SKILL_DAMAGE_PCT_PER_LEVEL in index.html (see combatGetDamageRange()).
+  WEAPON_SKILL_HIT_STEP: 100, WEAPON_SKILL_DAMAGE_PCT_PER_LEVEL: 0.01,
   KILL_STREAK_MAGIC_FIND_PCT_PER_KILL: 1,
   STAT_POINTS_PER_LEVEL: 3, LEVEL_CAP: 60,
   KILLS_PER_LEVEL_TARGET: 20, MONSTER_BASE_XP: 8.0, LEVEL_XP_GROWTH: 0.11,
@@ -1408,13 +1413,22 @@ function combatGetDamageRange(data) {
   if (c.chain === "thornguard") statBonus = combatGetTotalAttr(data, "str");
   else if (c.chain === "windrider") statBonus = combatGetTotalAttr(data, "dex");
   else if (c.chain === "wizard") statBonus = combatGetTotalAttr(data, "int");
+  // v0.19.1 (#14): % damage bonus applied multiplicatively to the whole base+gear total,
+  // mirroring PS.getDamageBreakdown() in index.html -- must stay in sync with that function.
   const weaponType = combatGetEquippedWeaponType(data);
-  const weaponSkillBonus = weaponType ? combatGetWeaponSkillLevel(data, weaponType) * CB.WEAPON_SKILL_DAMAGE_PER_LEVEL : 0;
-  const baseMin = (c.base_damage_min || 1) + perLevel + statBonus + weaponSkillBonus;
-  const baseMax = (c.base_damage_max || 2) + perLevel + statBonus + weaponSkillBonus;
-  return [baseMin + gearBonus, baseMax + gearBonus];
+  const skillLevel = weaponType ? combatGetWeaponSkillLevel(data, weaponType) : 0;
+  const weaponSkillPct = skillLevel * CB.WEAPON_SKILL_DAMAGE_PCT_PER_LEVEL;
+  const baseMin = (c.base_damage_min || 1) + perLevel + statBonus;
+  const baseMax = (c.base_damage_max || 2) + perLevel + statBonus;
+  const preSkillMin = baseMin + gearBonus, preSkillMax = baseMax + gearBonus;
+  return [preSkillMin * (1 + weaponSkillPct), preSkillMax * (1 + weaponSkillPct)];
 }
 function combatGetCritChance(data) { const c = COMBAT_CLASSES[data.class_id] || {}; return cbClampf((c.base_crit || 0.05) + combatGearBonus(data, "crit") / 100.0, 0, 0.95); }
+// v0.19.1 (#10): monsters now crit too -- 10% base at area level 1, +1% per additional level
+// (a level 24 mob: 10 + 23 = 33%), per Gwen's exact spec. Used for both the monster's
+// counter-attack (combatResolveMonsterTurn) and the pre-fight "strikes first" roll in
+// POST /api/combat/start -- both use the fight's own area_level as the monster's level.
+function combatGetMonsterCritChance(areaLevel) { return cbClampf(0.10 + (Math.max(1, areaLevel) - 1) * 0.01, 0, 0.95); }
 function combatGetArmor(data) { const c = COMBAT_CLASSES[data.class_id] || {}; return cbClampf((c.armor || 0.0) + combatGearBonus(data, "armor") / 100.0, 0, 0.75); }
 function combatGetMagicFind(data) {
   return cbClampf(combatGearBonus(data, "magic_find") + combatGetActiveTempBuff(data, "magic_find") + (data.kill_streak || 0) * CB.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL, 0, 500);
@@ -1582,14 +1596,18 @@ function updateCombatSession(id, fields) {
 // Armor. Mutates `data.current_hp` in place and returns a small result the caller folds into
 // the round response; never touches the session/monster HP (that's the caller's job).
 function combatResolveMonsterTurn(data, session, invulnActiveThisRound) {
-  if (invulnActiveThisRound) return { invulnerable: true, blocked: false, damage: null, fatal: false };
-  if (Math.random() < combatGetBlockChance(data)) return { invulnerable: false, blocked: true, damage: null, fatal: false };
+  if (invulnActiveThisRound) return { invulnerable: true, blocked: false, damage: null, crit: false, fatal: false };
+  if (Math.random() < combatGetBlockChance(data)) return { invulnerable: false, blocked: true, damage: null, crit: false, fatal: false };
   let mdmg = cbRandRange(session.dmg_min, session.dmg_max);
+  // v0.19.1 (#10): the monster's own crit roll, applied BEFORE armor mitigation (same order
+  // as the player's own crit-then-quad-damage math above) -- 10% + 1%/area-level.
+  const crit = Math.random() < combatGetMonsterCritChance(session.area_level);
+  if (crit) mdmg *= CB.CRIT_MULTIPLIER;
   mdmg *= (1.0 - combatGetArmor(data));
   data.current_hp = (data.current_hp || 0) - mdmg;
   let fatal = false;
   if (data.current_hp < 1) { data.current_hp = 0; fatal = true; }
-  return { invulnerable: false, blocked: false, damage: Math.round(mdmg), fatal };
+  return { invulnerable: false, blocked: false, damage: Math.round(mdmg), crit, fatal };
 }
 
 app.post("/api/combat/start", requireAuth, (req, res) => {
@@ -1626,10 +1644,14 @@ app.post("/api/combat/start", requireAuth, (req, res) => {
   let firstStrike = null;
   if (Math.random() < CB.MONSTER_FIRST_STRIKE_CHANCE) {
     let mdmg = cbRandRange(dmgMin, dmgMax);
+    // v0.19.1 (#10): the first-strike hit can crit too, same formula/order as the regular
+    // counter-attack in combatResolveMonsterTurn.
+    const crit = Math.random() < combatGetMonsterCritChance(areaLevel);
+    if (crit) mdmg *= CB.CRIT_MULTIPLIER;
     mdmg *= (1.0 - combatGetArmor(data));
     data.current_hp = Math.max(1, (data.current_hp || 0) - mdmg);
-    firstStrike = { damage: Math.round(mdmg) };
-    log.push(`The ${name} strikes first, hitting you for ${Math.round(mdmg)} damage before you can react!`);
+    firstStrike = { damage: Math.round(mdmg), crit };
+    log.push(`The ${name} strikes first, hitting you for ${Math.round(mdmg)} damage${crit ? " (Critical!)" : ""} before you can react!`);
   }
 
   const id = crypto.randomBytes(16).toString("hex");
@@ -1685,6 +1707,12 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
     const leveled = combatAddXp(data, xpGained);
     creditAccountGold(req.account.id, goldCredited);
     combatIncrementKillStreak(data);
+    // v0.19.1 (#19): this endpoint used to persist the raw characters-table row via
+    // saveCharacterRow() below but never forward max_kill_streak (or level/xp) into the
+    // separate leaderboard_bests table that GET /api/leaderboard/killstreak actually reads --
+    // so kills scored through server-authoritative combat never showed up on that leaderboard
+    // tab. The Broken Bridge Trial endpoint already does this correctly; mirror it here.
+    upsertLeaderboardBests(req.account.id, data);
 
     const magicFind = combatGetMagicFind(data);
     const rolled = combatRollLoot(session.loot_table, magicFind);
@@ -2290,6 +2318,237 @@ app.get("/api/admin/accounts", requireAuth, requireAdmin, (req, res) => {
       last_active_at: r.last_active_at || null,
     })),
   });
+});
+
+/* ---------------- v0.19.1 (#26): "Legacy Gear" admin review + manual rescale tool ----------------
+   Over successive balance patches, some stat maxes for a given tier have been tightened (e.g.
+   xp_find's Tier-1 max went 10 -> 1 -> 5, see ITEM_AFFIX_TIER1_MAX_CEILING's own comment
+   above). validateGearItem() deliberately still ACCEPTS such items (checked against the
+   loosest-ever ceiling) so nobody's existing gear silently breaks on the next deploy -- but
+   that leaves genuinely over-tuned items sitting in players' backpacks/equipped slots/vaults/
+   auction listings indefinitely. This tool surfaces every one of them for an admin to review,
+   showing a before/after comparison, and lets the admin rescale them down to what today's
+   LIVE balance would actually allow -- one item at a time, only on explicit confirmation,
+   never automatically and never in bulk. Per the standing data-safety directive, this must
+   never silently mutate anyone's gear. */
+
+// Returns the {stat, value, max} affix entries on `item` that exceed today's LIVE max for its
+// tier (itemAffixMaxForTier, the current-patch number) -- as opposed to validateGearItem's
+// looser ceiling check (itemAffixCeilingForTier). An empty array means the item is a
+// legitimate item by validateGearItem's rules AND already matches current balance.
+function legacyGearOutOfSpecAffixes(item) {
+  if (!item || !Array.isArray(item.affixes) || !Number.isInteger(item.tier)) return [];
+  const out = [];
+  for (const a of item.affixes) {
+    if (!a || typeof a.stat !== "string" || a.stat === "eyesight" || !Number.isFinite(a.value)) continue;
+    let max = itemAffixMaxForTier(a.stat, item.tier);
+    if (item.slot === "weapon" && a.stat === "damage") max = Math.round(max * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
+    if (a.value > max) out.push({ stat: a.stat, value: a.value, max });
+  }
+  return out;
+}
+
+// Returns a brand NEW item object (never mutates `item`) with every out-of-spec affix value
+// clamped down to today's live max. Same stats, same tier/rarity/slot/element/instance_id --
+// this is intentionally NOT a full re-roll (the player keeps the exact item they've always
+// had, just corrected to current balance) and never touches affixes that are already in spec.
+function legacyGearRescale(item) {
+  const affixes = item.affixes.map((a) => {
+    if (!a || a.stat === "eyesight") return a;
+    let max = itemAffixMaxForTier(a.stat, item.tier);
+    if (item.slot === "weapon" && a.stat === "damage") max = Math.round(max * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
+    return a.value > max ? Object.assign({}, a, { value: max }) : a;
+  });
+  return Object.assign({}, item, { affixes });
+}
+
+// Scans every gear item currently in the game -- equipped + backpack across every character
+// slot, every account's Storage Vault, and every live Auction House listing -- and returns
+// only the ones with at least one out-of-spec affix, each tagged with exactly where it lives
+// and who owns it so an admin can find and act on it. Read-only; touches nothing.
+function legacyGearScan() {
+  const out = [];
+  const accountUsername = new Map();
+  for (const r of db.prepare("SELECT id, username FROM accounts").all()) accountUsername.set(r.id, r.username);
+
+  const charRows = db.prepare("SELECT account_id, slot, data FROM characters").all();
+  for (const row of charRows) {
+    let data;
+    try { data = JSON.parse(row.data); } catch (e) { continue; }
+    const characterName = data.character_name || "";
+    const equipped = data.equipped || {};
+    for (const equipSlot of Object.keys(equipped)) {
+      const inst = equipped[equipSlot];
+      const bad = legacyGearOutOfSpecAffixes(inst);
+      if (bad.length) {
+        out.push({
+          location: { kind: "equipped", account_id: row.account_id, slot: row.slot, equip_slot: equipSlot, instance_id: inst.instance_id },
+          username: accountUsername.get(row.account_id) || "?",
+          character_name: characterName,
+          where: `Equipped (${equipSlot})`,
+          item: inst,
+          out_of_spec: bad,
+          rescaled: legacyGearRescale(inst),
+        });
+      }
+    }
+    for (const inst of (Array.isArray(data.gear_instances) ? data.gear_instances : [])) {
+      const bad = legacyGearOutOfSpecAffixes(inst);
+      if (bad.length) {
+        out.push({
+          location: { kind: "backpack", account_id: row.account_id, slot: row.slot, instance_id: inst.instance_id },
+          username: accountUsername.get(row.account_id) || "?",
+          character_name: characterName,
+          where: "Backpack",
+          item: inst,
+          out_of_spec: bad,
+          rescaled: legacyGearRescale(inst),
+        });
+      }
+    }
+  }
+
+  const vaultRows = db.prepare("SELECT account_id, data FROM vaults").all();
+  for (const row of vaultRows) {
+    let items;
+    try { items = JSON.parse(row.data); } catch (e) { continue; }
+    if (!Array.isArray(items)) continue;
+    for (const entry of items) {
+      if (!entry || entry.kind !== "gear" || !entry.inst) continue;
+      const bad = legacyGearOutOfSpecAffixes(entry.inst);
+      if (bad.length) {
+        out.push({
+          location: { kind: "vault", account_id: row.account_id, instance_id: entry.inst.instance_id },
+          username: accountUsername.get(row.account_id) || "?",
+          character_name: "",
+          where: "Storage Vault",
+          item: entry.inst,
+          out_of_spec: bad,
+          rescaled: legacyGearRescale(entry.inst),
+        });
+      }
+    }
+  }
+
+  const listingRows = db
+    .prepare("SELECT id, seller_account_id, seller_username, seller_character_name, item_json FROM auction_listings WHERE type = 'gear'")
+    .all();
+  for (const row of listingRows) {
+    if (!row.item_json) continue;
+    let inst;
+    try { inst = JSON.parse(row.item_json); } catch (e) { continue; }
+    const bad = legacyGearOutOfSpecAffixes(inst);
+    if (bad.length) {
+      out.push({
+        location: { kind: "auction", account_id: row.seller_account_id, listing_id: row.id, instance_id: inst.instance_id },
+        username: row.seller_username,
+        character_name: row.seller_character_name,
+        where: "Auction House listing",
+        item: inst,
+        out_of_spec: bad,
+        rescaled: legacyGearRescale(inst),
+      });
+    }
+  }
+
+  return out;
+}
+
+app.get("/api/admin/legacy-gear", requireAuth, requireAdmin, (req, res) => {
+  res.json({ entries: legacyGearScan() });
+});
+
+// Rescales exactly ONE item, at the exact location the admin selected, and ONLY on this
+// explicit call -- there is no bulk/"fix everything" endpoint, and nothing here runs
+// automatically or on a schedule. Every numeric affix value on the rescaled result is
+// recomputed fresh server-side from the live balance constants (never trusting the client's
+// own "after" preview), so a tampered admin request can't be used to smuggle in an arbitrary
+// stat boost. Re-fetches the item fresh from its current storage right before mutating it
+// (not the copy the admin's list view was built from), so a player who moved/sold/re-rolled
+// the item in the meantime can't have it clobbered out from under them.
+app.post("/api/admin/legacy-gear/rescale", requireAuth, requireAdmin, (req, res) => {
+  const location = req.body && req.body.location;
+  if (!location || typeof location !== "object" || typeof location.instance_id !== "string" || !location.instance_id) {
+    return res.status(400).json({ error: "Invalid location." });
+  }
+  const { kind, instance_id } = location;
+  const accountId = Number(location.account_id);
+  if (!Number.isInteger(accountId)) return res.status(400).json({ error: "Invalid account." });
+
+  if (kind === "equipped" || kind === "backpack") {
+    const slot = Number(location.slot);
+    if (!Number.isInteger(slot) || slot < 0 || slot >= MAX_CHARACTER_SLOTS) return res.status(400).json({ error: "Invalid slot." });
+    const row = db.prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?").get(accountId, slot);
+    if (!row) return res.status(404).json({ error: "Character not found." });
+    let data;
+    try { data = JSON.parse(row.data); } catch (e) { return res.status(500).json({ error: "Corrupt character data." }); }
+
+    let target, applyBack;
+    if (kind === "equipped") {
+      const equipSlot = location.equip_slot;
+      const inst = data.equipped && data.equipped[equipSlot];
+      if (!inst || inst.instance_id !== instance_id) return res.status(404).json({ error: "That item is no longer there (equipped slot changed)." });
+      target = inst;
+      applyBack = (rescaled) => { data.equipped[equipSlot] = rescaled; };
+    } else {
+      const list = Array.isArray(data.gear_instances) ? data.gear_instances : [];
+      const idx = list.findIndex((i) => i && i.instance_id === instance_id);
+      if (idx === -1) return res.status(404).json({ error: "That item is no longer in the backpack." });
+      target = list[idx];
+      applyBack = (rescaled) => { list[idx] = rescaled; data.gear_instances = list; };
+    }
+
+    const bad = legacyGearOutOfSpecAffixes(target);
+    if (!bad.length) return res.status(409).json({ error: "This item is already within current spec -- nothing to rescale." });
+    const rescaled = legacyGearRescale(target);
+    applyBack(rescaled);
+    db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(
+      JSON.stringify(data), nowIso(), accountId, slot
+    );
+    console.log(`[admin] ${req.account.username} rescaled a legacy gear item (${kind}) for account_id=${accountId} slot=${slot}`);
+    broadcastSystemMessage("An admin recalibrated an out-of-date item to match current game balance.");
+    return res.json({ ok: true, before: target, after: rescaled });
+  }
+
+  if (kind === "vault") {
+    const row = db.prepare("SELECT data FROM vaults WHERE account_id = ?").get(accountId);
+    if (!row) return res.status(404).json({ error: "Vault not found." });
+    let items;
+    try { items = JSON.parse(row.data); } catch (e) { return res.status(500).json({ error: "Corrupt vault data." }); }
+    if (!Array.isArray(items)) return res.status(500).json({ error: "Corrupt vault data." });
+    const idx = items.findIndex((e) => e && e.kind === "gear" && e.inst && e.inst.instance_id === instance_id);
+    if (idx === -1) return res.status(404).json({ error: "That item is no longer in the vault." });
+    const target = items[idx].inst;
+    const bad = legacyGearOutOfSpecAffixes(target);
+    if (!bad.length) return res.status(409).json({ error: "This item is already within current spec -- nothing to rescale." });
+    const rescaled = legacyGearRescale(target);
+    items[idx] = Object.assign({}, items[idx], { inst: rescaled });
+    db.prepare("UPDATE vaults SET data = ?, updated_at = ?, version = version + 1 WHERE account_id = ?").run(
+      JSON.stringify(items), nowIso(), accountId
+    );
+    console.log(`[admin] ${req.account.username} rescaled a legacy gear item (vault) for account_id=${accountId}`);
+    broadcastSystemMessage("An admin recalibrated an out-of-date item to match current game balance.");
+    return res.json({ ok: true, before: target, after: rescaled });
+  }
+
+  if (kind === "auction") {
+    const listingId = Number(location.listing_id);
+    if (!Number.isInteger(listingId)) return res.status(400).json({ error: "Invalid listing." });
+    const row = db.prepare("SELECT item_json FROM auction_listings WHERE id = ? AND type = 'gear'").get(listingId);
+    if (!row || !row.item_json) return res.status(404).json({ error: "Listing not found." });
+    let target;
+    try { target = JSON.parse(row.item_json); } catch (e) { return res.status(500).json({ error: "Corrupt listing data." }); }
+    if (target.instance_id !== instance_id) return res.status(404).json({ error: "That listing no longer holds the expected item." });
+    const bad = legacyGearOutOfSpecAffixes(target);
+    if (!bad.length) return res.status(409).json({ error: "This item is already within current spec -- nothing to rescale." });
+    const rescaled = legacyGearRescale(target);
+    db.prepare("UPDATE auction_listings SET item_json = ? WHERE id = ?").run(JSON.stringify(rescaled), listingId);
+    console.log(`[admin] ${req.account.username} rescaled a legacy gear item (auction listing #${listingId})`);
+    broadcastSystemMessage("An admin recalibrated an out-of-date item to match current game balance.");
+    return res.json({ ok: true, before: target, after: rescaled });
+  }
+
+  return res.status(400).json({ error: "Invalid location kind." });
 });
 
 app.get("/api/health", (req, res) => res.json({ ok: true, time: nowIso() }));
