@@ -924,7 +924,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.18.2.1-web",
+  GAME_VERSION:"v0.19-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   NPC_BLACKSMITH_NAME:"Grondar Emberhand", NPC_ALCHEMIST_NAME:"Maren Thistlebrew", NPC_MERCHANT_NAME:"Cassius Wraithcoin",
@@ -1873,6 +1873,64 @@ const Net = {
   async announceTrialResult(payload){
     if(!this.online) return;
     try{ await fetch(this.apiBase()+"/api/announce/trial",{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify(payload)}); }catch(e){}
+  },
+  // v0.18.3: server-authoritative Broken Bridge Trial -- the server rolls whether this
+  // plank holds, and (on a full crossing or a failure) computes and persists every
+  // consequence itself (level/xp/attribute reset, promotion, HP/Stamina, fail-streak,
+  // max_maze_depth_reached), returning the authoritative result for the client to render.
+  // See attemptStep() in screenMasterTrial() for how the response is applied to PS, and
+  // evergrind-server/server.js's POST /api/trial/attempt for the full server-side logic
+  // this replaces (a local Math.random() roll a modified client could freely rig).
+  async attemptTrialStep(slot, plankIndex){
+    const res=await fetch(this.apiBase()+"/api/trial/attempt",{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({slot,plank_index:plankIndex})});
+    const json=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(json.error||"The trial attempt could not be resolved.");
+    return json;
+  },
+  // v0.18.4: the Blacksmith's Reroll button used to run PS.rerollGear() entirely locally
+  // (IF.reroll() picked the new affix values in the browser, then autosave just reported
+  // the outcome as fact) -- a modified client could report back whatever "reroll result"
+  // it wanted, including a perfect max-roll, for free. This mirrors the Trial fix's
+  // pattern exactly: the server validates the item, checks+deducts the material cost
+  // against its own stored figure, and rolls every new affix value itself. See
+  // evergrind-server/server.js's POST /api/blacksmith/reroll for the full logic.
+  async rerollGear(slot, instanceId){
+    const res=await fetch(this.apiBase()+"/api/blacksmith/reroll",{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({slot,instance_id:instanceId})});
+    const json=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(json.error||"That item could not be rerolled.");
+    return json;
+  },
+  // v0.19: server-authoritative combat (see evergrind-server/server.js's new "Server-
+  // authoritative Combat" section for the full engine). Every roll that decides a fight's
+  // outcome -- block/crit/damage, the monster's counter, flee, loot, XP, gold, leveling,
+  // weapon-skill proficiency -- now happens server-side against a combat_sessions row, not
+  // inside screenCombat()'s old Math.random()-driven playerTurn()/attemptFlee(). These 4
+  // methods are the entire client-server contract for a fight; see startCombatSession()/
+  // playerTurn()/attemptFlee()/useItemInCombat() in the COMBAT section below for how the
+  // responses get applied back into PS/GF and rendered.
+  async startCombat(slot, monsterId, areaLevel, isGuardian, isRoamer){
+    const res=await fetch(this.apiBase()+"/api/combat/start",{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({slot,monster_id:monsterId,area_level:areaLevel,is_guardian:!!isGuardian,is_roamer:!!isRoamer})});
+    const json=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(json.error||"Could not start that fight.");
+    return json;
+  },
+  async attackCombat(sessionId){
+    const res=await fetch(this.apiBase()+`/api/combat/${sessionId}/attack`,{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:"{}"});
+    const json=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(json.error||"That attack could not be resolved.");
+    return json;
+  },
+  async fleeCombat(sessionId){
+    const res=await fetch(this.apiBase()+`/api/combat/${sessionId}/flee`,{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:"{}"});
+    const json=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(json.error||"Could not flee.");
+    return json;
+  },
+  async useItemCombat(sessionId, itemId){
+    const res=await fetch(this.apiBase()+`/api/combat/${sessionId}/use-item`,{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({item_id:itemId})});
+    const json=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(json.error||"That item could not be used.");
+    return json;
   },
   async announceDeath(payload){
     if(!this.online) return;
@@ -2914,6 +2972,12 @@ const PS = {
     this.addGold(Balance.sellValue(inst.tier, IF.slotCount(inst)));
     this.gear_instances.splice(idx,1);
   },
+  // v0.18.4 SUPERSEDED: the Blacksmith's Reroll button no longer calls this -- see
+  // rerollBlacksmithItem()/Net.rerollGear() and evergrind-server/server.js's POST
+  // /api/blacksmith/reroll, which now own the cost check and the RNG server-side. Left
+  // here (unused by the live UI) purely as the reference algorithm the server-side mirror
+  // was ported from, same reasoning as PS.resolveMasterTrial() being kept after the
+  // Broken Bridge Trial's own server-authoritative port.
   rerollGear(instanceId){
     const idx=this.findGearIndex(instanceId); if(idx===-1) return null;
     const inst=this.gear_instances[idx];
@@ -5727,6 +5791,20 @@ document.addEventListener("click",(e)=>{
 
 /* ================= COMBAT ================= */
 
+// v0.19: combat is now server-authoritative (see evergrind-server/server.js's "Server-
+// authoritative Combat" section) -- every roll that used to happen here via Math.random()
+// (monster block, player damage/crit, the monster's counter, flee, loot, XP, gold, leveling,
+// weapon-skill proficiency) now happens on the server against a combat_sessions row. This
+// whole section is now almost entirely about ASKING the server for a ruling and rendering
+// whatever it decides, rather than deciding anything itself -- see startCombatSession() and
+// screenCombat()'s playerTurn()/attemptFlee()/useItemInCombat() below.
+//
+// GF.combat's shape changed accordingly: it now mirrors the server's session (session_id,
+// monster_id/guardianCellIdx/roamerId for the "is this still the same encounter" identity
+// check, name/hp/maxHp/loot_table/isGuardian/isRoamer for display, plus the same log/
+// defeated/result_text fields the UI already rendered). GF.combatStarting/GF.combatResolving
+// are simple in-flight guards (same pattern as GF.rerolling/GF.trialResolving elsewhere) so a
+// slow network round-trip can't be double-submitted by an impatient extra click.
 function ensureCombat(){
   const guardianCellIdx=GF.pending_guardian_cell_idx!=null?GF.pending_guardian_cell_idx:null;
   // v0.18 (#2): a roaming mob is identified by its stable `roamerId`, not a cell index (its
@@ -5735,40 +5813,41 @@ function ensureCombat(){
   // navigating away and back mid-fight doesn't reset it, but a genuinely different roamer
   // (or guardian, or ordinary encounter) always does get a fresh GF.combat object.
   const roamerId=GF.pending_roamer_id!=null?GF.pending_roamer_id:null;
-  if(!GF.combat || GF.combat.monster_id!==GF.pending_monster_id || GF.combat.guardianCellIdx!==guardianCellIdx || GF.combat.roamerId!==roamerId){
-    const base=DL.getMonster(GF.pending_monster_id);
-    // v0.17.3 (#16) AUDIT: Kill Streak no longer scales monster HP/damage at all -- see
-    // Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL's comment for why that old behavior was
-    // removed. Stronghold guardians (v0.12): same per-area-level damage as an ordinary
-    // monster, but Balance.STRONGHOLD_GUARDIAN_HP_MULT (3x) more HP, per Gwen's spec:
-    // "extra strong mobs... damage quite equal to regular mobs".
-    const isGuardian=guardianCellIdx!=null;
-    // v0.18 (#2): unlike a guardian, a roaming mob is tougher in BOTH stats per Gwen's
-    // spec -- "more hitpoints than the guardians currently have, and they also deal more
-    // damage" -- see Balance.ROAMING_MOB_HP_MULT/ROAMING_MOB_DAMAGE_MULT's declaration.
-    const isRoamer=roamerId!=null;
-    const hpMult=isGuardian?Balance.STRONGHOLD_GUARDIAN_HP_MULT:isRoamer?Balance.ROAMING_MOB_HP_MULT:1;
-    const dmgMult=isRoamer?Balance.ROAMING_MOB_DAMAGE_MULT:1;
-    const maxHp=Balance.monsterHp(base.base_hp,GF.maze_depth)*hpMult;
-    // v0.17 (#18): guardians are worth extra XP (see STRONGHOLD_GUARDIAN_XP_MULT) -- they
-    // already cost 3x the HP and a real fight to bring down, but used to hand out the same
-    // XP as an ordinary mob of that area level. v0.17.2 (#1) HOTFIX: this was 4x, reverted
-    // to 1.5x per ImpulseBE's balance check -- 4x was overtuned relative to the fight.
-    const xpMult=isGuardian?Balance.STRONGHOLD_GUARDIAN_XP_MULT:isRoamer?Balance.ROAMING_MOB_XP_MULT:1;
-    const name=isGuardian?`Guardian ${base.name}`:isRoamer?`Roaming ${base.name}`:base.name;
-    GF.combat={monster_id:base.id, name, hp:maxHp, maxHp, dmgMin:Balance.monsterDamage(base.base_damage_min,GF.maze_depth)*dmgMult, dmgMax:Balance.monsterDamage(base.base_damage_max,GF.maze_depth)*dmgMult, xp:Balance.monsterXpReward(base.base_xp,GF.maze_depth)*xpMult, goldMin:base.gold_min, goldMax:base.gold_max, loot_table:base.loot_table, log:[], isGuardian, guardianCellIdx, isRoamer, roamerId};
-    // v0.17 (#16): 50% chance the monster gets an unavoidable first strike the instant this
-    // encounter is created, before the player can act at all -- see MONSTER_FIRST_STRIKE_
-    // CHANCE's comment above for the full rationale and why this floors at 1 HP instead of
-    // being able to kill outright.
-    if(Math.random()<Balance.MONSTER_FIRST_STRIKE_CHANCE){
-      let mdmg=randRange(GF.combat.dmgMin,GF.combat.dmgMax);
-      mdmg*=(1.0-PS.getArmor());
-      PS.current_hp=Math.max(1,PS.current_hp-mdmg);
-      combatLog(GF.combat,`The ${GF.combat.name} strikes first, hitting you for ${Math.round(mdmg)} damage before you can react!`);
-    }
+  if(GF.combat && GF.combat.monster_id===GF.pending_monster_id && GF.combat.guardianCellIdx===guardianCellIdx && GF.combat.roamerId===roamerId){
+    return GF.combat;
   }
-  return GF.combat;
+  // A different encounter than whatever's currently loaded (or none at all yet) -- kick off
+  // a fresh server-authoritative session exactly once; the resulting render() (fired from
+  // startCombatSession() once the network round-trip resolves) is what actually populates
+  // GF.combat. Returns null in the meantime so screenCombat() can show a brief loading state.
+  if(!GF.combatStarting){
+    GF.combatStarting=true;
+    startCombatSession(GF.pending_monster_id, guardianCellIdx, roamerId);
+  }
+  return null;
+}
+
+async function startCombatSession(monsterId, guardianCellIdx, roamerId){
+  try{
+    const result=await Net.startCombat(PS.current_slot, monsterId, GF.maze_depth, guardianCellIdx!=null, roamerId!=null);
+    PS._saveSeqFloor=Math.max(PS._saveSeqFloor||0, result._save_seq);
+    PS.current_hp=result.player.current_hp;
+    const base=DL.getMonster(monsterId);
+    GF.combat={
+      session_id:result.session_id, monster_id:monsterId, guardianCellIdx, roamerId,
+      name:result.monster.name, hp:result.monster.hp, maxHp:result.monster.max_hp,
+      loot_table:base.loot_table, isGuardian:guardianCellIdx!=null, isRoamer:roamerId!=null,
+      log:[...(result.log||[])], defeated:false, result_text:"",
+    };
+    autosave();
+  }catch(e){
+    setToast("Could not start that fight: "+e.message);
+    GF.combatStarting=false;
+    GF.goto("maze",{maze_depth:GF.maze_depth});
+    return;
+  }
+  GF.combatStarting=false;
+  render();
 }
 
 // v0.17 (#10): cap raised 5 -> 10 alongside doubling the log panel's height (see
@@ -5877,21 +5956,31 @@ function handleTrapDeath(){
 function screenCombat(){
   const cb=ensureCombat();
   const root=h("div",{});
+  if(!cb){
+    // Still waiting on POST /api/combat/start's round trip (see ensureCombat()/
+    // startCombatSession() above) -- there's nothing to render yet, no local monster/log
+    // data exists until the server has actually ruled on it.
+    root.appendChild(h("h2",{},["A wild monster blocks the path!"]));
+    root.appendChild(statHeader());
+    root.appendChild(h("div",{class:"panel muted"},["Sizing up the fight..."]));
+    return root;
+  }
   root.appendChild(h("h2",{},[cb.defeated?`The ${cb.name} lies defeated.`:`A wild ${cb.name} blocks the path!`]));
   root.appendChild(statHeader());
 
   const portraitWrap=h("div",{style:{width:"140px",height:"140px",margin:"0 auto 8px"}});
   portraitWrap.innerHTML=monsterPortrait(cb.monster_id,{slain:cb.defeated});
-  // v0.18.1 (#23): the entire monster tile is now clickable to attack, not just the small
-  // "Attack" button below it -- per Gwen's spec, players expect to be able to click directly
-  // on the monster itself. Only wired up while the fight is still ongoing (cb.defeated is
-  // handled by its own early-return branch further down, before the Attack button even
-  // exists, so this mirrors that same gating). playerTurn() is declared further down in this
-  // same function, but function declarations are hoisted, so it's already callable here.
+  const busy=!!GF.combatResolving;
+  // v0.18.1 (#23): the entire monster tile is clickable to attack, not just the small
+  // "Attack" button below it. Disabled while a request is already in flight (see
+  // GF.combatResolving) so an impatient extra click can't fire a second attack before the
+  // first one's server round-trip has even resolved. playerTurn() is declared further down
+  // in this same function, but function declarations are hoisted, so it's already callable
+  // here.
   const mobPanel=h("div",{
     class:"panel",
-    style:{flex:"0 0 50%",maxWidth:"50%",cursor:cb.defeated?"default":"pointer"},
-    onClick:cb.defeated?undefined:()=>playerTurn(),
+    style:{flex:"0 0 50%",maxWidth:"50%",cursor:(cb.defeated||busy)?"default":"pointer"},
+    onClick:(cb.defeated||busy)?undefined:()=>playerTurn(),
   },[
     portraitWrap,
     h("div",{style:{fontWeight:"bold",textAlign:"center"}},[cb.name]),
@@ -5920,114 +6009,95 @@ function screenCombat(){
     return root;
   }
 
-  function playerTurn(){
-    // v0.17.1 (#12): capture whether the two combat-round-scoped shrine buffs (Invuln/Quad
-    // Damage) are active BEFORE ticking them down -- so the round that brings a counter from
-    // 1 to 0 still actually gets the benefit it was granted for (ticking first, then
-    // checking, would silently shortchange the buff's very last round every time).
-    const quadActiveThisRound=PS.hasQuadDamage();
-    const invulnActiveThisRound=PS.isInvulnerable();
-    PS.tickCombatRoundBuffs();
-    // v0.17 (#11): monster block chance -- scales with area level, see
-    // Balance.mobBlockChance(). A blocked swing deals no damage and doesn't count toward
-    // weapon-skill proficiency (nothing actually landed), but the monster still gets its
-    // normal turn right after, same as the player's own block chance only cancels ONE
-    // side's hit for the round.
-    const mobBlocked=Math.random()<Balance.mobBlockChance(GF.maze_depth);
-    if(mobBlocked){
+  // Mirrors grantLoot()'s messaging (that function is untouched -- it's still used by chest
+  // encounters, which stay client-resolved for now per Gwen's explicit scoping), but the
+  // loot itself was already rolled AND applied to the stored character server-side; this
+  // only reconstructs the same local PS bookkeeping (deterministic, no RNG of its own, same
+  // spirit as PS.addXp(serverAmount) below) so the backpack/equip slots reflect it
+  // immediately instead of waiting on the next full reload, plus the matching toast text.
+  function applyCombatLoot(loot){
+    if(!loot) return "";
+    if(loot.type==="gear"){
+      const inst=loot.item;
+      if(!loot.fit) return "Found gear but your bags are full, it was left behind.";
+      const slot=loot.auto_equipped?PS._autoEquipTargetSlot(inst):null;
+      if(slot) PS.equipped[slot]=inst; else PS.gear_instances.push(inst);
+      spawnFloatItem("player",inst);
+      return loot.auto_equipped?`Found and equipped ${IF.displayName(inst)}!`:`Found ${IF.displayName(inst)}!`;
+    }
+    if(loot.type==="consumable"){ PS.addConsumable(loot.item_id,1); return `Found a ${DL.getItem(loot.item_id).name}.`; }
+    if(loot.type==="herb"){ PS.addHerb(loot.herb_id,1); return `Found ${DL.getHerb(loot.herb_id).name}.`; }
+    return "";
+  }
+
+  // Applies POST /api/combat/:id/attack's response into cb/PS exactly the way the old
+  // locally-rolled playerTurn() used to render its own outcome -- the difference is every
+  // number here (block/crit/damage, the monster's counter, loot/XP/gold/leveling) was
+  // decided by the server, not Math.random() in this browser tab.
+  function applyAttackResult(result){
+    if(result.mob_blocked){
       combatLog(cb,`The ${cb.name} blocks your attack!`);
       spawnFloat("monster","Blocked","float-text-block");
-    } else {
-      const [lo,hi]=PS.getDamageRange();
-      let dmg=randRange(lo,hi);
-      const crit=Math.random()<PS.getCritChance();
-      if(crit) dmg*=Balance.CRIT_MULTIPLIER;
-      // v0.17.1 (#12): Quad Damage shrine -- x4 total damage output while active.
-      if(quadActiveThisRound) dmg*=4;
-      cb.hp-=dmg;
-      combatLog(cb,`You hit the ${cb.name} for ${Math.round(dmg)} damage${crit?" (Critical!)":""}${quadActiveThisRound?" (Quad Damage!)":""}.`);
-      // v0.18 (#9): "-110 HP" near the monster, "CRIT!" appended when it lands as a crit.
-      spawnFloat("monster",`-${Math.round(dmg)} HP${crit?" CRIT!":""}`,crit?"float-text-crit":"float-text-dmg");
-      // v0.12: every attack with a recognized weapon type equipped counts toward that
-      // type's permanent proficiency (see PS.registerWeaponHit/getEquippedWeaponType).
-      const weaponType=PS.getEquippedWeaponType();
-      if(weaponType){
-        const skillResult=PS.registerWeaponHit(weaponType);
-        if(skillResult.leveledUp) combatLog(cb,`Your ${IF.WEAPON_TYPE_LABELS[weaponType]} proficiency reaches level ${skillResult.newLevel}!`);
+    } else if(result.player_hit){
+      const {damage,crit,quad_damage}=result.player_hit;
+      combatLog(cb,`You hit the ${cb.name} for ${damage} damage${crit?" (Critical!)":""}${quad_damage?" (Quad Damage!)":""}.`);
+      spawnFloat("monster",`-${damage} HP${crit?" CRIT!":""}`,crit?"float-text-crit":"float-text-dmg");
+      // The server already recorded this hit against the stored character's weapon_skills
+      // (see combatRegisterWeaponHit() in server.js) -- mirror that exact +1 locally
+      // (deterministic, no RNG) so the Character Sheet's Skill Bonuses card and this
+      // character's future damage calc stay in sync without waiting on a full reload.
+      if(result.weapon_skill){
+        const skillResult=PS.registerWeaponHit(result.weapon_skill.weapon_type);
+        if(skillResult.leveledUp) combatLog(cb,`Your ${IF.WEAPON_TYPE_LABELS[result.weapon_skill.weapon_type]} proficiency reaches level ${skillResult.newLevel}!`);
       }
     }
-    if(!mobBlocked && cb.hp<=0){
+    cb.hp=result.monster.hp;
+    PS.current_hp=result.player.current_hp;
+
+    if(result.kill){
+      const k=result.kill;
       cb.hp=0;
-      // v0.17.3 (#16) AUDIT: gold/XP no longer get a Kill Streak multiplier -- see
-      // Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL's comment. The streak's effect is
-      // entirely via the Magic Find bonus rolled into PS.getMagicFind(), which grantLoot()
-      // reads for BOTH halves of the loot roll: gear rarity (through IF.generate() ->
-      // Balance.rollRarity(), unchanged since v0.17.1) AND, as of v0.18.2 (#9), the odds of
-      // getting a drop at all (see DL.rollLoot()'s reroll-on-"nothing") -- so a longer
-      // streak now means both better AND more loot on average, still with no flat XP/gold
-      // multiplier.
-      const gold=randIntRange(cb.goldMin,cb.goldMax);
-      // v0.18.2 (#7): "Currently playing" is now also a community XP buff -- every kill's
-      // XP gets multiplied by the current active-player count (1 = just yourself = no
-      // bonus, 2 = double, 3 = triple, and so on -- see getGlobalXpMultiplier()'s comment).
-      // Applied here, AFTER shrine/guardian/roamer xpMult already baked into cb.xp at
-      // ensureCombat() time, so it stacks multiplicatively on top of those exactly like the
-      // "Currently playing" spec describes ("experience gained is doubled for everyone"),
-      // not folded into cb.xp itself -- cb.xp needs to stay the "base for this kill" number
-      // in case anything else ever reads it before this multiplier is known.
-      // v0.18.2.1 CORRECTION: Forest Reputation's positive bonus is a persistent PERCENTAGE
-      // multiplier (+10% XP gained per point, for as long as you're in that tier's forest),
-      // not the flat +10-XP-per-point bonus originally shipped in v0.18.2 -- it stacks
-      // multiplicatively right alongside the "Currently playing" community multiplier above,
-      // and is only ever a bonus, never a penalty when reputation is negative (see
-      // PS.getForestReputationXpMult()).
-      const xpGained=cb.xp*getGlobalXpMultiplier()*PS.getForestReputationXpMult();
       // v0.18 (#7): captured BEFORE addXp() mutates PS.xp, so animateXpBarGrowth() below
-      // (called after this kill's render()) knows where the bar visually started from.
+      // knows where the bar visually started from.
       const preKillXpFraction=PS.xp_to_next>0?(PS.xp/PS.xp_to_next):0;
-      const leveled=PS.addXp(xpGained);
-      PS.addGold(gold);
-      // v0.18 (#9): "+8 XP" in purple, gold amount in gold color -- both anchored near the
-      // player's own stat row/HP bar, same as any other player-side floating text.
-      spawnFloat("player",`+${Math.round(xpGained)} XP`,"float-text-xp");
-      spawnFloat("player",`+${gold}g`,"float-text-gold");
-      PS.incrementKillStreak();
-      const lootMsg=grantLoot(cb.loot_table);
+      spawnFloat("player",`+${Math.round(k.xp_gained)} XP`,"float-text-xp");
+      spawnFloat("player",`+${k.gold}g`,"float-text-gold");
+      // The XP AMOUNT was decided server-side; spending it (the level-up loop, stat points,
+      // HP/Stamina pool growth) is deterministic bookkeeping this client function already
+      // did safely before -- reusing it here just means "apply this server-given number",
+      // not "roll anything".
+      const leveled=PS.addXp(k.xp_gained);
+      // Gold is account-bound (PS.gold is a thin proxy onto Net.accountGold) -- the server
+      // already credited the account directly; mirror that exact delta locally so the
+      // header's gold figure updates without waiting on a full character reload.
+      Net.accountGold=(Net.accountGold||0)+k.gold_credited;
+      PS.kill_streak=k.kill_streak; PS.max_kill_streak=k.max_kill_streak;
+      const lootMsg=applyCombatLoot(k.loot);
       cb.defeated=true;
-      cb.result_text=`${cb.name} defeated! +${Math.round(xpGained)} XP, +${Math.round(gold)} gold. ${lootMsg}`;
-      if(cb.isGuardian){
+      cb.result_text=`${cb.name} defeated! +${Math.round(k.xp_gained)} XP, +${Math.round(k.gold_credited)} gold. ${lootMsg}`;
+      if(k.is_guardian){
         // v0.12: beating a Stronghold guardian opens the direct path to that Stronghold's
-        // chest (any 1 of the 4 is enough), and has its own independent 5% chance to drop
-        // a Stronghold Key -- the only way to actually unlock the chest once you reach it.
+        // chest -- this bookkeeping is purely client-side maze state (never validated
+        // server-side in this phase, see the combat section's top-of-file SCOPE NOTE in
+        // server.js), so it's unchanged from before.
         const maze=GF.overworld_snapshot;
         if(maze){
           const cell=maze.cells[cb.guardianCellIdx];
           if(cell){ cell.cleared=true; }
           if(maze.stronghold && cell && cell.guardianSlot!=null) maze.stronghold.guardianDefeated[cell.guardianSlot]=true;
         }
-        // v0.12 bug fix: keys only drop in an area at or above the character's own level,
-        // so a high-level character can't revisit a trivial low-level maze and farm
-        // guaranteed-easy guardian kills for keys (see Balance.strongholdKeyEligible).
-        const keyEligible=Balance.strongholdKeyEligible(GF.maze_depth, PS.level);
-        if(keyEligible && Math.random()<Balance.STRONGHOLD_KEY_DROP_CHANCE){
-          // v0.18 (#5): the dropped key's tier is fixed to the area level this guardian was
-          // actually fought in (never the player's own level or anything else) -- exactly
-          // what stops a player from farming keys at a low, easy area level and saving
-          // them up to open a high-level chest later, per Gwen's stated reason for asking.
-          const keyTier=Balance.strongholdKeyTierForAreaLevel(GF.maze_depth);
-          PS.addConsumable(Balance.strongholdKeyItemIdForTier(keyTier),1);
-          cb.result_text+=` It drops a Stronghold Key (Tier ${tierRomanNumeral(keyTier)})!`;
-        } else if(keyEligible){
+        if(k.key_drop && k.key_drop.item_id){
+          PS.addConsumable(k.key_drop.item_id,1);
+          cb.result_text+=` It drops a Stronghold Key (Tier ${tierRomanNumeral(k.key_drop.tier)})!`;
+        } else if(k.key_drop && k.key_drop.eligible){
           cb.result_text+=" The path to the Stronghold's chest is open, if you can find a key.";
         } else {
           cb.result_text+=" The path to the Stronghold's chest is open, though this area is too tame for its guardians to yield a Stronghold Key.";
         }
       }
-      // v0.18 (#2): a defeated roaming mob is gone for good, same as a cleared guardian --
-      // marking it `defeated` here (rather than removing it from the array) keeps roamerId
-      // indices stable for the rest of this maze's lifetime and is what both
-      // tickRoamingMobs() and screenMaze()'s render loop already check for.
-      if(cb.isRoamer){
+      // v0.18 (#2): a defeated roaming mob is gone for good -- same client-only maze
+      // bookkeeping as the guardian cell marking above.
+      if(k.is_roamer){
         const maze=GF.overworld_snapshot;
         if(maze && maze.roamers){
           const r=maze.roamers.find(rr=>rr.roamerId===cb.roamerId);
@@ -6041,66 +6111,110 @@ function screenCombat(){
       if(!leveled) animateXpBarGrowth(preKillXpFraction);
       return;
     }
-    // monster turn
-    // v0.17.1 (#12): Touch of Unicorn (Invulnerability shrine) -- full damage immunity,
-    // checked before the block-chance roll so an invulnerable round never even risks a
-    // "block" log line implying the hit could otherwise have landed.
-    if(invulnActiveThisRound){
-      combatLog(cb,`The ${cb.name}'s attack passes through you harmlessly -- you are untouchable!`);
-      spawnFloat("player","Immune!","float-text-block");
-      autosave(); render(); return;
+
+    if(result.monster_turn){
+      const mt=result.monster_turn;
+      // v0.17.1 (#12): Touch of Unicorn (Invulnerability shrine) -- full damage immunity.
+      if(mt.invulnerable){
+        combatLog(cb,`The ${cb.name}'s attack passes through you harmlessly -- you are untouchable!`);
+        spawnFloat("player","Immune!","float-text-block");
+      } else if(mt.blocked){
+        combatLog(cb,`You block the ${cb.name}'s attack entirely!`);
+        spawnFloat("player","Blocked","float-text-block");
+      } else if(mt.damage!=null){
+        combatLog(cb,`The ${cb.name} hits you for ${mt.damage} damage.`);
+        spawnFloat("player",`-${mt.damage} HP`,"float-text-dmg");
+      }
     }
-    if(Math.random()<PS.getBlockChance()){
-      combatLog(cb,`You block the ${cb.name}'s attack entirely!`);
-      spawnFloat("player","Blocked","float-text-block");
-      autosave(); render(); return;
-    }
-    let mdmg=randRange(cb.dmgMin,cb.dmgMax);
-    mdmg*=(1.0-PS.getArmor());
-    PS.current_hp-=mdmg;
-    combatLog(cb,`The ${cb.name} hits you for ${Math.round(mdmg)} damage.`);
-    // v0.18 (#9): "-4 HP" in red near the player's HP bar.
-    spawnFloat("player",`-${Math.round(mdmg)} HP`,"float-text-dmg");
-    // Anything below 1 HP is dead, a fractional sliver (e.g. 0.4) used to display as
-    // "0 HP" and read as alive, letting players survive a fight at what looked like 0 HP
-    // only to be one-shot next encounter. Treat "rounds down to 0" as actually dead.
-    if(PS.current_hp<1){ PS.current_hp=0; endCombatDeath(); return; }
+    // The server is the sole authority on "did this round kill the player" now (see
+    // server.js's combatResolveMonsterTurn()) -- current_hp above already reflects its
+    // clamped-to-0 verdict, so this is just reacting to that fact, not re-deciding it.
+    if(result.fatal){ endCombatDeath(); return; }
     autosave();
     render();
   }
 
-  // v0.14: fleeing now has a Balance.FLEE_FAIL_CHANCE (20%) chance to fail outright --
-  // the monster gets one more attack (same block-chance/armor math as its normal turn)
-  // and you're still in combat, free to try fleeing again (which can fail again on bad
-  // luck, no cap on attempts). A death on a failed flee attempt ends combat via the
-  // normal endCombatDeath() path, same as any other monster hit.
-  function attemptFlee(){
-    if(Math.random()<Balance.FLEE_FAIL_CHANCE){
-      combatLog(cb,"You fail to flee!");
-      if(Math.random()<PS.getBlockChance()){
-        combatLog(cb,`You block the ${cb.name}'s attack entirely!`);
-        spawnFloat("player","Blocked","float-text-block");
-      } else {
-        let mdmg=randRange(cb.dmgMin,cb.dmgMax);
-        mdmg*=(1.0-PS.getArmor());
-        PS.current_hp-=mdmg;
-        combatLog(cb,`The ${cb.name} hits you for ${Math.round(mdmg)} damage.`);
-        spawnFloat("player",`-${Math.round(mdmg)} HP`,"float-text-dmg");
-        if(PS.current_hp<1){ PS.current_hp=0; endCombatDeath(); return; }
-      }
-      autosave();
+  async function playerTurn(){
+    if(GF.combatResolving) return;
+    GF.combatResolving=true; render();
+    try{
+      const result=await Net.attackCombat(cb.session_id);
+      PS._saveSeqFloor=Math.max(PS._saveSeqFloor||0, result._save_seq);
+      GF.combatResolving=false;
+      applyAttackResult(result);
+    }catch(e){
+      GF.combatResolving=false;
+      setToast("That attack failed to register: "+e.message);
       render();
-      return;
     }
-    GF.combat=null; resetMazePositionToStart(); PS.saveGame(); setToast("You flee back to camp, but remember your way through these woods."); GF.goto("town");
   }
 
+  // v0.14: fleeing has a 20% (Balance.FLEE_FAIL_CHANCE) chance to fail outright -- the
+  // monster gets one more attack and you're still in combat, free to try again. That roll
+  // (and the counter-attack's block/armor math) is now server-side, same as every other
+  // combat number -- see POST /api/combat/:id/flee.
+  async function attemptFlee(){
+    if(GF.combatResolving) return;
+    GF.combatResolving=true; render();
+    try{
+      const result=await Net.fleeCombat(cb.session_id);
+      PS._saveSeqFloor=Math.max(PS._saveSeqFloor||0, result._save_seq);
+      GF.combatResolving=false;
+      PS.current_hp=result.player.current_hp;
+      if(result.failed){
+        combatLog(cb,"You fail to flee!");
+        const mt=result.monster_turn;
+        if(mt){
+          if(mt.blocked){
+            combatLog(cb,`You block the ${cb.name}'s attack entirely!`);
+            spawnFloat("player","Blocked","float-text-block");
+          } else if(mt.damage!=null){
+            combatLog(cb,`The ${cb.name} hits you for ${mt.damage} damage.`);
+            spawnFloat("player",`-${mt.damage} HP`,"float-text-dmg");
+          }
+        }
+        if(result.fatal){ endCombatDeath(); return; }
+        autosave();
+        render();
+        return;
+      }
+      GF.combat=null; resetMazePositionToStart(); PS.saveGame(); setToast("You flee back to camp, but remember your way through these woods."); GF.goto("town");
+    }catch(e){
+      GF.combatResolving=false;
+      setToast("Could not flee: "+e.message);
+      render();
+    }
+  }
+
+  // v0.19: mid-fight Health/Stamina Potion or Antidote use, same "free action, no counter-
+  // attack" behavior as before, but now validated (do you actually own this?) and applied
+  // (the gradual heal-over-time math) server-side -- see POST /api/combat/:id/use-item.
+  async function useItemInCombat(itemId){
+    if(GF.combatResolving || !itemId) return;
+    GF.combatResolving=true; render();
+    try{
+      const result=await Net.useItemCombat(cb.session_id, itemId);
+      PS._saveSeqFloor=Math.max(PS._saveSeqFloor||0, result._save_seq);
+      PS.current_hp=result.player.current_hp;
+      PS.current_stamina=result.player.current_stamina;
+      // The item itself was already deducted server-side -- mirror that one deterministic
+      // decrement locally so the backpack/quick-use buttons reflect it immediately.
+      PS._removeConsumableOne(itemId);
+    }catch(e){
+      setToast("Could not use that item: "+e.message);
+    }
+    GF.combatResolving=false;
+    autosave();
+    render();
+  }
+
+  const busyDisabled=!!GF.combatResolving;
   root.appendChild(h("div",{class:"row",style:{marginTop:"10px"}},[
-    h("button",{class:"play",onClick:playerTurn},["Attack"]),
-    h("button",{disabled:!PS.canUseConsumable(PS.bestAvailableConsumable("health")),onClick:()=>{ PS.useConsumable(PS.bestAvailableConsumable("health")); autosave(); render(); }},["Use Health Potion"]),
-    h("button",{disabled:!PS.canUseConsumable(PS.bestAvailableConsumable("stamina")),onClick:()=>{ PS.useConsumable(PS.bestAvailableConsumable("stamina")); autosave(); render(); }},["Use Stamina Potion"]),
-    h("button",{disabled:!PS.canUseConsumable("antidote"),onClick:()=>{ PS.useConsumable("antidote"); autosave(); render(); }},["Use Antidote"]),
-    h("button",{class:"danger",onClick:attemptFlee},["Flee"]),
+    h("button",{class:"play",disabled:busyDisabled,onClick:playerTurn},[busyDisabled?"...":"Attack"]),
+    h("button",{disabled:busyDisabled||!PS.canUseConsumable(PS.bestAvailableConsumable("health")),onClick:()=>useItemInCombat(PS.bestAvailableConsumable("health"))},["Use Health Potion"]),
+    h("button",{disabled:busyDisabled||!PS.canUseConsumable(PS.bestAvailableConsumable("stamina")),onClick:()=>useItemInCombat(PS.bestAvailableConsumable("stamina"))},["Use Stamina Potion"]),
+    h("button",{disabled:busyDisabled||!PS.canUseConsumable("antidote"),onClick:()=>useItemInCombat("antidote")},["Use Antidote"]),
+    h("button",{class:"danger",disabled:busyDisabled,onClick:attemptFlee},["Flee"]),
   ]));
   return root;
 }
@@ -6802,6 +6916,30 @@ function screenInventory(){
 
 /* ================= BLACKSMITH ================= */
 
+// v0.18.4: the reroll's outcome is now decided server-side (see Net.rerollGear() and
+// evergrind-server/server.js's POST /api/blacksmith/reroll) instead of PS.rerollGear()
+// picking new affix values locally -- this async wrapper replaces that direct call,
+// mirroring attemptStep()'s pattern in screenMasterTrial() (double-submit guard via a GF
+// flag while the request is in flight, _save_seq reconciliation on the response, then
+// applying the server's authoritative result). The button/flow itself is unchanged: same
+// cost preview, same instant-feeling result once the response lands.
+async function rerollBlacksmithItem(instanceId){
+  if(GF.rerolling) return;
+  GF.rerolling=instanceId; render();
+  try{
+    const result=await Net.rerollGear(PS.current_slot, instanceId);
+    PS._saveSeqFloor=Math.max(PS._saveSeqFloor||0, result._save_seq);
+    const idx=PS.findGearIndex(instanceId);
+    if(idx!==-1) PS.gear_instances[idx]=result.item;
+    PS.materials=result.materials;
+    autosave();
+    setToast(`Rerolled! You got a ${IF.displayName(result.item)}.`);
+  }catch(e){
+    setToast("Could not reroll: "+e.message);
+  }
+  GF.rerolling=null; render();
+}
+
 function screenBlacksmith(){
   const root=h("div",{});
   root.appendChild(h("div",{class:"row gap"},[iconBadge(`<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="19" fill="#5a4028"/><rect x="10" y="26" width="20" height="6" rx="1" fill="#333"/></svg>`,52),h("div",{},[h("h2",{},[Balance.NPC_BLACKSMITH_NAME]),h("div",{class:"flavor"},["\"Bring me your battered gear. I'll see what can be salvaged, or improved.\""])])]));
@@ -6833,8 +6971,8 @@ function screenBlacksmith(){
     // shipped back in v0.15.1/v0.16, this is just a defensive belt-and-suspenders so no
     // gear mutation can ever race a pending craft's autosave).
     root.appendChild(gearRow(inst,[
-      h("button",{disabled:PS.materials<cost||!!GF.crafting,onClick:()=>{ const result=PS.rerollGear(inst.instance_id); if(result){autosave(); setToast(`Rerolled! You got a ${IF.displayName(result)}.`);} render(); }},[`Reroll (${cost} mat)`]),
-      h("button",{disabled:!!GF.crafting,onClick:()=>{PS.salvageGear(inst.instance_id);autosave();render();}},[`Salvage (+${Balance.salvageValue(inst.tier,IF.slotCount(inst))} mat)`]),
+      h("button",{disabled:PS.materials<cost||!!GF.crafting||!!GF.rerolling,onClick:()=>rerollBlacksmithItem(inst.instance_id)},[GF.rerolling===inst.instance_id?"Rerolling...":`Reroll (${cost} mat)`]),
+      h("button",{disabled:!!GF.crafting||!!GF.rerolling,onClick:()=>{PS.salvageGear(inst.instance_id);autosave();render();}},[`Salvage (+${Balance.salvageValue(inst.tier,IF.slotCount(inst))} mat)`]),
     ]));
   }
 
@@ -7839,60 +7977,75 @@ function screenMasterTrial(){
     `A new attempt at this tier starts with ${Balance.STARTING_STAT_POINTS} unspent stat points. Every failed attempt permanently adds +1 more (currently +${failStreak}, for ${Balance.STARTING_STAT_POINTS+failStreak} total) until you successfully cross.`,
   ]));
 
-  function attemptStep(plankIndex){
-    if(failed) return;
+  // v0.18.3: the plank roll, and every consequence of it (pass/fail/full-crossing,
+  // level/xp/attribute reset, promotion, HP/Stamina, fail-streak, max_maze_depth_reached),
+  // is now decided server-side -- see POST /api/trial/attempt in evergrind-server/server.js.
+  // This function used to roll Math.random() locally and mutate PS directly, which a
+  // modified client could freely rig (always "pass", or fabricate a promotion outright);
+  // it now just asks the server for a ruling and renders whatever comes back, same as
+  // combat is planned to work once that phase lands (see server_authoritative_combat_
+  // design.md). GF.trialResolving disables every plank button for the (brief) round trip
+  // so a double-click can't fire two overlapping requests against the same step.
+  async function attemptStep(plankIndex){
+    if(failed || GF.trialResolving) return;
     const stepIdx=progress.discoveredSides.length;
     const failedHere=progress.stepFailedPlanks[stepIdx]||[];
     if(failedHere.includes(plankIndex)) return; // already known-bad, shouldn't be clickable anyway
-    // v0.13: once every OTHER plank at this step has already failed, the last remaining
-    // one is guaranteed safe -- "the bridge remembers the faulty plank", so this can never
-    // regress into an unwinnable step. Otherwise it's a plain 1-in-remaining roll.
-    const remaining=plankCount-failedHere.length;
-    const passed=remaining<=1 ? true : Math.random()<(1/remaining);
-    if(passed){
-      progress.discoveredSides.push(plankIndex);
-      // v0.15 BUG FIX: this used to `delete progress.stepFailedPlanks[stepIdx]` right here,
-      // wiping out the record of every plank that broke at this step the moment you passed
-      // it -- so the bridge view only ever showed the single green (safe) plank for a
-      // completed step, never the red ones you'd already learned were bad. Gwen's report:
-      // "would it be possible to also keep the red plank in view". Keeping this entry
-      // around (instead of deleting it) means the render loop below, which reads
-      // progress.stepFailedPlanks[i] for every step including completed ones, keeps
-      // showing the full red-and-green history of that step permanently -- exactly the
-      // "overview of where and how many times they failed" Gwen asked for.
-      // v0.17.3 (#12) HOTFIX: the crossing-complete branch below calls resolveMasterTrial()
-      // right after this, which resets last_bridge_steps to 0 -- saving HERE too (before
-      // that reset) used to fire two autosave() calls back to back on the exact step that
-      // completes a crossing, one still carrying the stale pre-reset last_bridge_steps.
-      // Two saves racing on the network could land out of order and let the stale one win,
-      // which is exactly the "shows old tier's step count right after promoting" bug Gwen
-      // reported. Skip this intermediate save on the crossing-completing step -- the single
-      // save inside the block below (with the reset already applied) covers it.
-      if(progress.discoveredSides.length<rows) autosave();
-      if(progress.discoveredSides.length>=rows){
-        const nameBefore=c.display_name, levelBefore=PS.level;
-        const result=PS.resolveMasterTrial(true);
-        PS.trial_progress[PS.class_id]={stage:0,discoveredSides:[],stepFailedPlanks:{}};
-        autosave();
-        Net.announceTrialResult({character_name:PS.character_name, level:levelBefore, class_name:nameBefore, result:"passed", new_class_name:DL.getClass(PS.class_id).display_name});
-        setToast(result.final_tier?`You have mastered the ${c.chain} path completely!`:`You are promoted to ${DL.getClass(PS.class_id).display_name}!`);
-        GF.ventureDepth=1; GF.goto("town"); return;
-      }
+    GF.trialResolving=true; render();
+    let result;
+    try{
+      result=await Net.attemptTrialStep(PS.current_slot, plankIndex);
+    }catch(e){
+      GF.trialResolving=false;
+      setToast(e.message||"The trial attempt could not be resolved. Please try again.");
       render();
-    } else {
-      failedHere.push(plankIndex);
-      progress.stepFailedPlanks[stepIdx]=failedHere;
-      GF.trialJustFailed=true; GF.trialFailedPlankIndex=plankIndex; GF.trialFailedStepIndex=stepIdx;
-      // v0.17 (#1): stepIdx is exactly "how many steps you'd already gotten past when this
-      // one broke", i.e. the leaderboard's "Successful bridge step count" -- e.g. failing on
-      // step 4 (0-indexed stepIdx=3) means 3 completed steps. Only updated here (on failure),
-      // see the field's declaration above for why.
-      PS.last_bridge_steps=stepIdx;
+      return;
+    }
+    GF.trialResolving=false;
+
+    // Same "don't let a stale later autosave undo this" guard loadFromJSON() already
+    // applies on character load (see PS._nextSaveSeq()/_saveSeqFloor) -- the server just
+    // persisted a NEWER _save_seq than whatever this client last knew about, so the
+    // client's own local counter must never be allowed to fall behind it, or the game's
+    // very next autosave (e.g. syncing gear-inclusive HP/Stamina back in, see this
+    // feature's HP/Stamina scope note) could get silently rejected as "not actually newer".
+    if(result._save_seq) PS._saveSeqFloor=Math.max(PS._saveSeqFloor||0, result._save_seq);
+
+    if(result.outcome==="passed_step"){
+      progress.discoveredSides=result.discovered_sides;
+      progress.stepFailedPlanks=result.step_failed_planks;
+      render();
+      return;
+    }
+
+    if(result.outcome==="failed"){
+      progress.stepFailedPlanks=result.step_failed_planks;
+      GF.trialJustFailed=true; GF.trialFailedPlankIndex=plankIndex; GF.trialFailedStepIndex=result.failed_step_index;
+      PS.last_bridge_steps=result.last_bridge_steps;
+      PS.bridge_fail_streak=result.bridge_fail_streak;
+      PS.level=result.level; PS.xp=result.xp; PS.xp_to_next=result.xp_to_next;
+      PS.attributes=result.attributes; PS.unspent_stat_points=result.unspent_stat_points;
+      PS.bonus_hp_from_attributes=0; PS.bonus_stamina_from_attributes=0;
+      PS.current_hp=result.current_hp; PS.current_stamina=result.current_stamina;
+      PS.max_maze_depth_reached=result.max_maze_depth_reached;
       setToast("The plank gives way beneath you! The attempt ends here, but you'll remember this plank next time.");
-      Net.announceTrialResult({character_name:PS.character_name, level:PS.level, class_name:c.display_name, result:"failed", failed_step:stepIdx+1});
-      PS.resolveMasterTrial(false);
-      autosave();
       render();
+      return;
+    }
+
+    if(result.outcome==="promoted"){
+      PS.highest_tier_reached=Math.max(PS.highest_tier_reached||1, currentTier+1);
+      PS.class_id=result.new_class_id;
+      PS.last_bridge_steps=result.last_bridge_steps;
+      PS.bridge_fail_streak=result.bridge_fail_streak;
+      PS.trial_progress[PS.class_id]={stage:0,discoveredSides:[],stepFailedPlanks:{}};
+      PS.level=result.level; PS.xp=result.xp; PS.xp_to_next=result.xp_to_next;
+      PS.attributes=result.attributes; PS.unspent_stat_points=result.unspent_stat_points;
+      PS.bonus_hp_from_attributes=0; PS.bonus_stamina_from_attributes=0;
+      PS.current_hp=result.current_hp; PS.current_stamina=result.current_stamina;
+      PS.max_maze_depth_reached=result.max_maze_depth_reached;
+      setToast(result.final_tier?`You have mastered the ${c.chain} path completely!`:`You are promoted to ${result.new_class_display_name}!`);
+      GF.ventureDepth=1; GF.goto("town");
     }
   }
 
@@ -7910,9 +8063,12 @@ function screenMasterTrial(){
     for(let p=0;p<plankCount;p++){
       const isSafe=discoveredPlank===p;
       const isUnsafe=knownFailedHere.includes(p);
+      // v0.18.3: every plank is disabled while GF.trialResolving is true (a request is
+      // in flight for the server's ruling on this exact step) -- prevents a double-click
+      // from firing two overlapping /api/trial/attempt calls against the same step.
       col.appendChild(h("button",{class:"plank-btn"+(isSafe?" safe":(isUnsafe?" unsafe":"")),
-        disabled:!isCurrent || isUnsafe,
-        title:isUnsafe?"You already know this plank breaks.":"",
+        disabled:!isCurrent || isUnsafe || !!GF.trialResolving,
+        title:isUnsafe?"You already know this plank breaks.":(GF.trialResolving?"Waiting for the trial's outcome...":""),
         onClick:()=>attemptStep(p)},[inlineIcon(FOOTSTEP_SVG,16)]));
     }
     plankCols.appendChild(col);
@@ -8054,6 +8210,19 @@ function screenAdminPanel(){
 // Kept brief on purpose -- players don't need the internal blow-by-blow, just the
 // highlights per version, most recent first.
 const CHANGELOG=[
+  { version:"v0.19", notes:[
+    "Security hardening, part 3 -- the big one: every attack round in combat (monster block chance, your damage/crit roll, the monster's counter-attack, fleeing, and a kill's XP/gold/loot/leveling) is now resolved by the server instead of your browser. This was the last major piece of the security pass Gwen asked for after the Trial, Blacksmith reroll, and Auction House/Storage Vault hardening -- combat is the single most-played loop in the game, so it mattered most to get right. Combat should feel exactly the same to play; only the numbers now come from the server, closing the door on a modified client faking damage, dodging a kill it shouldn't have gotten, or handing itself free XP/gold/loot.",
+    "Server-authoritative maze generation and chest/herb/critter encounters remain on the backlog for a future pass.",
+  ]},
+  { version:"v0.18.4", notes:[
+    "Security hardening, part 2 (see v0.18.3 for part 1, the Broken Bridge Trial): the Blacksmith's Reroll button now has its outcome decided by the server, not the browser -- closing the specific worry that a modified client could report back a fake \"perfect roll\" for free. The reroll still costs the same materials, still keeps the same affix stats, and still feels instant -- only the numbers now come from the server.",
+    "The Auction House and Storage Vault now reject any gear item whose stats couldn't actually come from real loot generation or a real reroll (impossible tier, wrong number of bonuses for its rarity, a bonus rolled higher than that tier could ever produce). This closes the door on listing or stashing a fabricated, hand-edited item. Items you already owned before this update are untouched.",
+    "This closes out the security pass Gwen asked for on the Trial, Blacksmith, Auction House, and Storage Vault. Full server-side combat resolution and maze generation remain on the roadmap for later.",
+  ]},
+  { version:"v0.18.3", notes:[
+    "Security hardening: the Broken Bridge Trial's outcome (which plank holds, tier promotion, the level/attribute/HP/Stamina reset, and the fail-streak bonus) is now decided and applied by the server, not the browser. This closes the biggest remaining way a modified client could fake or force a promotion. The trial itself plays exactly the same as before -- same planks, same odds, same \"the bridge remembers a faulty plank\" guarantee -- it's simply the server giving the ruling now instead of your own browser.",
+    "This is the first piece of a broader security pass (more to come): the Auction House, Storage Vault, and Blacksmith/Merchant/Alchemist reroll outcomes are next in line for the same server-side treatment.",
+  ]},
   { version:"v0.18.2.1", notes:[
     "CORRECTION to Forest Reputation's positive bonus: it was shipped in v0.18.2 as a flat +10 XP per point. It's now a persistent +10% bonus to ALL experience gained per point, for as long as you're exploring that tier's forest -- stacking multiplicatively with every other XP bonus (Community XP, shrines, gear) instead of being a one-off flat add. Squashing/sparing critters, and the -1/+1 reputation shift, are unchanged.",
   ]},

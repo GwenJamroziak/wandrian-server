@@ -177,6 +177,12 @@ for (const stmt of [
   // migrateStaleBridgeSteps() for what it's cleaning up and why a blanket reset (rather than
   // trying to guess which rows are actually corrupt) is the safe choice here.
   "ALTER TABLE leaderboard_bests ADD COLUMN bridge_steps_migrated_v18 INTEGER NOT NULL DEFAULT 0",
+  // v0.18.2 (#8): lifetime Kill Streak record per character, for the new "Max Killstreak"
+  // leaderboard tab -- see index.html's PS.max_kill_streak declaration. DEFAULT 0 means every
+  // existing row on a live deployment just starts showing 0 until that character's next
+  // save (harmless -- nothing else reads or depends on this column, so there's no data to
+  // lose or backfill here, unlike the gold/bridge-steps migrations above).
+  "ALTER TABLE leaderboard_bests ADD COLUMN max_kill_streak INTEGER NOT NULL DEFAULT 0",
 ]) {
   try { db.exec(stmt); } catch (e) { /* column already exists, fine */ }
 }
@@ -535,43 +541,12 @@ app.put("/api/characters/:slot", requireAuth, (req, res) => {
   // just-promoted character has, by definition, taken 0 steps on their new tier's bridge
   // yet. (The client-side double-autosave on the crossing step was also collapsed into a
   // single save to remove the race at its root -- see attemptStep() in index.html.)
-  if (data.character_name && data.class_display_name) {
-    // v0.17.3 (#13): weapon_skills/herbalism_points ride along on the same upsert as
-    // everything else here, stored as excluded.value (current snapshot, not MAX()'d) --
-    // see the ALTER TABLE comment above for why that's correct.
-    const weaponSkillsJson = JSON.stringify(data.weapon_skills || {});
-    db.prepare(
-      `INSERT INTO leaderboard_bests (account_id, character_name, class_name, level, highest_tier_reached, gold, updated_at, hardcore, lifetime_xp, is_dead, last_bridge_steps, xp, weapon_skills, herbalism_points)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
-       ON CONFLICT(account_id, character_name) DO UPDATE SET
-         class_name=excluded.class_name,
-         level=excluded.level,
-         highest_tier_reached=MAX(leaderboard_bests.highest_tier_reached, excluded.highest_tier_reached),
-         gold=excluded.gold,
-         updated_at=excluded.updated_at,
-         hardcore=excluded.hardcore,
-         lifetime_xp=MAX(leaderboard_bests.lifetime_xp, excluded.lifetime_xp),
-         is_dead=0,
-         last_bridge_steps=CASE WHEN excluded.highest_tier_reached > leaderboard_bests.highest_tier_reached THEN 0 ELSE excluded.last_bridge_steps END,
-         xp=excluded.xp,
-         weapon_skills=excluded.weapon_skills,
-         herbalism_points=excluded.herbalism_points`
-    ).run(
-      req.account.id,
-      data.character_name,
-      data.class_display_name,
-      data.level || 1,
-      data.highest_tier_reached || 1,
-      data.gold || 0,
-      nowIso(),
-      data.hardcore ? 1 : 0,
-      data.lifetime_xp || 0,
-      data.last_bridge_steps || 0,
-      data.xp || 0,
-      weaponSkillsJson,
-      data.herbalism_points || 0
-    );
-  }
+  // v0.18.3: this upsert used to be inline here -- extracted to upsertLeaderboardBests()
+  // (defined below, just above the new Broken Bridge Trial endpoint) so the trial endpoint
+  // can share the exact same logic instead of duplicating/risking drift on this SQL. See
+  // that function's own comment for the full column-by-column rationale (MAX() vs
+  // overwrite semantics for each field) -- unchanged by the extraction, just relocated.
+  upsertLeaderboardBests(req.account.id, data);
   res.json({ ok: true, account_gold: getAccountGold(req.account.id) });
 });
 
@@ -619,6 +594,1225 @@ app.delete("/api/characters/:slot", requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+/* ---------------- shared leaderboard upsert helper ----------------
+   v0.18.3: extracted out of PUT /api/characters/:slot (where this logic used to live
+   inline) so the new server-authoritative Broken Bridge Trial endpoint below can call
+   the exact same upsert after IT resolves a promotion/failure, instead of duplicating
+   this SQL block and risking the two copies drifting apart in a future patch. Nothing
+   about the actual column semantics changed -- see each line's own comment for why
+   level/gold/xp/last_bridge_steps/weapon_skills/herbalism_points are current-snapshot
+   overwrites while highest_tier_reached/lifetime_xp/max_kill_streak are MAX()'d lifetime
+   records, and why a promotion (highest_tier_reached rising) forces last_bridge_steps
+   back to 0 regardless of what value rode along with this particular save. */
+function upsertLeaderboardBests(accountId, data) {
+  if (!data.character_name || !data.class_display_name) return;
+  // v0.17.3 (#13): weapon_skills/herbalism_points ride along on the same upsert as
+  // everything else here, stored as excluded.value (current snapshot, not MAX()'d) --
+  // see the ALTER TABLE comment (search "weapon_skills TEXT") for why that's correct.
+  const weaponSkillsJson = JSON.stringify(data.weapon_skills || {});
+  // v0.18.2 (#8): max_kill_streak is a genuine lifetime record (only ever grows for a
+  // given character, exactly like highest_tier_reached/lifetime_xp above) -- MAX()'d
+  // against the existing row rather than overwritten with excluded.value, so an
+  // out-of-order/retried save can never stomp a higher previously-recorded streak back
+  // down to a smaller one.
+  db.prepare(
+    `INSERT INTO leaderboard_bests (account_id, character_name, class_name, level, highest_tier_reached, gold, updated_at, hardcore, lifetime_xp, is_dead, last_bridge_steps, xp, weapon_skills, herbalism_points, max_kill_streak)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+     ON CONFLICT(account_id, character_name) DO UPDATE SET
+       class_name=excluded.class_name,
+       level=excluded.level,
+       highest_tier_reached=MAX(leaderboard_bests.highest_tier_reached, excluded.highest_tier_reached),
+       gold=excluded.gold,
+       updated_at=excluded.updated_at,
+       hardcore=excluded.hardcore,
+       lifetime_xp=MAX(leaderboard_bests.lifetime_xp, excluded.lifetime_xp),
+       is_dead=0,
+       last_bridge_steps=CASE WHEN excluded.highest_tier_reached > leaderboard_bests.highest_tier_reached THEN 0 ELSE excluded.last_bridge_steps END,
+       xp=excluded.xp,
+       weapon_skills=excluded.weapon_skills,
+       herbalism_points=excluded.herbalism_points,
+       max_kill_streak=MAX(leaderboard_bests.max_kill_streak, excluded.max_kill_streak)`
+  ).run(
+    accountId,
+    data.character_name,
+    data.class_display_name,
+    data.level || 1,
+    data.highest_tier_reached || 1,
+    data.gold || 0,
+    nowIso(),
+    data.hardcore ? 1 : 0,
+    data.lifetime_xp || 0,
+    data.last_bridge_steps || 0,
+    data.xp || 0,
+    weaponSkillsJson,
+    data.herbalism_points || 0,
+    data.max_kill_streak || 0
+  );
+}
+
+/* ---------------- Broken Bridge Trial (server-authoritative) ----------------
+   v0.18.3: this is the first concrete piece of the expanded security-hardening scope
+   Gwen asked for after reading server_authoritative_combat_design.md -- explicitly
+   called out as the HIGHEST priority of that whole request ("this is a crucial
+   progression step that I do not want to see get hacked"), ahead of even combat. Every
+   roll that decides whether a plank holds, and every consequence of a pass, a fail, or
+   a full crossing (level/xp/attribute reset, tier promotion, HP/Stamina, fail-streak,
+   max_maze_depth_reached), now happens HERE, server-side, against the server's own
+   stored copy of the character row. A modified client can still ask the server for a
+   ruling, but it can no longer fabricate the ruling itself, invent a "safe" plank, or
+   skip straight to a promotion.
+
+   Deliberately a small, self-contained mirror of the handful of CLASSES/Balance facts
+   this ONE mechanic actually needs (tier, next_class, display_name, base attributes,
+   base_hp/hp_per_level, and the bridge/level/xp formulas) -- see index.html's own
+   CLASSES table and Balance object for the authoritative client-side copies these are
+   kept in sync with by hand. A server test (v0183_trial_server_test.js) pins the exact
+   numbers below so any future drift between the two copies is caught immediately
+   instead of silently shipping a mismatched trial.
+
+   v0.18.3 SCOPE NOTE (HP/Stamina after a resolution): computed here with the SIMPLE
+   base formula (class.base_hp, TRIAL_STAMINA_MAX_BASE) rather than porting the full
+   gearBonus()/canEquipGear()/affix-total dependency chain -- omitting gear bonuses can
+   only ever UNDERSHOOT the true max, never oversell an advantage, and the client's very
+   next autosave (still flowing through the existing, untightened PUT
+   /api/characters/:slot) corrects the displayed/stored HP/Stamina to the fully accurate
+   figure moments later regardless. A deliberate scope-narrowing decision to keep this
+   port focused on the RNG-sensitive, progression-critical logic. */
+
+// Tier / next-class / base-attribute subset of index.html's CLASSES table -- only what
+// a trial resolution needs (nothing about role/description/damage/crit/armor/regen).
+const TRIAL_CLASSES = {
+  wizard:      { tier: 1, next_class: "sorcerer",    display_name: "Wizard",      base_hp: 60,  hp_per_level: 8,  base_str: 2,  base_dex: 6,  base_vit: 16, base_int: 16 },
+  thornguard:  { tier: 1, next_class: "stonewarden", display_name: "Thornguard",  base_hp: 100, hp_per_level: 14, base_str: 16, base_dex: 6,  base_vit: 16, base_int: 2 },
+  windrider:   { tier: 1, next_class: "galestrider", display_name: "Windrider",   base_hp: 75,  hp_per_level: 10, base_str: 4,  base_dex: 16, base_vit: 16, base_int: 4 },
+  sorcerer:    { tier: 2, next_class: "warlock",     display_name: "Sorcerer",    base_hp: 80,  hp_per_level: 10, base_str: 3,  base_dex: 8,  base_vit: 20, base_int: 21 },
+  stonewarden: { tier: 2, next_class: "treesinger",  display_name: "Stonewarden", base_hp: 140, hp_per_level: 18, base_str: 20, base_dex: 8,  base_vit: 21, base_int: 3 },
+  galestrider: { tier: 2, next_class: "shadowbloom", display_name: "Galestrider", base_hp: 100, hp_per_level: 13, base_str: 5,  base_dex: 21, base_vit: 21, base_int: 5 },
+  warlock:     { tier: 3, next_class: "necromancer", display_name: "Warlock",     base_hp: 105, hp_per_level: 13, base_str: 3,  base_dex: 10, base_vit: 27, base_int: 26 },
+  treesinger:  { tier: 3, next_class: "rootbinder",  display_name: "Treesinger",  base_hp: 160, hp_per_level: 20, base_str: 27, base_dex: 10, base_vit: 26, base_int: 3 },
+  shadowbloom: { tier: 3, next_class: "druid",       display_name: "Shadowbloom", base_hp: 125, hp_per_level: 16, base_str: 7,  base_dex: 26, base_vit: 26, base_int: 7 },
+  necromancer: { tier: 4, next_class: "archmage",    display_name: "Summoner",    base_hp: 135, hp_per_level: 17, base_str: 4,  base_dex: 12, base_vit: 33, base_int: 33 },
+  rootbinder:  { tier: 4, next_class: "emberpriest", display_name: "Rootbinder",  base_hp: 210, hp_per_level: 26, base_str: 33, base_dex: 12, base_vit: 33, base_int: 4 },
+  druid:       { tier: 4, next_class: "galeshaper",  display_name: "Druid",       base_hp: 160, hp_per_level: 20, base_str: 8,  base_dex: 33, base_vit: 33, base_int: 8 },
+  emberpriest: { tier: 5, next_class: null,          display_name: "Emberpriest", base_hp: 190, hp_per_level: 24, base_str: 40, base_dex: 15, base_vit: 40, base_int: 5 },
+  archmage:    { tier: 5, next_class: null,          display_name: "Archmage",    base_hp: 165, hp_per_level: 21, base_str: 5,  base_dex: 15, base_vit: 40, base_int: 40 },
+  galeshaper:  { tier: 5, next_class: null,          display_name: "Galeshaper",  base_hp: 195, hp_per_level: 25, base_str: 10, base_dex: 40, base_vit: 40, base_int: 10 },
+};
+
+// Balance-equivalent constants/formulas, ported verbatim from index.html's Balance
+// object -- see that file's own comments (search "BRIDGE_ROWS", "STARTING_STAT_POINTS")
+// for the full rationale behind these exact numbers.
+const TRIAL_BRIDGE_ROWS = 10, TRIAL_BRIDGE_MIN_PLANKS = 2, TRIAL_BRIDGE_MAX_PLANKS = 5;
+const TRIAL_LEVEL_REQUIREMENT_PER_TIER = 10;
+const TRIAL_STARTING_STAT_POINTS = 3;
+const TRIAL_STAMINA_MAX_BASE = 100.0;
+const TRIAL_KILLS_PER_LEVEL_TARGET = 20, TRIAL_MONSTER_BASE_XP = 8.0, TRIAL_LEVEL_XP_GROWTH = 0.11;
+
+function trialClampi(n, lo, hi) { return Math.max(lo, Math.min(hi, Math.round(n))); }
+function trialBridgePlankCount(tier) { return trialClampi((tier || 1) + 1, TRIAL_BRIDGE_MIN_PLANKS, TRIAL_BRIDGE_MAX_PLANKS); }
+function trialLevelRequirement(tier) { return trialClampi(tier || 1, 1, 4) * TRIAL_LEVEL_REQUIREMENT_PER_TIER; }
+function trialXpRequiredForLevel(level) {
+  return Math.round(TRIAL_KILLS_PER_LEVEL_TARGET * TRIAL_MONSTER_BASE_XP * Math.pow(1.0 + TRIAL_LEVEL_XP_GROWTH, level));
+}
+
+// Mirrors PS._resetAttributesToClassBase() + the surrounding reset lines in
+// PS.resolveMasterTrial() (index.html): level/xp back to the very start, attributes
+// reset to the (possibly newly-promoted) class's own base stats plus `startingPoints`
+// unspent points, HP/Stamina maxed out, max_maze_depth_reached back to 1. Mutates
+// `data` (the character's parsed JSON blob) in place.
+function applyTrialResolutionReset(data, classId, startingPoints) {
+  const c = TRIAL_CLASSES[classId];
+  data.level = 1;
+  data.xp = 0;
+  data.xp_to_next = trialXpRequiredForLevel(1);
+  data.attributes = { str: c.base_str || 5, dex: c.base_dex || 5, vit: c.base_vit || 5, int: c.base_int || 5 };
+  data.unspent_stat_points = startingPoints;
+  data.bonus_hp_from_attributes = 0;
+  data.bonus_stamina_from_attributes = 0;
+  // getMaxHp()'s (level-1)*hp_per_level term is 0 at level 1, and gear/attribute bonuses
+  // are both freshly zeroed above -- so base_hp alone is the exact, correct level-1 max
+  // (see this section's top-of-file SCOPE NOTE for why gear is deliberately excluded).
+  data.current_hp = c.base_hp || 50;
+  data.current_stamina = TRIAL_STAMINA_MAX_BASE;
+  data.max_maze_depth_reached = 1;
+}
+
+app.post("/api/trial/attempt", requireAuth, (req, res) => {
+  const slot = Number(req.body?.slot);
+  const plankIndex = Number(req.body?.plank_index);
+  if (!Number.isInteger(slot) || slot < 0 || slot >= MAX_CHARACTER_SLOTS) {
+    return res.status(400).json({ error: "Invalid slot." });
+  }
+  if (!Number.isInteger(plankIndex) || plankIndex < 0) {
+    return res.status(400).json({ error: "Invalid plank_index." });
+  }
+
+  const row = db.prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?").get(req.account.id, slot);
+  if (!row) return res.status(404).json({ error: "No character in that slot." });
+  let data;
+  try {
+    data = JSON.parse(row.data);
+  } catch (e) {
+    return res.status(500).json({ error: "Corrupt character save." });
+  }
+
+  const classId = data.class_id;
+  const classInfo = TRIAL_CLASSES[classId];
+  if (!classInfo) return res.status(400).json({ error: "Unknown class for this character." });
+  const nextClassId = classInfo.next_class;
+  // Mirrors screenMasterTrial()'s own gate: a character at the final tier of its chain
+  // has no further trial to attempt -- the client never even shows plank buttons in this
+  // case, so a request reaching here with no next_class is necessarily a bypassed client.
+  if (!nextClassId) return res.status(400).json({ error: "This class has no further trial to attempt." });
+
+  const currentTier = classInfo.tier || 1;
+  const levelReq = trialLevelRequirement(currentTier);
+  const level = data.level || 1;
+  if (level < levelReq) {
+    return res.status(400).json({ error: `Must reach Level ${levelReq} before attempting this trial.` });
+  }
+
+  // Server's own authoritative mirror of PS.trial_progress (getTrialProgress() client-
+  // side) -- lives in the same stored JSON blob the client already round-trips as
+  // data.trial_progress, keyed per class_id, so there is nothing new to migrate.
+  if (!data.trial_progress || typeof data.trial_progress !== "object") data.trial_progress = {};
+  if (!data.trial_progress[classId] || typeof data.trial_progress[classId] !== "object") {
+    data.trial_progress[classId] = { stage: 0, discoveredSides: [], stepFailedPlanks: {} };
+  }
+  const progress = data.trial_progress[classId];
+  if (!Array.isArray(progress.discoveredSides)) progress.discoveredSides = [];
+  if (!progress.stepFailedPlanks || typeof progress.stepFailedPlanks !== "object") progress.stepFailedPlanks = {};
+
+  const plankCount = trialBridgePlankCount(currentTier);
+  if (plankIndex >= plankCount) {
+    return res.status(400).json({ error: "plank_index out of range for this tier's bridge." });
+  }
+  const stepIdx = progress.discoveredSides.length;
+  if (stepIdx >= TRIAL_BRIDGE_ROWS) {
+    return res.status(400).json({ error: "This trial attempt has already been fully resolved." });
+  }
+  const failedHere = progress.stepFailedPlanks[stepIdx] || [];
+  if (failedHere.includes(plankIndex)) {
+    return res.status(400).json({ error: "That plank is already known to be broken at this step." });
+  }
+
+  // The exact same "the bridge remembers the faulty plank" guarantee the client's local
+  // roll used to provide: once every OTHER plank at this step has already failed, the
+  // one remaining plank is certain to hold, so a step can never become unwinnable.
+  const remaining = plankCount - failedHere.length;
+  const passed = remaining <= 1 ? true : Math.random() < 1 / remaining;
+  const nowStr = nowIso();
+
+  if (!passed) {
+    failedHere.push(plankIndex);
+    progress.stepFailedPlanks[stepIdx] = failedHere;
+    // v0.17 (#1): stepIdx is exactly "how many steps were already cleared when this one
+    // broke" -- the leaderboard's public step count. Only ever updated on a failure, same
+    // as the client-side field this mirrors.
+    data.last_bridge_steps = stepIdx;
+    data.bridge_fail_streak = (data.bridge_fail_streak || 0) + 1;
+    applyTrialResolutionReset(data, classId, TRIAL_STARTING_STAT_POINTS + data.bridge_fail_streak);
+    data._save_seq = (data._save_seq || 0) + 1;
+    db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(
+      JSON.stringify(data),
+      nowStr,
+      req.account.id,
+      slot
+    );
+    upsertLeaderboardBests(req.account.id, data);
+    broadcastSystemMessage(
+      `${data.character_name || "A traveler"} (Lv ${level} ${classInfo.display_name}) has failed the broken bridge trial at step ${stepIdx + 1}.`
+    );
+    return res.json({
+      ok: true,
+      outcome: "failed",
+      failed_step_index: stepIdx,
+      plank_index: plankIndex,
+      discovered_sides: progress.discoveredSides,
+      step_failed_planks: progress.stepFailedPlanks,
+      level: data.level,
+      xp: data.xp,
+      xp_to_next: data.xp_to_next,
+      attributes: data.attributes,
+      unspent_stat_points: data.unspent_stat_points,
+      current_hp: data.current_hp,
+      current_stamina: data.current_stamina,
+      max_maze_depth_reached: data.max_maze_depth_reached,
+      last_bridge_steps: data.last_bridge_steps,
+      bridge_fail_streak: data.bridge_fail_streak,
+      _save_seq: data._save_seq,
+    });
+  }
+
+  // Passed this step.
+  progress.discoveredSides.push(plankIndex);
+  const fullyCrossed = progress.discoveredSides.length >= TRIAL_BRIDGE_ROWS;
+
+  if (!fullyCrossed) {
+    data._save_seq = (data._save_seq || 0) + 1;
+    db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(
+      JSON.stringify(data),
+      nowStr,
+      req.account.id,
+      slot
+    );
+    return res.json({
+      ok: true,
+      outcome: "passed_step",
+      plank_index: plankIndex,
+      discovered_sides: progress.discoveredSides,
+      step_failed_planks: progress.stepFailedPlanks,
+      _save_seq: data._save_seq,
+    });
+  }
+
+  // Full crossing: promotion to the next class in this chain.
+  data.highest_tier_reached = Math.max(data.highest_tier_reached || 1, currentTier + 1);
+  data.class_id = nextClassId;
+  data.class_display_name = TRIAL_CLASSES[nextClassId].display_name;
+  data.last_bridge_steps = 0;
+  data.bridge_fail_streak = 0;
+  // A fresh promotion means 0 steps taken so far on the NEW tier's bridge -- clear (not
+  // carry over) this class_id's trial_progress entry, mirroring the client's own
+  // `PS.trial_progress[PS.class_id]={...}` reset right after resolveMasterTrial(true).
+  data.trial_progress[nextClassId] = { stage: 0, discoveredSides: [], stepFailedPlanks: {} };
+  applyTrialResolutionReset(data, nextClassId, TRIAL_STARTING_STAT_POINTS);
+  data._save_seq = (data._save_seq || 0) + 1;
+  db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(
+    JSON.stringify(data),
+    nowStr,
+    req.account.id,
+    slot
+  );
+  upsertLeaderboardBests(req.account.id, data);
+  broadcastSystemMessage(
+    `${data.character_name || "A traveler"} (Lv ${level} ${classInfo.display_name}) has passed the broken bridge trial and is now a ${data.class_display_name}.`
+  );
+  return res.json({
+    ok: true,
+    outcome: "promoted",
+    final_tier: !TRIAL_CLASSES[nextClassId].next_class,
+    new_class_id: data.class_id,
+    new_class_display_name: data.class_display_name,
+    level: data.level,
+    xp: data.xp,
+    xp_to_next: data.xp_to_next,
+    attributes: data.attributes,
+    unspent_stat_points: data.unspent_stat_points,
+    current_hp: data.current_hp,
+    current_stamina: data.current_stamina,
+    max_maze_depth_reached: data.max_maze_depth_reached,
+    last_bridge_steps: data.last_bridge_steps,
+    bridge_fail_streak: data.bridge_fail_streak,
+    _save_seq: data._save_seq,
+  });
+});
+
+/* ---------------- Gear item authenticity validation (v0.18.4) ----------------
+   Shared by the Blacksmith reroll endpoint just below, the Auction House listing route,
+   and the Storage Vault PUT route -- anywhere a gear item JSON blob arrives from the
+   client and gets persisted or traded, it must pass this bounds check first. Mirrors
+   index.html's IF.generate()/Balance.affixMaxForTier() rules just closely enough to
+   catch a FABRICATED item (impossible tier, an affix count that doesn't match its own
+   rarity, an affix value beyond what that tier could ever legitimately roll, an unknown
+   affix stat) without needing full server-side item generation or per-item provenance
+   tracking (that's real future work -- see the anti-cheat roadmap discussion at the top
+   of this file). This does NOT prove a given item was actually EARNED through combat/
+   crafting, only that its numbers are within what the game's own generation rules could
+   ever produce -- closing the "list/stash an impossible perfect-rolled item" vector
+   specifically, which is the concrete duplication/manipulation risk Gwen flagged for
+   the Auction House and Storage Vault. */
+const ITEM_TIER_MAX = 5;
+const ITEM_AFFIX_POOL = [
+  "damage", "hp", "crit", "armor", "regen", "gold_find", "xp_find", "stamina_max",
+  "strength", "dexterity", "vitality", "intelligence", "poison_resist", "magic_find",
+];
+const ITEM_AFFIX_TIER1_MAX = {
+  damage: 5, hp: 15, crit: 5, armor: 20, regen: 5, gold_find: 10, xp_find: 1,
+  stamina_max: 15, strength: 5, dexterity: 5, vitality: 5, intelligence: 5, poison_resist: 5,
+  magic_find: 10,
+};
+// index.html's RARITY_TABLE's `slots` field, keyed by the RARITY_TABLE `name` (internal
+// name, not the player-facing RARITY_DISPLAY_NAMES wording -- items store the internal
+// name, e.g. "Epic" is displayed to players as "Rare").
+const ITEM_RARITY_SLOTS = { Common: 1, Uncommon: 2, Rare: 3, Epic: 5, Legendary: 8 };
+const ITEM_GENERATION_SLOTS = ["weapon", "head", "shoulders", "armor", "pants", "gloves", "boots", "ring", "amulet", "belt"];
+const ITEM_ELEMENT_IDS = ["fire", "wind", "earth", "water"];
+const ITEM_WEAPON_DAMAGE_AFFIX_MULT = 1.40;
+const ITEM_SALVAGE_MATERIALS_PER_SLOT = 3, ITEM_REROLL_MATERIAL_COST_MULT = 2;
+
+// Upper-bound-only override, used SOLELY by validateGearItem's "is this affix value even
+// plausible" check below -- never by the actual reroll/generation math, which always uses
+// the live ITEM_AFFIX_TIER1_MAX above. A stat's live-tuning max can be REDUCED later as a
+// balance nerf (index.html's own comment on xp_find: its Tier-1 max was 10, hotfixed down
+// to 1 in v0.17.2 (#4) because it was far too strong) -- an item legitimately rolled back
+// when the max was still 10 must not start failing validation retroactively just because
+// today's max is tighter. This map is deliberately the LOOSEST ceiling any stat has ever
+// had; update it here (never the live map above) if a future balance pass tightens another
+// stat's max.
+const ITEM_AFFIX_TIER1_MAX_CEILING = Object.assign({}, ITEM_AFFIX_TIER1_MAX, { xp_find: 10 });
+
+function itemAffixMaxForTier(stat, tier) {
+  const base = ITEM_AFFIX_TIER1_MAX[stat];
+  return base != null ? base * tier : 0;
+}
+function itemAffixCeilingForTier(stat, tier) {
+  const base = ITEM_AFFIX_TIER1_MAX_CEILING[stat];
+  return base != null ? base * tier : 0;
+}
+function itemSalvageValue(tier, slots) { return Math.round(Math.pow(tier, 1.5) * slots * ITEM_SALVAGE_MATERIALS_PER_SLOT); }
+function itemRerollCost(tier, slots) { return itemSalvageValue(tier, slots) * ITEM_REROLL_MATERIAL_COST_MULT; }
+
+// Returns null if `item` is a plausible gear item the game's own generation rules could
+// have produced, or a short player-facing string describing what's wrong with it.
+function validateGearItem(item) {
+  if (!item || typeof item !== "object") return "Invalid item.";
+  const tier = item.tier;
+  if (!Number.isInteger(tier) || tier < 1 || tier > ITEM_TIER_MAX) return "Invalid item tier.";
+  if (!ITEM_GENERATION_SLOTS.includes(item.slot)) return "Invalid item slot.";
+  const slotCount = ITEM_RARITY_SLOTS[item.rarity];
+  if (slotCount == null) return "Invalid item rarity.";
+  if (item.element && !ITEM_ELEMENT_IDS.includes(item.element)) return "Invalid item element.";
+  if (!Array.isArray(item.affixes)) return "Invalid item affixes.";
+  let statCount = 0, eyesightCount = 0;
+  for (const a of item.affixes) {
+    if (!a || typeof a.stat !== "string" || !Number.isFinite(a.value)) return "Invalid affix entry.";
+    if (a.stat === "eyesight") {
+      eyesightCount++;
+      // EYESIGHT_AFFIX_CHANCE grants a fixed +2 -- it never scales with tier like a normal
+      // AFFIX_POOL stat does, so any other value is definitely fabricated.
+      if (a.value !== 2) return "Invalid eyesight affix value.";
+      continue;
+    }
+    if (!ITEM_AFFIX_POOL.includes(a.stat)) return "Unknown affix stat.";
+    let max = itemAffixCeilingForTier(a.stat, tier);
+    if (item.slot === "weapon" && a.stat === "damage") max = Math.round(max * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
+    if (a.value < 1 || a.value > max) return `Affix "${a.stat}" value is beyond what a Tier ${tier} item could roll.`;
+    statCount++;
+  }
+  if (eyesightCount > 1) return "An item can only carry one Eyesight affix.";
+  // IF.generate() always rolls exactly `slotCount` normal stat affixes (min(slotCount,
+  // pool.length), and pool.length=14 is never the limiting factor) -- so a legitimate
+  // item's normal-affix count always matches its own rarity's slot count exactly.
+  if (statCount !== slotCount) return "Affix count doesn't match this item's rarity.";
+  return null;
+}
+
+// v0.18.4: the Blacksmith's Reroll button used to run entirely client-side (PS.rerollGear()
+// deducted materials and called IF.reroll() locally, then just autosaved whatever the
+// client claims the outcome was) -- a modified client could report back a "reroll" that
+// actually just directly wrote max-roll affixes onto the item with zero material cost.
+// This endpoint moves the whole decision server-side: it validates the request, re-checks
+// the item is a plausible one to begin with (see validateGearItem above), verifies+deducts
+// the material cost against the server's own stored `materials` figure, and rolls every new
+// affix value itself, mirroring IF.reroll()'s exact algorithm (same stats survive, only the
+// numbers change). The Blacksmith UI/flow is unchanged -- same button, same cost preview,
+// same instant result -- only the RNG and the outcome now come from the server.
+app.post("/api/blacksmith/reroll", requireAuth, (req, res) => {
+  const slot = Number(req.body?.slot);
+  const instanceId = req.body?.instance_id;
+  if (!Number.isInteger(slot) || slot < 0 || slot >= MAX_CHARACTER_SLOTS) {
+    return res.status(400).json({ error: "Invalid slot." });
+  }
+  if (typeof instanceId !== "string" || !instanceId) {
+    return res.status(400).json({ error: "Invalid instance_id." });
+  }
+
+  const row = db.prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?").get(req.account.id, slot);
+  if (!row) return res.status(404).json({ error: "No character in that slot." });
+  let data;
+  try {
+    data = JSON.parse(row.data);
+  } catch (e) {
+    return res.status(500).json({ error: "Corrupt character save." });
+  }
+
+  // Rerolling is only ever offered from the Blacksmith's backpack list (equipped gear
+  // must be unequipped first) -- mirrors PS.findGearIndex()'s own search scope, which
+  // never looks at PS.equipped.
+  const gearList = Array.isArray(data.gear_instances) ? data.gear_instances : [];
+  const idx = gearList.findIndex((g) => g && g.instance_id === instanceId);
+  if (idx === -1) return res.status(404).json({ error: "That item isn't in your backpack." });
+  const inst = gearList[idx];
+
+  // Reject outright if the item itself is already implausible -- a modified client
+  // shouldn't be able to launder a fabricated item into legitimacy just by asking the
+  // server to reroll it (the reroll below only touches affix VALUES for the stats
+  // already present, so a fabricated tier/rarity/slot/affix-set would otherwise sail
+  // through completely untouched).
+  const itemError = validateGearItem(inst);
+  if (itemError) return res.status(400).json({ error: `This item can't be rerolled: ${itemError}` });
+
+  // IF.slotCount(inst) counts EVERY affix including a bonus Eyesight roll -- matches the
+  // cost the client already previews on the Reroll button.
+  const totalSlotCount = (inst.affixes || []).length;
+  const cost = itemRerollCost(inst.tier, totalSlotCount);
+  const materials = data.materials || 0;
+  if (materials < cost) return res.status(400).json({ error: `Not enough materials -- this reroll costs ${cost}.` });
+
+  // The actual roll: the SERVER picks a fresh value for every existing affix (same stats,
+  // same count -- only the numbers change), exactly mirroring IF.reroll()'s algorithm.
+  // This is the specific fix for the "blacksmith's reroll stat outcome mustn't be
+  // manipulable to a perfect roll" concern -- a modified client can still ask for a
+  // reroll, but it can no longer dictate what comes back.
+  const newAffixes = inst.affixes.map((a) => {
+    if (a.stat === "eyesight") return { stat: a.stat, value: a.value };
+    let max = itemAffixMaxForTier(a.stat, inst.tier);
+    if (inst.slot === "weapon" && a.stat === "damage") max = Math.round(max * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
+    const value = 1 + Math.floor(Math.random() * max);
+    return { stat: a.stat, value };
+  });
+  const rerolled = Object.assign({}, inst, { affixes: newAffixes });
+  gearList[idx] = rerolled;
+  data.gear_instances = gearList;
+  data.materials = materials - cost;
+  data._save_seq = (data._save_seq || 0) + 1;
+
+  db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(
+    JSON.stringify(data),
+    nowIso(),
+    req.account.id,
+    slot
+  );
+
+  res.json({ ok: true, item: rerolled, materials: data.materials, _save_seq: data._save_seq });
+});
+
+/* ================= Server-authoritative Combat (v0.19) =================
+   Implements server_authoritative_combat_design.md's Phase 1: every roll that decides a
+   fight's outcome (monster block/damage, player crit/damage/block, the monster's counter,
+   flee, loot, XP, gold, leveling, weapon-skill proficiency) now happens HERE, against the
+   server's own stored copy of the character and a server-held combat_sessions row for the
+   monster's HP -- not inside screenCombat()'s old Math.random()-driven playerTurn()/
+   attemptFlee(). A modified client can still ask for a ruling on each Attack/Flee/potion
+   click, but it can no longer fabricate the ruling itself.
+
+   SCOPE NOTE ON DEATH (deliberate, not an oversight): when a round drops the player's HP
+   below 1, this code clamps current_hp to 0, persists that, marks the session `lost`, and
+   returns `fatal:true` -- but does NOT itself run the softcore gold/XP/item-loss penalty or
+   the hardcore permadeath/graveyard flow. Those stay exactly where they already are
+   (PS.handleDeath/applyDeathPenalty in index.html, invoked by the client the instant it sees
+   fatal:true), for two reasons: (1) porting the FULL death economy -- item-loss random
+   selection across equipped+backpack, hardcore character deletion, graveyard insertion --
+   is a large, first-time port of delicate, data-destroying logic in its own right, and the
+   one thing this phase must never do is rush that under the same change that's meant to
+   IMPROVE data safety; (2) the exploitable surface here is winning (fabricating damage/loot/
+   XP/gold), not losing -- a manipulated client faking a smaller death PENALTY than deserved
+   is the same pre-existing "client-trusted PUT /api/characters/:slot" trust boundary the
+   design doc itself explicitly scoped to a later "validate on save" phase, not a new
+   regression introduced here. What's actually closed by this file is the ability to fabricate
+   a fight's outcome to AVOID ever reaching 0 HP, or to invent kills/loot/XP/gold that never
+   happened -- that's the concrete request ("per attack round server validation").
+
+   SCOPE NOTE ON MAZE LEGITIMACY: `is_guardian`/`is_roamer` flags and the monster id/area
+   level are still client-asserted at /api/combat/start, same explicitly-flagged gap the
+   design doc calls out ("no independent knowledge of maze layout yet"). What IS validated:
+   the area level must be one this character has actually reached (max_maze_depth_reached),
+   and the monster id must be a real monster whose tier is actually available at that area
+   level (mirrors DL.pickRandomMonsterForArea's own gating) -- closing the "claim area level
+   1 unlocks an Epic-tier fight" version of this gap, even though "was there really a
+   guardian on that tile" isn't provable without server-side maze state (tracked separately,
+   see BACKLOG task #483/#484).
+*/
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS combat_sessions (
+    id TEXT PRIMARY KEY,
+    account_id INTEGER NOT NULL,
+    slot INTEGER NOT NULL,
+    monster_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    area_level INTEGER NOT NULL,
+    max_hp REAL NOT NULL,
+    hp REAL NOT NULL,
+    dmg_min REAL NOT NULL,
+    dmg_max REAL NOT NULL,
+    xp REAL NOT NULL,
+    gold_min INTEGER NOT NULL,
+    gold_max INTEGER NOT NULL,
+    loot_table TEXT NOT NULL,
+    is_guardian INTEGER NOT NULL DEFAULT 0,
+    is_roamer INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+`);
+
+// Full combat-relevant subset of index.html's CLASSES table (adds chain/damage/crit/armor/
+// regen on top of what TRIAL_CLASSES above already carries -- kept as its own object rather
+// than extending TRIAL_CLASSES so the already-shipped, already-tested Trial endpoint can
+// never be affected by anything combat-specific).
+const COMBAT_CLASSES = {
+  wizard:      { tier: 1, chain: "wizard",      base_hp: 60,  hp_per_level: 8,  base_damage_min: 8,  base_damage_max: 14, damage_per_level: 1.4, base_crit: 0.05, armor: 0.0,  regen: 0.0 },
+  thornguard:  { tier: 1, chain: "thornguard",  base_hp: 100, hp_per_level: 14, base_damage_min: 6,  base_damage_max: 10, damage_per_level: 1.1, base_crit: 0.05, armor: 0.15, regen: 0.0 },
+  windrider:   { tier: 1, chain: "windrider",   base_hp: 75,  hp_per_level: 10, base_damage_min: 7,  base_damage_max: 12, damage_per_level: 1.2, base_crit: 0.20, armor: 0.0,  regen: 0.0 },
+  sorcerer:    { tier: 2, chain: "wizard",      base_hp: 80,  hp_per_level: 10, base_damage_min: 12, base_damage_max: 20, damage_per_level: 1.9, base_crit: 0.08, armor: 0.0,  regen: 0.0 },
+  stonewarden: { tier: 2, chain: "thornguard",  base_hp: 140, hp_per_level: 18, base_damage_min: 10, base_damage_max: 16, damage_per_level: 1.6, base_crit: 0.10, armor: 0.12, regen: 0.0 },
+  galestrider: { tier: 2, chain: "windrider",   base_hp: 100, hp_per_level: 13, base_damage_min: 11, base_damage_max: 18, damage_per_level: 1.7, base_crit: 0.25, armor: 0.0,  regen: 0.0 },
+  warlock:     { tier: 3, chain: "wizard",      base_hp: 105, hp_per_level: 13, base_damage_min: 16, base_damage_max: 26, damage_per_level: 2.4, base_crit: 0.10, armor: 0.0,  regen: 1.0 },
+  treesinger:  { tier: 3, chain: "thornguard",  base_hp: 160, hp_per_level: 20, base_damage_min: 14, base_damage_max: 22, damage_per_level: 2.0, base_crit: 0.15, armor: 0.18, regen: 2.5 },
+  shadowbloom: { tier: 3, chain: "windrider",   base_hp: 125, hp_per_level: 16, base_damage_min: 18, base_damage_max: 28, damage_per_level: 2.4, base_crit: 0.35, armor: 0.0,  regen: 0.0 },
+  necromancer: { tier: 4, chain: "wizard",      base_hp: 135, hp_per_level: 17, base_damage_min: 22, base_damage_max: 34, damage_per_level: 3.0, base_crit: 0.12, armor: 0.0,  regen: 1.5 },
+  rootbinder:  { tier: 4, chain: "thornguard",  base_hp: 210, hp_per_level: 26, base_damage_min: 18, base_damage_max: 28, damage_per_level: 2.6, base_crit: 0.12, armor: 0.25, regen: 3.5 },
+  druid:       { tier: 4, chain: "windrider",   base_hp: 160, hp_per_level: 20, base_damage_min: 24, base_damage_max: 36, damage_per_level: 3.1, base_crit: 0.20, armor: 0.08, regen: 2.0 },
+  emberpriest: { tier: 5, chain: "thornguard",  base_hp: 190, hp_per_level: 24, base_damage_min: 16, base_damage_max: 24, damage_per_level: 2.3, base_crit: 0.10, armor: 0.20, regen: 6.0 },
+  archmage:    { tier: 5, chain: "wizard",      base_hp: 165, hp_per_level: 21, base_damage_min: 28, base_damage_max: 42, damage_per_level: 3.6, base_crit: 0.15, armor: 0.0,  regen: 2.0 },
+  galeshaper:  { tier: 5, chain: "windrider",   base_hp: 195, hp_per_level: 25, base_damage_min: 30, base_damage_max: 44, damage_per_level: 3.8, base_crit: 0.28, armor: 0.10, regen: 2.4 },
+};
+
+// Verbatim mirror of index.html's MONSTERS array (id/tier/base stats/loot_table only -- name
+// is used to build the combat log/session `name` field).
+const COMBAT_MONSTERS = [
+  { id: "sprout", name: "Sprout", tier: "common", base_hp: 20, base_damage_min: 2, base_damage_max: 4, base_xp: 8, gold_min: 1, gold_max: 4, loot_table: "common" },
+  { id: "mosshide", name: "Mosshide", tier: "common", base_hp: 22, base_damage_min: 3, base_damage_max: 6, base_xp: 8, gold_min: 2, gold_max: 5, loot_table: "common" },
+  { id: "windwisp", name: "Windwisp", tier: "common", base_hp: 16, base_damage_min: 2, base_damage_max: 5, base_xp: 7, gold_min: 1, gold_max: 3, loot_table: "common" },
+  { id: "pebblekin", name: "Pebblekin", tier: "common", base_hp: 26, base_damage_min: 3, base_damage_max: 6, base_xp: 9, gold_min: 2, gold_max: 5, loot_table: "common" },
+  { id: "cinderling", name: "Cinderling", tier: "common", base_hp: 24, base_damage_min: 4, base_damage_max: 7, base_xp: 9, gold_min: 2, gold_max: 6, loot_table: "common" },
+  { id: "bramble_knight", name: "Bramble Knight", tier: "uncommon", base_hp: 38, base_damage_min: 6, base_damage_max: 10, base_xp: 12, gold_min: 4, gold_max: 10, loot_table: "uncommon" },
+  { id: "thornling", name: "Thornling", tier: "uncommon", base_hp: 32, base_damage_min: 6, base_damage_max: 10, base_xp: 12, gold_min: 3, gold_max: 9, loot_table: "uncommon" },
+  { id: "boglurker", name: "Boglurker", tier: "uncommon", base_hp: 42, base_damage_min: 5, base_damage_max: 9, base_xp: 12, gold_min: 3, gold_max: 8, loot_table: "uncommon" },
+  { id: "emberkin", name: "Emberkin", tier: "uncommon", base_hp: 28, base_damage_min: 7, base_damage_max: 12, base_xp: 13, gold_min: 4, gold_max: 9, loot_table: "uncommon" },
+  { id: "fernstalker", name: "Fernstalker", tier: "uncommon", base_hp: 30, base_damage_min: 8, base_damage_max: 13, base_xp: 13, gold_min: 4, gold_max: 10, loot_table: "uncommon" },
+  { id: "vinewraith", name: "Vinewraith", tier: "rare", base_hp: 65, base_damage_min: 10, base_damage_max: 16, base_xp: 18, gold_min: 8, gold_max: 16, loot_table: "rare" },
+  { id: "stumplurker", name: "Stumplurker", tier: "rare", base_hp: 58, base_damage_min: 9, base_damage_max: 15, base_xp: 17, gold_min: 7, gold_max: 15, loot_table: "rare" },
+  { id: "ashwalker", name: "Ashwalker", tier: "rare", base_hp: 60, base_damage_min: 8, base_damage_max: 14, base_xp: 18, gold_min: 8, gold_max: 18, loot_table: "rare" },
+  { id: "stormroot", name: "Stormroot", tier: "rare", base_hp: 50, base_damage_min: 11, base_damage_max: 18, base_xp: 19, gold_min: 8, gold_max: 17, loot_table: "rare" },
+  { id: "bark_golem", name: "Bark Golem", tier: "rare", base_hp: 90, base_damage_min: 9, base_damage_max: 14, base_xp: 20, gold_min: 10, gold_max: 20, loot_table: "rare" },
+  { id: "ancient_treant", name: "Ancient Treant", tier: "epic", base_hp: 95, base_damage_min: 16, base_damage_max: 24, base_xp: 30, gold_min: 16, gold_max: 28, loot_table: "epic" },
+  { id: "wildfire", name: "Wildfire", tier: "epic", base_hp: 100, base_damage_min: 18, base_damage_max: 28, base_xp: 34, gold_min: 18, gold_max: 32, loot_table: "epic" },
+  { id: "stonewaker", name: "Stonewaker", tier: "epic", base_hp: 110, base_damage_min: 17, base_damage_max: 26, base_xp: 32, gold_min: 17, gold_max: 30, loot_table: "epic" },
+  { id: "tempest_elm", name: "Tempest Elm", tier: "epic", base_hp: 105, base_damage_min: 19, base_damage_max: 29, base_xp: 36, gold_min: 19, gold_max: 34, loot_table: "epic" },
+];
+
+// Verbatim mirror of index.html's LOOT_TABLES.
+const COMBAT_LOOT_TABLES = {
+  common: [{ type: "nothing", weight: 155 }, { type: "gear", weight: 50 }, { type: "consumable", weight: 66, item_id: "minor_health_potion" }, { type: "herb", weight: 1, herb_id: "sunpetal" }, { type: "consumable", weight: 26, item_id: "dry_branch" }],
+  uncommon: [{ type: "nothing", weight: 139 }, { type: "gear", weight: 66 }, { type: "consumable", weight: 50, item_id: "health_potion" }, { type: "herb", weight: 1, herb_id: "emberroot" }, { type: "consumable", weight: 26, item_id: "dry_branch" }],
+  rare: [{ type: "nothing", weight: 112 }, { type: "gear", weight: 99 }, { type: "consumable", weight: 50, item_id: "medium_health_potion" }, { type: "herb", weight: 1, herb_id: "frostvine" }, { type: "consumable", weight: 20, item_id: "dry_branch" }],
+  epic: [{ type: "nothing", weight: 83 }, { type: "gear", weight: 149 }, { type: "consumable", weight: 50, item_id: "greater_health_potion" }, { type: "herb", weight: 1, herb_id: "frostvine" }, { type: "consumable", weight: 17, item_id: "dry_branch" }],
+};
+
+// Only the fields combat's use-item endpoint actually needs from index.html's ITEMS.
+const COMBAT_CONSUMABLES = {
+  minor_health_potion: { heal_amount: 20 }, health_potion: { heal_amount: 40 }, medium_health_potion: { heal_amount: 75 }, greater_health_potion: { heal_amount: 120 }, supreme_health_potion: { heal_amount: 180 },
+  minor_stamina_potion: { stamina_amount: 35 }, stamina_potion: { stamina_amount: 60 }, medium_stamina_potion: { stamina_amount: 100 }, greater_stamina_potion: { stamina_amount: 150 }, supreme_stamina_potion: { stamina_amount: 220 },
+  antidote: { cures_poison: true },
+};
+const COMBAT_BAG_CAPACITY = { traveler_pouch: 8, woven_bag: 16, bramble_sack: 24, rootpack_ancient: 40 };
+const COMBAT_BASE_NAMES = {
+  weapon: ["Twig Wand", "Bramblestaff", "Rootcarver", "Thornbow", "Charwood Axe", "Emberbrand", "Thornfang", "Bramblespike", "Quickthorn", "Goedendag"],
+  head: ["Bramble Circlet", "Mosscap", "Antlercrown", "Leafwood Hood"],
+  shoulders: ["Bark Mantle", "Rootguard Pauldrons", "Thistle Shoulderguard"],
+  armor: ["Big Leaf Wrap", "Bark Plate", "Mosscloak", "Reedmail", "Ashen Hide"],
+  pants: ["Root-woven Leggings", "Bark Greaves", "Vine Trousers"],
+  gloves: ["Thornweave Gloves", "Barkgrip Gauntlets", "Mossback Handwraps"],
+  boots: ["Rootstep Boots", "Mossy Treads", "Bramblehide Boots"],
+  ring: ["Acorn Ring", "Petal Ring", "Vinewrought Ring"],
+  amulet: ["Emberstone Pendant", "Driftwood Amulet", "Heartwood Talisman"],
+  belt: ["Vine Cinch", "Barkweave Belt", "Root Sash"],
+};
+const COMBAT_WEAPON_TYPE_BY_BASE_NAME = { "Twig Wand": "wand", "Bramblestaff": "staff", "Rootcarver": "sword", "Thornbow": "bow", "Charwood Axe": "axe", "Emberbrand": "sword", "Thornfang": "dagger", "Bramblespike": "dagger", "Quickthorn": "dagger", "Goedendag": "dagger" };
+const COMBAT_WEAPON_TYPE_CLASS_RESTRICTIONS = {
+  wand: ["wizard", "sorcerer"], staff: ["warlock", "rootbinder", "druid"],
+  sword: ["thornguard", "stonewarden", "treesinger", "galestrider"],
+  axe: ["thornguard", "stonewarden", "rootbinder", "windrider", "galestrider", "galeshaper"],
+  bow: ["windrider", "galestrider", "treesinger"],
+};
+const COMBAT_EQUIPPED_SLOT_KEYS = ["weapon", "head", "shoulders", "armor", "pants", "gloves", "boots", "ring1", "ring2", "amulet", "belt"];
+const COMBAT_RARITY_TABLE = [{ name: "Common", slots: 1, weight: 60 }, { name: "Uncommon", slots: 2, weight: 25 }, { name: "Rare", slots: 3, weight: 10 }, { name: "Epic", slots: 5, weight: 4 }, { name: "Legendary", slots: 8, weight: 1 }];
+
+// Balance-equivalent constants combat needs, ported verbatim from index.html's Balance
+// object (see that file's own comments for the full rationale behind each number).
+const CB = {
+  CRIT_MULTIPLIER: 1.75, FLEE_FAIL_CHANCE: 0.20, MONSTER_FIRST_STRIKE_CHANCE: 0.5,
+  BLOCK_CHANCE_PER_DEX: 0.01, BLOCK_CHANCE_MAX: 0.60,
+  MOB_BLOCK_CHANCE_BASE: 0.05, MOB_BLOCK_CHANCE_PER_LEVEL: 0.005,
+  MONSTER_HP_MULT: 2.0, MONSTER_DAMAGE_MULT: 2.0,
+  AREA_HP_GROWTH: 0.15, AREA_DAMAGE_GROWTH: 0.12, AREA_XP_GROWTH: 0.062,
+  LATE_GAME_MONSTER_GROWTH_START_LEVEL: 10, LATE_GAME_MONSTER_GROWTH_PER_LEVEL: 0.10,
+  STRONGHOLD_GUARDIAN_HP_MULT: 3.0, STRONGHOLD_GUARDIAN_XP_MULT: 1.5, STRONGHOLD_KEY_DROP_CHANCE: 0.15,
+  ROAMING_MOB_HP_MULT: 4.0, ROAMING_MOB_DAMAGE_MULT: 1.5, ROAMING_MOB_XP_MULT: 2.0,
+  WEAPON_SKILL_HIT_STEP: 100, WEAPON_SKILL_DAMAGE_PER_LEVEL: 1,
+  KILL_STREAK_MAGIC_FIND_PCT_PER_KILL: 1,
+  STAT_POINTS_PER_LEVEL: 3, LEVEL_CAP: 60,
+  KILLS_PER_LEVEL_TARGET: 20, MONSTER_BASE_XP: 8.0, LEVEL_XP_GROWTH: 0.11,
+  FOREST_REPUTATION_XP_PCT_PER_POINT: 10,
+  POTION_HEAL_DURATION_MS: 5000,
+  ITEM_TIER_BRACKET_WIDTH: 5,
+  TIER_DROP_WEIGHTS_BY_OFFSET: [40, 30, 20, 6, 4],
+  WEAPON_DAMAGE_GUARANTEE_CHANCE: 0.70,
+  ELEMENT_ITEM_CHANCE: 0.3, ELEMENT_IDS: ["fire", "wind", "earth", "water"],
+  ELEMENT_AFFIX_BIAS: { fire: "damage", wind: "stamina_max", earth: "armor", water: "regen" },
+  EYESIGHT_AFFIX_CHANCE: 0.03,
+  STAMINA_MAX_BASE: 100.0,
+  AREA_LEVEL_MAX: 100,
+};
+
+function cbClampf(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+function cbClampi(v, lo, hi) { return Math.max(lo, Math.min(hi, Math.round(v))); }
+function cbRandRange(a, b) { return a + Math.random() * (b - a); }
+function cbRandIntRange(a, b) { return a + Math.floor(Math.random() * (b - a + 1)); }
+function cbPick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function cbShuffle(arr) { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[arr[i], arr[j]] = [arr[j], arr[i]]; } }
+
+function combatXpRequiredForLevel(level) { return Math.round(CB.KILLS_PER_LEVEL_TARGET * CB.MONSTER_BASE_XP * Math.pow(1.0 + CB.LEVEL_XP_GROWTH, level)); }
+function combatMonsterXpReward(baseXp, areaLevel) { return baseXp * Math.pow(1.0 + CB.AREA_XP_GROWTH, areaLevel); }
+function combatLateGameGrowthMult(areaLevel) {
+  const lvl = areaLevel || 1;
+  if (lvl < CB.LATE_GAME_MONSTER_GROWTH_START_LEVEL) return 1.0;
+  return 1.0 + CB.LATE_GAME_MONSTER_GROWTH_PER_LEVEL * (lvl - (CB.LATE_GAME_MONSTER_GROWTH_START_LEVEL - 1));
+}
+function combatMonsterHp(baseHp, areaLevel) { return baseHp * CB.MONSTER_HP_MULT * Math.pow(1.0 + CB.AREA_HP_GROWTH, areaLevel) * combatLateGameGrowthMult(areaLevel); }
+function combatMonsterDamage(baseDmg, areaLevel) { return baseDmg * CB.MONSTER_DAMAGE_MULT * Math.pow(1.0 + CB.AREA_DAMAGE_GROWTH, areaLevel) * combatLateGameGrowthMult(areaLevel); }
+function combatMobBlockChance(areaLevel) { return CB.MOB_BLOCK_CHANCE_BASE + CB.MOB_BLOCK_CHANCE_PER_LEVEL * Math.max(0, (areaLevel || 1) - 1); }
+function combatItemTierForAreaLevel(areaLevel) { return cbClampi(1 + Math.floor((areaLevel || 1) / CB.ITEM_TIER_BRACKET_WIDTH), 1, ITEM_TIER_MAX); }
+function combatRollItemTier(areaLevel) {
+  const nat = combatItemTierForAreaLevel(areaLevel);
+  let total = 0; for (let o = 0; o < nat; o++) total += (CB.TIER_DROP_WEIGHTS_BY_OFFSET[o] || 1);
+  let roll = Math.random() * total, cum = 0;
+  for (let o = 0; o < nat; o++) { cum += (CB.TIER_DROP_WEIGHTS_BY_OFFSET[o] || 1); if (roll < cum) return nat - o; }
+  return nat;
+}
+function combatRollRarity(mfPct) {
+  mfPct = mfPct || 0;
+  const rollOnce = () => {
+    let total = 0; for (const r of COMBAT_RARITY_TABLE) total += r.weight;
+    let roll = Math.floor(Math.random() * total), cum = 0;
+    for (const r of COMBAT_RARITY_TABLE) { cum += r.weight; if (roll < cum) return r; }
+    return COMBAT_RARITY_TABLE[0];
+  };
+  const first = rollOnce();
+  if (!mfPct) return first;
+  if (Math.random() < Math.min(0.9, mfPct / 100)) {
+    const second = rollOnce();
+    const fi = COMBAT_RARITY_TABLE.indexOf(first), si = COMBAT_RARITY_TABLE.indexOf(second);
+    return si > fi ? second : first;
+  }
+  return first;
+}
+function combatRollLoot(tableId, mfPct) {
+  mfPct = mfPct || 0;
+  const table = COMBAT_LOOT_TABLES[tableId] || [];
+  const rollOnce = () => {
+    if (table.length === 0) return { type: "nothing" };
+    let total = 0; for (const e of table) total += e.weight;
+    if (total <= 0) return { type: "nothing" };
+    let roll = Math.floor(Math.random() * total), cum = 0;
+    for (const e of table) { cum += e.weight; if (roll < cum) return e; }
+    return { type: "nothing" };
+  };
+  const first = rollOnce();
+  if (first.type !== "nothing" || !mfPct) return first;
+  if (Math.random() < Math.min(0.9, mfPct / 100)) {
+    const second = rollOnce();
+    if (second.type !== "nothing") return second;
+  }
+  return first;
+}
+// Mirrors IF.generate() exactly, reusing the SAME live constants (ITEM_AFFIX_POOL,
+// ITEM_AFFIX_TIER1_MAX via itemAffixMaxForTier, ITEM_WEAPON_DAMAGE_AFFIX_MULT,
+// ITEM_GENERATION_SLOTS) already defined above for validateGearItem/the reroll endpoint --
+// so a server-rolled drop and a server-rerolled item can never drift out of sync with each
+// other, and both automatically stay valid against validateGearItem() by construction.
+function combatGenerateGearItem(tier, magicFindPct) {
+  const chosenSlot = cbPick(ITEM_GENERATION_SLOTS);
+  const baseName = cbPick(COMBAT_BASE_NAMES[chosenSlot] || ["Item"]);
+  const rarity = combatRollRarity(magicFindPct);
+  const slotCount = rarity.slots;
+  let pool = [...ITEM_AFFIX_POOL];
+  cbShuffle(pool);
+  if (chosenSlot === "weapon" && Math.random() < CB.WEAPON_DAMAGE_GUARANTEE_CHANCE && pool.includes("damage")) {
+    pool = pool.filter((s) => s !== "damage");
+    pool.unshift("damage");
+  }
+  let element = "";
+  if (Math.random() < CB.ELEMENT_ITEM_CHANCE) {
+    element = cbPick(CB.ELEMENT_IDS);
+    const biasStat = CB.ELEMENT_AFFIX_BIAS[element] || "";
+    if (biasStat && pool.includes(biasStat)) {
+      pool = pool.filter((s) => s !== biasStat);
+      pool.unshift(biasStat);
+    }
+  }
+  const affixCount = Math.min(slotCount, pool.length);
+  const affixes = [];
+  for (let i = 0; i < affixCount; i++) {
+    const stat = pool[i];
+    const max = itemAffixMaxForTier(stat, tier);
+    let value = 1 + Math.floor(Math.random() * max);
+    if (chosenSlot === "weapon" && stat === "damage") value = Math.round(value * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
+    affixes.push({ stat, value });
+  }
+  if (Math.random() < CB.EYESIGHT_AFFIX_CHANCE) affixes.push({ stat: "eyesight", value: 2 });
+  return { instance_id: `srv_${Date.now()}_${Math.floor(Math.random() * 999999)}`, slot: chosenSlot, base_name: baseName, tier, rarity: rarity.name, affixes, element };
+}
+
+function combatTierLevelRequirement(tier) { const t = cbClampi(tier, 1, ITEM_TIER_MAX); return Math.max(1, (t - 1) * CB.ITEM_TIER_BRACKET_WIDTH); }
+function combatWeaponTypeForInstance(inst) { return (inst && inst.base_name) ? (COMBAT_WEAPON_TYPE_BY_BASE_NAME[inst.base_name] || null) : null; }
+function combatClassCanEquipItem(classId, inst) {
+  if (!inst || inst.slot !== "weapon") return true;
+  const wt = combatWeaponTypeForInstance(inst);
+  if (!wt) return true;
+  const list = COMBAT_WEAPON_TYPE_CLASS_RESTRICTIONS[wt];
+  return !list || list.includes(classId);
+}
+function combatCanEquipGear(data, inst) { return (data.level || 1) >= combatTierLevelRequirement(inst.tier) && combatClassCanEquipItem(data.class_id, inst); }
+function combatAffixTotal(inst, stat) {
+  if (!inst || !inst.affixes) return 0;
+  let total = 0; for (const a of inst.affixes) if (a.stat === stat) total += a.value;
+  return total;
+}
+function combatGearBonus(data, stat) {
+  let total = 0;
+  const equipped = data.equipped || {};
+  for (const slot of COMBAT_EQUIPPED_SLOT_KEYS) {
+    const inst = equipped[slot];
+    if (inst && combatCanEquipGear(data, inst)) total += combatAffixTotal(inst, stat);
+  }
+  return total;
+}
+function combatGetActiveTempBuff(data, type) {
+  const b = data.temp_buffs && data.temp_buffs[type];
+  if (b && Date.now() < b.expires_at) return b.amount;
+  return 0;
+}
+function combatGetTotalAttr(data, key) {
+  const gearStat = { str: "strength", dex: "dexterity", vit: "vitality", int: "intelligence" }[key];
+  return ((data.attributes && data.attributes[key]) || 0) + combatGearBonus(data, gearStat) + combatGetActiveTempBuff(data, gearStat);
+}
+function combatGetBlockChance(data) {
+  return cbClampf(combatGetTotalAttr(data, "dex") * CB.BLOCK_CHANCE_PER_DEX + combatGetActiveTempBuff(data, "block_chance") / 100.0, 0, CB.BLOCK_CHANCE_MAX);
+}
+function combatGetMaxHp(data) {
+  const c = COMBAT_CLASSES[data.class_id] || {};
+  return (c.base_hp || 50) + (c.hp_per_level || 5) * ((data.level || 1) - 1) + combatGearBonus(data, "hp") + (data.bonus_hp_from_attributes || 0);
+}
+function combatGetMaxStamina(data) { return CB.STAMINA_MAX_BASE + combatGearBonus(data, "stamina_max") + (data.bonus_stamina_from_attributes || 0); }
+function combatGetEquippedWeaponType(data) { return combatWeaponTypeForInstance(data.equipped && data.equipped.weapon); }
+function combatWeaponSkillCumulativeHitsForLevel(level) { return CB.WEAPON_SKILL_HIT_STEP * level * (level + 1) / 2; }
+function combatWeaponSkillLevelForHits(hits) {
+  let level = 0;
+  while (combatWeaponSkillCumulativeHitsForLevel(level + 1) <= hits) level++;
+  return level;
+}
+function combatGetWeaponSkillLevel(data, weaponType) {
+  const hits = (data.weapon_skills && data.weapon_skills[weaponType] && data.weapon_skills[weaponType].hits) || 0;
+  return combatWeaponSkillLevelForHits(hits);
+}
+function combatGetDamageRange(data) {
+  const c = COMBAT_CLASSES[data.class_id] || {};
+  const perLevel = (c.damage_per_level || 1.0) * ((data.level || 1) - 1);
+  const gearBonus = combatGearBonus(data, "damage");
+  let statBonus = 0;
+  if (c.chain === "thornguard") statBonus = combatGetTotalAttr(data, "str");
+  else if (c.chain === "windrider") statBonus = combatGetTotalAttr(data, "dex");
+  else if (c.chain === "wizard") statBonus = combatGetTotalAttr(data, "int");
+  const weaponType = combatGetEquippedWeaponType(data);
+  const weaponSkillBonus = weaponType ? combatGetWeaponSkillLevel(data, weaponType) * CB.WEAPON_SKILL_DAMAGE_PER_LEVEL : 0;
+  const baseMin = (c.base_damage_min || 1) + perLevel + statBonus + weaponSkillBonus;
+  const baseMax = (c.base_damage_max || 2) + perLevel + statBonus + weaponSkillBonus;
+  return [baseMin + gearBonus, baseMax + gearBonus];
+}
+function combatGetCritChance(data) { const c = COMBAT_CLASSES[data.class_id] || {}; return cbClampf((c.base_crit || 0.05) + combatGearBonus(data, "crit") / 100.0, 0, 0.95); }
+function combatGetArmor(data) { const c = COMBAT_CLASSES[data.class_id] || {}; return cbClampf((c.armor || 0.0) + combatGearBonus(data, "armor") / 100.0, 0, 0.75); }
+function combatGetMagicFind(data) {
+  return cbClampf(combatGearBonus(data, "magic_find") + combatGetActiveTempBuff(data, "magic_find") + (data.kill_streak || 0) * CB.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL, 0, 500);
+}
+function combatGetGoldFindMult(data) { return 1.0 + combatGearBonus(data, "gold_find") / 100.0; }
+function combatGetXpFindMult(data) { return 1.0 + combatGearBonus(data, "xp_find") / 100.0; }
+function combatGetForestReputationXpMult(data) {
+  const tier = data.highest_tier_reached || 1;
+  const rep = (data.forest_reputation && data.forest_reputation[tier]) || 0;
+  return 1 + Math.max(0, rep) * CB.FOREST_REPUTATION_XP_PCT_PER_POINT / 100;
+}
+// v0.18.2 (#7)'s "Currently playing" community XP multiplier -- the server already knows
+// the live active-player count (getActiveCharacters(), defined further down this file but
+// hoisted, so callable here), so this reads that directly instead of trusting the client's
+// own Net.activePlayersCache the way index.html's getGlobalXpMultiplier() has to.
+function combatGetCommunityXpMult() { return Math.max(1, getActiveCharacters(100).length); }
+function combatIsInvulnerable(data) { return (data.invuln_rounds_left || 0) > 0; }
+function combatHasQuadDamage(data) { return (data.quad_dmg_rounds_left || 0) > 0; }
+function combatTickCombatRoundBuffs(data) {
+  if (data.invuln_rounds_left > 0) data.invuln_rounds_left--;
+  if (data.quad_dmg_rounds_left > 0) data.quad_dmg_rounds_left--;
+}
+
+// Lazy heal-over-time settlement -- the "hard part" server_authoritative_combat_design.md
+// flags: rather than a 200ms tick loop (impractical over HTTP request/response), each heal
+// is stored as {rate (HP per ms), remainingMs, lastSettledAt}, and settled (delivered amount
+// applied, remainingMs/lastSettledAt advanced) lazily every time a combat request touches
+// this character -- mathematically identical to the client's own perTick/ticksLeft tick
+// array, just computed on demand instead of every 200ms.
+function combatSettleHeal(heal) {
+  if (!heal) return { delivered: 0, heal: null };
+  const now = Date.now();
+  let elapsed = Math.max(0, now - heal.lastSettledAt);
+  elapsed = Math.min(elapsed, heal.remainingMs);
+  const delivered = heal.rate * elapsed;
+  const remainingMs = heal.remainingMs - elapsed;
+  if (remainingMs <= 0) return { delivered, heal: null };
+  return { delivered, heal: { rate: heal.rate, remainingMs, lastSettledAt: now } };
+}
+// Mirrors PS._queueGradualHeal()'s merge-not-stack fix: a heal already in flight has its
+// pending amount extended (capped at headroom) at the SAME rate, rather than starting a
+// second, independent stream alongside it.
+function combatQueueHeal(existingHeal, amount, headroom, durationMs) {
+  if (headroom <= 0) return existingHeal || null;
+  const now = Date.now();
+  if (existingHeal) {
+    const currentPending = existingHeal.rate * existingHeal.remainingMs;
+    const newPending = Math.min(headroom, currentPending + amount);
+    return { rate: existingHeal.rate, remainingMs: existingHeal.rate > 0 ? newPending / existingHeal.rate : 0, lastSettledAt: now };
+  }
+  const rate = amount / durationMs;
+  const pending = Math.min(headroom, amount);
+  return { rate, remainingMs: rate > 0 ? pending / rate : 0, lastSettledAt: now };
+}
+function combatSettleAllHeals(data) {
+  const maxHp = combatGetMaxHp(data);
+  if (data.srv_heal) {
+    const { delivered, heal } = combatSettleHeal(data.srv_heal);
+    data.current_hp = Math.min(maxHp, (data.current_hp || 0) + delivered);
+    data.srv_heal = heal;
+  }
+  const maxStamina = combatGetMaxStamina(data);
+  if (data.srv_stamina_heal) {
+    const { delivered, heal } = combatSettleHeal(data.srv_stamina_heal);
+    data.current_stamina = Math.min(maxStamina, (data.current_stamina || 0) + delivered);
+    data.srv_stamina_heal = heal;
+  }
+}
+
+function combatAddXp(data, amount) {
+  let buffed = amount * combatGetXpFindMult(data);
+  if (data.xp_buff_encounters_left > 0) buffed *= (data.xp_buff_multiplier || 1);
+  data.xp = (data.xp || 0) + Math.round(buffed);
+  data.lifetime_xp = (data.lifetime_xp || 0) + Math.round(buffed);
+  let leveled = false;
+  while (data.xp >= data.xp_to_next && (data.level || 1) < CB.LEVEL_CAP) {
+    data.xp -= data.xp_to_next;
+    data.level = (data.level || 1) + 1;
+    data.xp_to_next = combatXpRequiredForLevel(data.level);
+    data.unspent_stat_points = (data.unspent_stat_points || 0) + CB.STAT_POINTS_PER_LEVEL;
+    const vit = (data.attributes && data.attributes.vit) || 0;
+    data.bonus_hp_from_attributes = (data.bonus_hp_from_attributes || 0) + vit;
+    data.bonus_stamina_from_attributes = (data.bonus_stamina_from_attributes || 0) + vit;
+    data.current_hp = combatGetMaxHp(data);
+    leveled = true;
+  }
+  if (data.level >= CB.LEVEL_CAP) data.xp = 0;
+  return leveled;
+}
+function combatRegisterWeaponHit(data, weaponType) {
+  if (!data.weapon_skills) data.weapon_skills = {};
+  if (!data.weapon_skills[weaponType]) data.weapon_skills[weaponType] = { hits: 0 };
+  const before = combatWeaponSkillLevelForHits(data.weapon_skills[weaponType].hits);
+  data.weapon_skills[weaponType].hits++;
+  const after = combatWeaponSkillLevelForHits(data.weapon_skills[weaponType].hits);
+  return { leveledUp: after > before, newLevel: after };
+}
+function combatIncrementKillStreak(data) {
+  data.kill_streak = (data.kill_streak || 0) + 1;
+  if (data.kill_streak > (data.max_kill_streak || 0)) data.max_kill_streak = data.kill_streak;
+}
+function combatGetInventoryCapacity(data) {
+  let cap = 16; // Balance.BASE_INVENTORY_SLOTS
+  for (const bagId of (data.equipped_bags || [])) cap += (COMBAT_BAG_CAPACITY[bagId] || 0);
+  return cap;
+}
+function combatAutoEquipTargetSlot(data, inst) {
+  const genSlot = inst.slot;
+  const equipped = data.equipped || {};
+  if (genSlot === "ring") return !equipped["ring1"] ? "ring1" : (!equipped["ring2"] ? "ring2" : null);
+  if (!COMBAT_EQUIPPED_SLOT_KEYS.includes(genSlot)) return null;
+  return equipped[genSlot] ? null : genSlot;
+}
+function combatCanAutoEquip(data, inst) { return combatCanEquipGear(data, inst) && !!combatAutoEquipTargetSlot(data, inst); }
+function combatAddGearAutoEquip(data, inst) {
+  if (!data.equipped) data.equipped = {};
+  if (!data.gear_instances) data.gear_instances = [];
+  if (combatCanAutoEquip(data, inst)) {
+    data.equipped[combatAutoEquipTargetSlot(data, inst)] = inst;
+    return { fit: true, autoEquipped: true };
+  }
+  if (data.gear_instances.length >= combatGetInventoryCapacity(data)) return { fit: false, autoEquipped: false };
+  data.gear_instances.push(inst);
+  return { fit: true, autoEquipped: false };
+}
+function combatAddConsumable(data, itemId, count) { if (!data.consumables) data.consumables = {}; data.consumables[itemId] = (data.consumables[itemId] || 0) + count; }
+function combatAddHerb(data, herbId, count) { if (!data.herbs) data.herbs = {}; data.herbs[herbId] = (data.herbs[herbId] || 0) + count; }
+function combatStrongholdKeyTierForAreaLevel(level) { if (level <= 4) return 1; return cbClampi(2 + Math.floor((level - 5) / 5), 1, ITEM_TIER_MAX); }
+function combatStrongholdKeyItemIdForTier(tier) { return tier <= 1 ? "stronghold_key" : `stronghold_key_t${tier}`; }
+function combatStrongholdKeyEligible(mazeDepth, playerLevel) { return (mazeDepth || 1) >= (playerLevel || 1) - 1; }
+
+// Mirrors DL.pickRandomMonsterForArea()'s own tier gate -- used at /api/combat/start to
+// reject a claimed monster id that isn't actually available at the claimed area level.
+function combatMonsterAllowedForAreaLevel(monster, areaLevel) {
+  if (monster.tier === "common") return true;
+  if (monster.tier === "uncommon") return areaLevel >= 8;
+  if (monster.tier === "rare") return areaLevel >= 20;
+  if (monster.tier === "epic") return areaLevel >= 35;
+  return false;
+}
+
+function loadCharacterRow(accountId, slot) {
+  const row = db.prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?").get(accountId, slot);
+  if (!row) return null;
+  try { return JSON.parse(row.data); } catch (e) { return null; }
+}
+function saveCharacterRow(accountId, slot, data) {
+  data._save_seq = (data._save_seq || 0) + 1;
+  db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(JSON.stringify(data), nowIso(), accountId, slot);
+  return data._save_seq;
+}
+function getCombatSession(accountId, id) {
+  return db.prepare("SELECT * FROM combat_sessions WHERE id = ? AND account_id = ?").get(id, accountId);
+}
+function updateCombatSession(id, fields) {
+  const keys = Object.keys(fields);
+  if (keys.length === 0) return;
+  const setSql = keys.map((k) => `${k} = ?`).join(", ") + ", updated_at = ?";
+  db.prepare(`UPDATE combat_sessions SET ${setSql} WHERE id = ?`).run(...keys.map((k) => fields[k]), nowIso(), id);
+}
+
+// Resolves the monster's counter-attack against the (already-settled-heals) character,
+// mirroring screenCombat()'s monster-turn block exactly: Invulnerability shrine first (full
+// immunity), then the player's own Dexterity-derived block chance, then damage reduced by
+// Armor. Mutates `data.current_hp` in place and returns a small result the caller folds into
+// the round response; never touches the session/monster HP (that's the caller's job).
+function combatResolveMonsterTurn(data, session, invulnActiveThisRound) {
+  if (invulnActiveThisRound) return { invulnerable: true, blocked: false, damage: null, fatal: false };
+  if (Math.random() < combatGetBlockChance(data)) return { invulnerable: false, blocked: true, damage: null, fatal: false };
+  let mdmg = cbRandRange(session.dmg_min, session.dmg_max);
+  mdmg *= (1.0 - combatGetArmor(data));
+  data.current_hp = (data.current_hp || 0) - mdmg;
+  let fatal = false;
+  if (data.current_hp < 1) { data.current_hp = 0; fatal = true; }
+  return { invulnerable: false, blocked: false, damage: Math.round(mdmg), fatal };
+}
+
+app.post("/api/combat/start", requireAuth, (req, res) => {
+  const slot = Number(req.body?.slot);
+  const monsterId = req.body?.monster_id;
+  const areaLevel = Number(req.body?.area_level);
+  const isGuardian = !!req.body?.is_guardian;
+  const isRoamer = !!req.body?.is_roamer;
+  if (!Number.isInteger(slot) || slot < 0 || slot >= MAX_CHARACTER_SLOTS) return res.status(400).json({ error: "Invalid slot." });
+  if (!Number.isInteger(areaLevel) || areaLevel < 1 || areaLevel > CB.AREA_LEVEL_MAX) return res.status(400).json({ error: "Invalid area level." });
+  const monster = COMBAT_MONSTERS.find((m) => m.id === monsterId);
+  if (!monster) return res.status(400).json({ error: "Unknown monster." });
+  if (!combatMonsterAllowedForAreaLevel(monster, areaLevel)) return res.status(400).json({ error: "That monster isn't found at this area level." });
+
+  const data = loadCharacterRow(req.account.id, slot);
+  if (!data) return res.status(404).json({ error: "No character in that slot." });
+  if (areaLevel > (data.max_maze_depth_reached || 1)) return res.status(400).json({ error: "You haven't reached that area level yet." });
+
+  // A stale/abandoned session (e.g. the client navigated away mid-fight) can't be reused --
+  // starting a new encounter always retires whatever was previously active for this slot.
+  db.prepare("DELETE FROM combat_sessions WHERE account_id = ? AND slot = ? AND status = 'active'").run(req.account.id, slot);
+
+  const hpMult = isGuardian ? CB.STRONGHOLD_GUARDIAN_HP_MULT : isRoamer ? CB.ROAMING_MOB_HP_MULT : 1;
+  const dmgMult = isRoamer ? CB.ROAMING_MOB_DAMAGE_MULT : 1;
+  const xpMult = isGuardian ? CB.STRONGHOLD_GUARDIAN_XP_MULT : isRoamer ? CB.ROAMING_MOB_XP_MULT : 1;
+  const maxHp = combatMonsterHp(monster.base_hp, areaLevel) * hpMult;
+  const dmgMin = combatMonsterDamage(monster.base_damage_min, areaLevel) * dmgMult;
+  const dmgMax = combatMonsterDamage(monster.base_damage_max, areaLevel) * dmgMult;
+  const xp = combatMonsterXpReward(monster.base_xp, areaLevel) * xpMult;
+  const name = isGuardian ? `Guardian ${monster.name}` : isRoamer ? `Roaming ${monster.name}` : monster.name;
+
+  combatSettleAllHeals(data);
+  const log = [];
+  let firstStrike = null;
+  if (Math.random() < CB.MONSTER_FIRST_STRIKE_CHANCE) {
+    let mdmg = cbRandRange(dmgMin, dmgMax);
+    mdmg *= (1.0 - combatGetArmor(data));
+    data.current_hp = Math.max(1, (data.current_hp || 0) - mdmg);
+    firstStrike = { damage: Math.round(mdmg) };
+    log.push(`The ${name} strikes first, hitting you for ${Math.round(mdmg)} damage before you can react!`);
+  }
+
+  const id = crypto.randomBytes(16).toString("hex");
+  const now = nowIso();
+  db.prepare(
+    `INSERT INTO combat_sessions (id, account_id, slot, monster_id, name, area_level, max_hp, hp, dmg_min, dmg_max, xp, gold_min, gold_max, loot_table, is_guardian, is_roamer, status, created_at, updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?, ?)`
+  ).run(id, req.account.id, slot, monster.id, name, areaLevel, maxHp, maxHp, dmgMin, dmgMax, xp, monster.gold_min, monster.gold_max, monster.loot_table, isGuardian ? 1 : 0, isRoamer ? 1 : 0, now, now);
+
+  const saveSeq = saveCharacterRow(req.account.id, slot, data);
+  res.json({
+    ok: true, session_id: id,
+    monster: { name, hp: maxHp, max_hp: maxHp },
+    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data) },
+    first_strike: firstStrike, log, _save_seq: saveSeq,
+  });
+});
+
+app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
+  const session = getCombatSession(req.account.id, req.params.sessionId);
+  if (!session) return res.status(404).json({ error: "That fight no longer exists." });
+  if (session.status !== "active") return res.status(409).json({ error: "That fight has already ended." });
+  const data = loadCharacterRow(req.account.id, session.slot);
+  if (!data) return res.status(404).json({ error: "No character in that slot." });
+
+  combatSettleAllHeals(data);
+  const quadActiveThisRound = combatHasQuadDamage(data);
+  const invulnActiveThisRound = combatIsInvulnerable(data);
+  combatTickCombatRoundBuffs(data);
+
+  const mobBlocked = Math.random() < combatMobBlockChance(session.area_level);
+  let playerHit = null, weaponSkill = null, newMonsterHp = session.hp;
+  if (!mobBlocked) {
+    const [lo, hi] = combatGetDamageRange(data);
+    let dmg = cbRandRange(lo, hi);
+    const crit = Math.random() < combatGetCritChance(data);
+    if (crit) dmg *= CB.CRIT_MULTIPLIER;
+    if (quadActiveThisRound) dmg *= 4;
+    newMonsterHp = session.hp - dmg;
+    playerHit = { damage: Math.round(dmg), crit, quad_damage: quadActiveThisRound };
+    const weaponType = combatGetEquippedWeaponType(data);
+    if (weaponType) weaponSkill = { weapon_type: weaponType, ...combatRegisterWeaponHit(data, weaponType) };
+  }
+
+  const monsterDefeated = !mobBlocked && newMonsterHp <= 0;
+  let kill = null, monsterTurn = null, fatal = false;
+
+  if (monsterDefeated) {
+    newMonsterHp = 0;
+    const gold = cbRandIntRange(session.gold_min, session.gold_max);
+    const goldCredited = Math.round(gold * combatGetGoldFindMult(data));
+    const xpGained = session.xp * combatGetCommunityXpMult() * combatGetForestReputationXpMult(data);
+    const leveled = combatAddXp(data, xpGained);
+    creditAccountGold(req.account.id, goldCredited);
+    combatIncrementKillStreak(data);
+
+    const magicFind = combatGetMagicFind(data);
+    const rolled = combatRollLoot(session.loot_table, magicFind);
+    let loot = { type: rolled.type };
+    if (rolled.type === "gear") {
+      const tier = combatRollItemTier(session.area_level);
+      const inst = combatGenerateGearItem(tier, magicFind);
+      const placement = combatAddGearAutoEquip(data, inst);
+      loot = { type: "gear", item: inst, fit: placement.fit, auto_equipped: placement.autoEquipped };
+    } else if (rolled.type === "consumable") {
+      combatAddConsumable(data, rolled.item_id, 1);
+      loot = { type: "consumable", item_id: rolled.item_id };
+    } else if (rolled.type === "herb") {
+      combatAddHerb(data, rolled.herb_id, 1);
+      loot = { type: "herb", herb_id: rolled.herb_id };
+    }
+
+    let keyDrop = null;
+    if (session.is_guardian) {
+      const keyEligible = combatStrongholdKeyEligible(session.area_level, data.level);
+      if (keyEligible && Math.random() < CB.STRONGHOLD_KEY_DROP_CHANCE) {
+        const keyTier = combatStrongholdKeyTierForAreaLevel(session.area_level);
+        const keyItemId = combatStrongholdKeyItemIdForTier(keyTier);
+        combatAddConsumable(data, keyItemId, 1);
+        keyDrop = { tier: keyTier, item_id: keyItemId };
+      }
+      keyDrop = keyDrop || { eligible: keyEligible, dropped: false };
+    }
+
+    kill = {
+      gold, gold_credited: goldCredited, xp_gained: xpGained, leveled,
+      loot, key_drop: keyDrop, kill_streak: data.kill_streak, max_kill_streak: data.max_kill_streak,
+      is_guardian: !!session.is_guardian, is_roamer: !!session.is_roamer,
+    };
+    updateCombatSession(session.id, { hp: 0, status: "won" });
+  } else {
+    if (!(!mobBlocked && monsterDefeated)) {
+      monsterTurn = combatResolveMonsterTurn(data, session, invulnActiveThisRound);
+      fatal = monsterTurn.fatal;
+    }
+    updateCombatSession(session.id, { hp: newMonsterHp });
+  }
+
+  if (fatal) updateCombatSession(session.id, { status: "lost" });
+  const saveSeq = saveCharacterRow(req.account.id, session.slot, data);
+  res.json({
+    ok: true, mob_blocked: mobBlocked, player_hit: playerHit, weapon_skill: weaponSkill,
+    monster: { hp: Math.max(0, newMonsterHp), max_hp: session.max_hp, defeated: monsterDefeated },
+    kill, monster_turn: monsterTurn,
+    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data) },
+    fatal, _save_seq: saveSeq,
+  });
+});
+
+app.post("/api/combat/:sessionId/flee", requireAuth, (req, res) => {
+  const session = getCombatSession(req.account.id, req.params.sessionId);
+  if (!session) return res.status(404).json({ error: "That fight no longer exists." });
+  if (session.status !== "active") return res.status(409).json({ error: "That fight has already ended." });
+  const data = loadCharacterRow(req.account.id, session.slot);
+  if (!data) return res.status(404).json({ error: "No character in that slot." });
+
+  combatSettleAllHeals(data);
+  const failed = Math.random() < CB.FLEE_FAIL_CHANCE;
+  let monsterTurn = null, fatal = false;
+  if (failed) {
+    monsterTurn = combatResolveMonsterTurn(data, session, combatIsInvulnerable(data));
+    fatal = monsterTurn.fatal;
+    if (fatal) updateCombatSession(session.id, { status: "lost" });
+  } else {
+    updateCombatSession(session.id, { status: "fled" });
+  }
+  const saveSeq = saveCharacterRow(req.account.id, session.slot, data);
+  res.json({
+    ok: true, failed, monster_turn: monsterTurn, fatal,
+    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data) },
+    _save_seq: saveSeq,
+  });
+});
+
+app.post("/api/combat/:sessionId/use-item", requireAuth, (req, res) => {
+  const session = getCombatSession(req.account.id, req.params.sessionId);
+  if (!session) return res.status(404).json({ error: "That fight no longer exists." });
+  if (session.status !== "active") return res.status(409).json({ error: "That fight has already ended." });
+  const itemId = req.body?.item_id;
+  const item = COMBAT_CONSUMABLES[itemId];
+  if (!item) return res.status(400).json({ error: "Unknown consumable." });
+
+  const data = loadCharacterRow(req.account.id, session.slot);
+  if (!data) return res.status(404).json({ error: "No character in that slot." });
+  if (!((data.consumables && data.consumables[itemId]) > 0)) return res.status(400).json({ error: "You don't have that item." });
+
+  combatSettleAllHeals(data);
+  let used = false;
+  const totalTicks = CB.POTION_HEAL_DURATION_MS; // durationMs directly, rate = amount/durationMs
+  if ((item.heal_amount || 0) > 0) {
+    const maxHp = combatGetMaxHp(data);
+    const pendingHeal = data.srv_heal ? data.srv_heal.rate * data.srv_heal.remainingMs : 0;
+    if ((data.current_hp || 0) + pendingHeal < maxHp) {
+      data.srv_heal = combatQueueHeal(data.srv_heal, item.heal_amount, maxHp - (data.current_hp || 0), totalTicks);
+      used = true;
+    }
+  }
+  if ((item.stamina_amount || 0) > 0) {
+    const maxStamina = combatGetMaxStamina(data);
+    const pendingStamina = data.srv_stamina_heal ? data.srv_stamina_heal.rate * data.srv_stamina_heal.remainingMs : 0;
+    if ((data.current_stamina || 0) + pendingStamina < maxStamina) {
+      data.srv_stamina_heal = combatQueueHeal(data.srv_stamina_heal, item.stamina_amount, maxStamina - (data.current_stamina || 0), totalTicks);
+      used = true;
+    }
+  }
+  if (item.cures_poison && data.poison_expires_at && data.poison_expires_at > Date.now()) {
+    data.poison_expires_at = 0;
+    data.poison_pct_per_sec = 0;
+    used = true;
+  }
+  if (!used) return res.status(400).json({ error: "That wouldn't do anything right now." });
+
+  const rem = (data.consumables[itemId] || 0) - 1;
+  if (rem > 0) data.consumables[itemId] = rem; else delete data.consumables[itemId];
+
+  const saveSeq = saveCharacterRow(req.account.id, session.slot, data);
+  res.json({
+    ok: true,
+    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data) },
+    _save_seq: saveSeq,
+  });
+});
+
 /* Storage Vault (v0.11): one shared 200-slot chest per ACCOUNT (not per character), so
    every character slot on the same account can deposit into and withdraw from the same
    stash. Scoped strictly by req.account.id (set by requireAuth from the caller's own
@@ -662,8 +1856,49 @@ app.put("/api/vault", requireAuth, (req, res) => {
     return res.status(400).json({ error: `The vault only holds ${VAULT_CAPACITY} items.` });
   }
 
-  const existing = db.prepare("SELECT version FROM vaults WHERE account_id = ?").get(req.account.id);
+  const existing = db.prepare("SELECT version, data FROM vaults WHERE account_id = ?").get(req.account.id);
   const currentVersion = existing ? existing.version || 0 : 0;
+
+  // v0.18.4: every "gear"-kind entry's item blob (see vaultDepositGear()'s {slot, kind:
+  // "gear", inst} shape in index.html) gets the same bounds check as an Auction House
+  // listing or a Blacksmith reroll -- otherwise a modified client could deposit a
+  // fabricated, impossible item directly into long-term storage with no combat/crafting
+  // ever involved. Consumable/herb entries are plain stackable counts with no RNG affix
+  // roll to fabricate, so they're out of scope here (still just structurally sane-checked
+  // below); a full per-item ownership ledger for those remains backlog work, same as the
+  // existing version-based concurrency guard already notes above.
+  //
+  // IMPORTANT: only NEWLY-deposited gear (an instance_id not already present in this
+  // account's currently-stored vault) is bounds-checked. A gear item legitimately rolled
+  // under an OLDER balance formula (e.g. xp_find's T1 max was 10 before the v0.17.2 (#4)
+  // hotfix tightened it to 1 -- see validateGearItem's ceiling-map comment) must never
+  // start failing validation retroactively just because it's already resident in the
+  // vault; that would lock a player out of touching their OWN vault at all (every
+  // deposit/withdraw re-PUTs the full items array), which is exactly the kind of data-
+  // loss-adjacent regression this project treats as unacceptable.
+  let existingItems = [];
+  if (existing) {
+    try { existingItems = JSON.parse(existing.data); } catch (e) { existingItems = []; }
+  }
+  const alreadyStoredGearIds = new Set(
+    existingItems.filter((e) => e && e.kind === "gear" && e.inst).map((e) => e.inst.instance_id)
+  );
+  for (const entry of items) {
+    if (!entry || typeof entry !== "object" || !Number.isInteger(entry.slot) || entry.slot < 0 || entry.slot >= VAULT_CAPACITY) {
+      return res.status(400).json({ error: "Invalid vault entry." });
+    }
+    if (entry.kind === "gear") {
+      if (!entry.inst || !alreadyStoredGearIds.has(entry.inst.instance_id)) {
+        const itemError = validateGearItem(entry.inst);
+        if (itemError) return res.status(400).json({ error: `Invalid item in vault: ${itemError}` });
+      }
+    } else if (entry.kind === "consumable" || entry.kind === "herb") {
+      if (!Number.isFinite(entry.qty) || entry.qty <= 0) return res.status(400).json({ error: "Invalid vault stack quantity." });
+    } else {
+      return res.status(400).json({ error: "Invalid vault entry kind." });
+    }
+  }
+
   if (clientVersion !== currentVersion) {
     // Someone else's change (another of your characters, in another tab/device) already
     // landed since this client last fetched the vault -- reject instead of overwriting it,
@@ -831,6 +2066,33 @@ app.get("/api/leaderboard/gold", (req, res) => {
   res.json({ entries: rows.map((r) => ({ player: r.username, gold: r.gold || 0 })) });
 });
 
+// v0.18.2 (#8): "Max Killstreak" leaderboard tab -- explicitly per-CHARACTER, not per-account
+// (Gwen's spec: "different characters on the same account can have different max killstreak
+// records"), same as the Skill Progression tab above and unlike the account-level Gold tab.
+// max_kill_streak is a MAX()'d lifetime record (see the character-save upsert's ON CONFLICT
+// clause), so a plain server-side ORDER BY + LIMIT is enough -- no client-side ranking math
+// needed, unlike Skill Progression's per-weapon-type breakdown.
+app.get("/api/leaderboard/killstreak", (req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT account_id, character_name, class_name, max_kill_streak, is_dead
+       FROM leaderboard_bests ORDER BY max_kill_streak DESC LIMIT 50`
+    )
+    .all();
+  const withNames = rows.map((r) => {
+    const acc = db.prepare("SELECT username FROM accounts WHERE id = ?").get(r.account_id);
+    return {
+      account_id: r.account_id,
+      player: acc ? acc.username : "?",
+      character_name: r.character_name,
+      class_name: r.class_name,
+      max_kill_streak: r.max_kill_streak || 0,
+      is_dead: !!r.is_dead,
+    };
+  });
+  res.json({ entries: withNames });
+});
+
 // v0.18 (#14/#17): "activity" tracking piggybacks entirely on the `characters.updated_at`
 // column that autosave (PUT /api/characters/:slot) already stamps on essentially every
 // meaningful in-game action -- no new column, no client heartbeat, nothing extra to keep in
@@ -915,7 +2177,7 @@ app.get("/api/leaderboard/inspect/:accountId/:characterName", requireAuth, (req,
   }
 
   const lbRow = db
-    .prepare("SELECT highest_tier_reached, hardcore, is_dead FROM leaderboard_bests WHERE account_id = ? AND character_name = ?")
+    .prepare("SELECT highest_tier_reached, hardcore, is_dead, last_bridge_steps FROM leaderboard_bests WHERE account_id = ? AND character_name = ?")
     .get(accountId, characterName);
 
   res.json({
@@ -927,10 +2189,22 @@ app.get("/api/leaderboard/inspect/:accountId/:characterName", requireAuth, (req,
     hardcore: !!(lbRow ? lbRow.hardcore : data.hardcore),
     is_dead: !!(lbRow && lbRow.is_dead),
     highest_tier_reached: lbRow ? lbRow.highest_tier_reached : data.highest_tier_reached || 1,
+    // v0.18.1 (#1): Broken Bridge Trial progression -- how far this character got before
+    // their most recent trial failure (0 if they haven't failed one yet at their current
+    // tier, or just crossed successfully). This is NOT new exposure: it's the exact same
+    // last_bridge_steps value already shown to everyone on the public Leaderboard's
+    // "(Tier N, Step X/10)" row -- Inspect Player just surfaces it in its own dedicated
+    // read-only section instead of making players cross-reference the ladder separately.
+    last_bridge_steps: lbRow ? (lbRow.last_bridge_steps || 0) : (data.last_bridge_steps || 0),
     attributes: data.attributes || { str: 0, dex: 0, vit: 0, int: 0 },
     equipped: data.equipped || {},
     weapon_skills: data.weapon_skills || {},
     herbalism_points: data.herbalism_points || 0,
+    // v0.18.2 (#6): Forest Reputation, per Gwen's spec ("also shown in the player inspect
+    // view") -- read straight off the character's own data blob (there's no separate
+    // leaderboard_bests column for this, no cross-account ranking is needed, so it never
+    // needed a schema migration at all), keyed by class tier same as the client keeps it.
+    forest_reputation: data.forest_reputation || {},
   });
 });
 
@@ -987,6 +2261,35 @@ app.delete("/api/admin/leaderboard/:accountId/:characterName", requireAuth, requ
   );
   if (info.changes === 0) return res.status(404).json({ error: "No matching leaderboard entry found." });
   res.json({ ok: true, removed: info.changes });
+});
+
+// v0.18.1 (#2): read-only account list for admins -- createdOn/email/lastActiveAt per
+// account. lastActiveAt is the account-wide MAX(characters.updated_at) across every
+// character slot (same join shape as getActiveCharacters()'s "currently playing" query,
+// just without its 5-minute cutoff/LIMIT), NOT the leaderboard's last_active_at (which is
+// scoped to a single "best" character and only exists for accounts with a ladder entry).
+// Accounts with zero characters still show up, with last_active_at: null. No account
+// secrets (passcode_hash/passcode_salt) are ever included.
+app.get("/api/admin/accounts", requireAuth, requireAdmin, (req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT a.id AS account_id, a.username, a.email, a.created_at, latest.max_updated AS last_active_at
+       FROM accounts a
+       LEFT JOIN (
+         SELECT account_id, MAX(updated_at) AS max_updated FROM characters GROUP BY account_id
+       ) latest ON latest.account_id = a.id
+       ORDER BY a.created_at DESC`
+    )
+    .all();
+  res.json({
+    entries: rows.map((r) => ({
+      account_id: r.account_id,
+      username: r.username,
+      email: r.email || "",
+      created_at: r.created_at,
+      last_active_at: r.last_active_at || null,
+    })),
+  });
 });
 
 app.get("/api/health", (req, res) => res.json({ ok: true, time: nowIso() }));
@@ -1082,6 +2385,16 @@ app.post("/api/auction", requireAuth, (req, res) => {
   const numPrice = Number(price);
   if (!Number.isFinite(numPrice) || numPrice < 1) return res.status(400).json({ error: "Invalid price." });
   if (!character_name || !display_name) return res.status(400).json({ error: "Missing listing details." });
+  // v0.18.4: a gear listing's `item` blob used to be trusted completely -- a modified
+  // client could list (and another account could then buy) a completely fabricated item
+  // with every affix maxed out, an impossible tier/rarity pairing, or stats that could
+  // never come from IF.generate()/IF.reroll(). Same bounds check as the Blacksmith
+  // reroll endpoint and the Storage Vault deposit route above; see validateGearItem's own
+  // comment for what this does and doesn't prove (numbers-plausible, not provenance-proven).
+  if (type === "gear") {
+    const itemError = validateGearItem(item);
+    if (itemError) return res.status(400).json({ error: `This item can't be listed: ${itemError}` });
+  }
   const numQty = type === "gear" ? 1 : Math.max(1, Number(quantity) || 1);
   const itemJson = type === "gear" ? JSON.stringify(item || {}) : null;
   const roundedPrice = Math.round(numPrice);
