@@ -958,6 +958,10 @@ const ITEM_SALVAGE_MATERIALS_PER_SLOT = 3, ITEM_REROLL_MATERIAL_COST_MULT = 2;
 const ITEM_SELL_GOLD_PER_SLOT = 4;
 const ITEM_REROLL_GOLD_COST_MULT = 3;
 const ITEM_REFORGE_MATERIAL_COST_MULT = 6, ITEM_REFORGE_GOLD_COST_MULT = 12;
+// v0.20.2: "Refine" -- final, priciest crafting step. Priced off Reforge's own costs: 1.4x
+// Reforge's material cost, 4x Reforge's gold cost. Mirrors index.html's
+// Balance.REFINE_MATERIAL_COST_MULT/REFINE_GOLD_COST_MULT exactly.
+const ITEM_REFINE_MATERIAL_COST_MULT = 1.4, ITEM_REFINE_GOLD_COST_MULT = 4;
 
 // Upper-bound-only override, used SOLELY by validateGearItem's "is this affix value even
 // plausible" check below -- never by the actual reroll/generation math, which always uses
@@ -985,6 +989,9 @@ function itemSellValue(tier, slots) { return Math.round(Math.pow(tier, 1.5) * sl
 function itemRerollGoldCost(tier, slots) { return itemSellValue(tier, slots) * ITEM_REROLL_GOLD_COST_MULT; }
 function itemReforgeMaterialCost(tier, slots) { return itemRerollCost(tier, slots) * ITEM_REFORGE_MATERIAL_COST_MULT; }
 function itemReforgeGoldCost(tier, slots) { return itemSellValue(tier, slots) * ITEM_REFORGE_GOLD_COST_MULT; }
+// v0.20.2: mirrors index.html's Balance.refineCost()/refineGoldCost() exactly.
+function itemRefineMaterialCost(tier, slots) { return Math.round(itemReforgeMaterialCost(tier, slots) * ITEM_REFINE_MATERIAL_COST_MULT); }
+function itemRefineGoldCost(tier, slots) { return itemReforgeGoldCost(tier, slots) * ITEM_REFINE_GOLD_COST_MULT; }
 
 // Returns null if `item` is a plausible gear item the game's own generation rules could
 // have produced, or a short player-facing string describing what's wrong with it.
@@ -1207,6 +1214,86 @@ app.post("/api/blacksmith/reforge", requireAuth, (req, res) => {
   );
 
   res.json({ ok: true, item: reforged, materials: data.materials, account_gold: accountGoldAfter, _save_seq: data._save_seq });
+});
+
+// v0.20.2: "Refine" -- the final, priciest crafting step. Nearly identical validation to
+// Reforge just above (player-supplied affix_index, must exist on the item, can't target the
+// fixed "eyesight" bonus), but the outcome is different: the targeted affix keeps its STAT,
+// only its VALUE gets rerolled (same per-affix reroll math the Reroll endpoint above uses
+// for every affix, just applied to one chosen affix here instead of all of them). Priced at
+// itemRefineMaterialCost/itemRefineGoldCost (1.4x/4x Reforge's own costs).
+app.post("/api/blacksmith/refine", requireAuth, (req, res) => {
+  const slot = Number(req.body?.slot);
+  const instanceId = req.body?.instance_id;
+  const affixIndex = Number(req.body?.affix_index);
+  if (!Number.isInteger(slot) || slot < 0 || slot >= MAX_CHARACTER_SLOTS) {
+    return res.status(400).json({ error: "Invalid slot." });
+  }
+  if (typeof instanceId !== "string" || !instanceId) {
+    return res.status(400).json({ error: "Invalid instance_id." });
+  }
+  if (!Number.isInteger(affixIndex) || affixIndex < 0) {
+    return res.status(400).json({ error: "Invalid affix_index." });
+  }
+
+  const row = db.prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?").get(req.account.id, slot);
+  if (!row) return res.status(404).json({ error: "No character in that slot." });
+  let data;
+  try {
+    data = JSON.parse(row.data);
+  } catch (e) {
+    return res.status(500).json({ error: "Corrupt character save." });
+  }
+
+  const gearList = Array.isArray(data.gear_instances) ? data.gear_instances : [];
+  const idx = gearList.findIndex((g) => g && g.instance_id === instanceId);
+  if (idx === -1) return res.status(404).json({ error: "That item isn't in your backpack." });
+  const inst = gearList[idx];
+
+  const itemError = validateGearItem(inst);
+  if (itemError) return res.status(400).json({ error: `This item can't be refined: ${itemError}` });
+
+  if (affixIndex >= inst.affixes.length) {
+    return res.status(400).json({ error: "That stat slot doesn't exist on this item." });
+  }
+  if (inst.affixes[affixIndex].stat === "eyesight") {
+    return res.status(400).json({ error: "That bonus can't be refined." });
+  }
+
+  const totalSlotCount = (inst.affixes || []).length;
+  const materialCost = itemRefineMaterialCost(inst.tier, totalSlotCount);
+  const goldCost = itemRefineGoldCost(inst.tier, totalSlotCount);
+  const materials = data.materials || 0;
+  if (materials < materialCost) return res.status(400).json({ error: `Not enough materials -- this refine costs ${materialCost}.` });
+  if (getAccountGold(req.account.id) < goldCost) {
+    return res.status(400).json({ error: `Not enough gold -- this refine costs ${goldCost}g.` });
+  }
+
+  // The stat itself never changes here -- only reroll a fresh value for it, exactly like the
+  // Reroll endpoint's per-affix math above, just targeted at this one affix instead of all of
+  // them.
+  const targetStat = inst.affixes[affixIndex].stat;
+  let max = itemAffixMaxForTier(targetStat, inst.tier);
+  if (inst.slot === "weapon" && targetStat === "damage") max = Math.round(max * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
+  const newValue = 1 + Math.floor(Math.random() * Math.max(1, max));
+
+  const newAffixes = inst.affixes.slice();
+  newAffixes[affixIndex] = { stat: targetStat, value: newValue };
+  const refined = Object.assign({}, inst, { affixes: newAffixes });
+  gearList[idx] = refined;
+  data.gear_instances = gearList;
+  data.materials = materials - materialCost;
+  data._save_seq = (data._save_seq || 0) + 1;
+  const accountGoldAfter = creditAccountGold(req.account.id, -goldCost);
+
+  db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(
+    JSON.stringify(data),
+    nowIso(),
+    req.account.id,
+    slot
+  );
+
+  res.json({ ok: true, item: refined, materials: data.materials, account_gold: accountGoldAfter, _save_seq: data._save_seq });
 });
 
 /* ================= Server-authoritative Combat (v0.19) =================

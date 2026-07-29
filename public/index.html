@@ -1058,7 +1058,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.20.2-web",
+  GAME_VERSION:"v0.20.3-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   // v0.20 (#10): each town tier previously shared the exact same "A quiet camp on the edge
@@ -1185,6 +1185,14 @@ const Balance = {
   // value -- see rerollGoldCost()/reforgeCost()/reforgeGoldCost() below and their mirrored
   // server-side constants/functions in evergrind-server/server.js.
   REROLL_GOLD_COST_MULT:3, REFORGE_MATERIAL_COST_MULT:6, REFORGE_GOLD_COST_MULT:12,
+  // v0.20.2: "Refine" -- the final, priciest step in the crafting cycle. Like Reforge, the
+  // player picks exactly ONE existing affix, but instead of swapping its STAT, Refine keeps
+  // the stat and just rerolls its VALUE (same "keep the stat, reroll the number" idea as
+  // Reroll, just targeted at one stat instead of all of them). Priced off Reforge's own
+  // costs: 1.4x Reforge's material cost, 4x Reforge's gold cost -- see refineCost()/
+  // refineGoldCost() below and their mirrored server-side constants/functions in
+  // evergrind-server/server.js.
+  REFINE_MATERIAL_COST_MULT:1.4, REFINE_GOLD_COST_MULT:4,
   // Broken Bridge Trial (v0.11 rework): one continuous 10-step crossing per
   // promotion attempt (no more sub-"stages"). The number of planks hidden at each step
   // -- and so the per-step pass chance -- scales with the tier being climbed FROM:
@@ -1470,6 +1478,13 @@ const Balance = {
   rerollGoldCost(tier,slots){return this.sellValue(tier,slots)*this.REROLL_GOLD_COST_MULT;},
   reforgeCost(tier,slots){return this.rerollCost(tier,slots)*this.REFORGE_MATERIAL_COST_MULT;},
   reforgeGoldCost(tier,slots){return this.sellValue(tier,slots)*this.REFORGE_GOLD_COST_MULT;},
+  // v0.20.2: "Refine" costs, derived from Reforge's own costs (see REFINE_MATERIAL_COST_MULT/
+  // REFINE_GOLD_COST_MULT's comment above). Rounded to the nearest material since 1.4x an
+  // integer isn't always itself a whole number; the gold multiplier (4) always keeps the
+  // result a whole number already, but Math.round costs nothing to leave off there either --
+  // omitted for symmetry with reforgeGoldCost() just above, which also never rounds.
+  refineCost(tier,slots){return Math.round(this.reforgeCost(tier,slots)*this.REFINE_MATERIAL_COST_MULT);},
+  refineGoldCost(tier,slots){return this.reforgeGoldCost(tier,slots)*this.REFINE_GOLD_COST_MULT;},
   bagBuyPrice(cap){return cap*this.BAG_BUY_GOLD_PER_CAPACITY;},
   // v0.12: Merchant buy price for any consumable/scroll -- item.buy_price overrides the
   // default sell_value*VENDOR_MARKUP formula when an item needs an exact price point
@@ -2226,6 +2241,16 @@ const Net = {
     const res=await fetch(this.apiBase()+"/api/blacksmith/reforge",{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({slot,instance_id:instanceId,affix_index:affixIndex})});
     const json=await res.json().catch(()=>({}));
     if(!res.ok) throw new Error(json.error||"That item could not be reforged.");
+    return json;
+  },
+  // v0.20.2: "Refine" -- same server-authoritative pattern as reforgeGear() just above (the
+  // player names a target affix, the server owns the actual outcome), hitting the new POST
+  // /api/blacksmith/refine instead. Unlike Reforge, the targeted affix's STAT never changes
+  // here -- only its VALUE gets rerolled, same as a single-stat Reroll.
+  async refineGear(slot, instanceId, affixIndex){
+    const res=await fetch(this.apiBase()+"/api/blacksmith/refine",{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({slot,instance_id:instanceId,affix_index:affixIndex})});
+    const json=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(json.error||"That item could not be refined.");
     return json;
   },
   // v0.19: server-authoritative combat (see evergrind-server/server.js's new "Server-
@@ -8339,8 +8364,45 @@ function screenInventory(){
 // flag while the request is in flight, _save_seq reconciliation on the response, then
 // applying the server's authoritative result). The button/flow itself is unchanged: same
 // cost preview, same instant-feeling result once the response lands.
+// v0.20.2: shared "item header" block (icon, rarity-colored name+tier, category subtext) --
+// used by both the stat-picker popup (openStatPicker, below) and the new craft-result
+// overlay (showCraftResultOverlay, below) so a crafted item looks the exact same way in
+// either popup as it does everywhere else in the game (gearRow()'s backpack list, tooltips,
+// etc.), all driven by the same IF.displayName()/tierRomanNumeral()/IF.categoryLabel() the
+// rest of the game already uses -- nothing item-view-specific is reinvented here.
+function craftItemViewHeader(inst){
+  return h("div",{class:"row gap",style:{alignItems:"center",marginBottom:"10px"}},[
+    gearIcon(inst,36),
+    h("div",{},[
+      h("div",{class:"rarity-"+inst.rarity,style:{fontWeight:"bold",fontSize:"1.05em"}},[`${IF.displayName(inst)} (${tierRomanNumeral(inst.tier)})`]),
+      h("div",{class:"muted",style:{fontSize:".85em"}},[IF.categoryLabel(inst)]),
+    ]),
+  ]);
+}
+// v0.20.2: the craft-result overlay all 3 Blacksmith mechanisms (Reroll/Reforge/Refine) now
+// show on success, replacing the old plain toast ("Rerolled! You got a X."). Shows the same
+// item header as the stat-picker popup, then every affix on its own line via
+// IF.formatAffix(a,inst) -- which already appends the 💎 "perfected roll" marker when a stat
+// rolled its maximum possible value (see IF.isAffixMaxRoll()'s comment) -- so a maxed stat is
+// exactly as visible here as it is anywhere else in the game. A single "Continue" button
+// closes the modal; there's nothing else to confirm here, this is a result screen, not a
+// decision point.
+function showCraftResultOverlay(verb, inst){
+  const rows=(inst.affixes||[]).map((a)=>h("div",{style:{marginBottom:"3px"}},[IF.formatAffix(a,inst)]));
+  modalRoot.innerHTML="";
+  modalRoot.appendChild(h("div",{class:"modal-backdrop",onClick:(e)=>{ if(e.target===e.currentTarget) closeConfirmModal(); }},[
+    h("div",{class:"modal-box"},[
+      h("div",{style:{fontWeight:"bold",fontSize:"1.15em",marginBottom:"10px"}},[`${verb}!`]),
+      craftItemViewHeader(inst),
+      ...rows,
+      h("div",{class:"row",style:{marginTop:"12px"}},[
+        h("button",{onClick:closeConfirmModal},["Continue"]),
+      ]),
+    ]),
+  ]));
+}
 async function rerollBlacksmithItem(instanceId){
-  if(GF.rerolling||GF.reforging) return;
+  if(GF.rerolling||GF.reforging||GF.refining) return;
   GF.rerolling=instanceId; render();
   try{
     const result=await Net.rerollGear(PS.current_slot, instanceId);
@@ -8354,7 +8416,9 @@ async function rerollBlacksmithItem(instanceId){
     // lines below), rather than guessing the deduction client-side.
     if(typeof result.account_gold==="number") PS.gold=result.account_gold;
     autosave();
-    setToast(`Rerolled! You got a ${IF.displayName(result.item)}.`);
+    // v0.20.2: success now shows the full craft-result overlay instead of a plain toast --
+    // see showCraftResultOverlay()'s comment above for why.
+    showCraftResultOverlay("Rerolled", result.item);
   }catch(e){
     setToast("Could not reroll: "+e.message);
   }
@@ -8363,11 +8427,11 @@ async function rerollBlacksmithItem(instanceId){
 // v0.20.1 (#17): "Reforge" -- mirrors rerollBlacksmithItem()'s exact async flow (double-
 // submit guard, _save_seq reconciliation, gold sync), calling the new Net.reforgeGear()
 // instead. See POST /api/blacksmith/reforge in server.js for what actually changes: the
-// affix at affixIndex (chosen by the player -- see openReforgeStatPicker() below, v0.20.1
+// affix at affixIndex (chosen by the player -- see openStatPicker() below, v0.20.1
 // CORRECTION) gets swapped for a brand-new stat (and freshly rolled value), while every
 // other affix on the item is left exactly as it was.
 async function reforgeBlacksmithItem(instanceId, affixIndex){
-  if(GF.rerolling||GF.reforging) return;
+  if(GF.rerolling||GF.reforging||GF.refining) return;
   GF.reforging=instanceId; render();
   try{
     const result=await Net.reforgeGear(PS.current_slot, instanceId, affixIndex);
@@ -8377,30 +8441,64 @@ async function reforgeBlacksmithItem(instanceId, affixIndex){
     PS.materials=result.materials;
     if(typeof result.account_gold==="number") PS.gold=result.account_gold;
     autosave();
-    setToast(`Reforged! You got a ${IF.displayName(result.item)}.`);
+    showCraftResultOverlay("Reforged", result.item);
   }catch(e){
     setToast("Could not reforge: "+e.message);
   }
   GF.reforging=null; render();
 }
+// v0.20.2: "Refine" -- the final, priciest step in the crafting cycle. Mirrors
+// reforgeBlacksmithItem()'s exact async flow (double-submit guard, _save_seq reconciliation,
+// gold sync, craft-result overlay), calling the new Net.refineGear() instead. Unlike
+// Reforge, the affix at affixIndex keeps its STAT -- only its VALUE gets rerolled, so this is
+// the tool for "I love every stat on this item, I just want a better roll on one of them."
+async function refineBlacksmithItem(instanceId, affixIndex){
+  if(GF.rerolling||GF.reforging||GF.refining) return;
+  GF.refining=instanceId; render();
+  try{
+    const result=await Net.refineGear(PS.current_slot, instanceId, affixIndex);
+    PS._saveSeqFloor=Math.max(PS._saveSeqFloor||0, result._save_seq);
+    const idx=PS.findGearIndex(instanceId);
+    if(idx!==-1) PS.gear_instances[idx]=result.item;
+    PS.materials=result.materials;
+    if(typeof result.account_gold==="number") PS.gold=result.account_gold;
+    autosave();
+    showCraftResultOverlay("Refined", result.item);
+  }catch(e){
+    setToast("Could not refine: "+e.message);
+  }
+  GF.refining=null; render();
+}
 // v0.20.1 CORRECTION: Reforge originally had the server pick which existing affix to
 // replace at random -- Gwen's actual intent was for the PLAYER to choose which stat line
 // gets replaced, with the replacement stat/value still rolled by the server exactly as
-// before. This popup lists every eligible affix (everything except the rare fixed-value
-// "eyesight" bonus, which can't be reforged -- see server.js's identical exclusion) as a
-// clickable row; clicking one selects it (re-rendering the popup to show the highlight),
-// and the Reforge button stays disabled until a stat is actually picked. Rendered into
-// modalRoot the same way askConfirm() is (see that function's comment for why), but as its
-// own hand-rolled popup instead of reusing askConfirm() since it needs per-row click
-// handlers and a re-render-on-select loop that askConfirm()'s single-message shape can't
-// express.
-function openReforgeStatPicker(inst){
+// before. v0.20.2: generalized into a shared `mode` picker so the new Refine feature (same
+// "pick one affix" UX, different underlying action) doesn't need its own near-duplicate
+// popup -- openReforgeStatPicker()/openRefineStatPicker() below are just thin wrappers
+// naming which mode to use. This popup lists every eligible affix (everything except the
+// rare fixed-value "eyesight" bonus, which can't be reforged OR refined -- see server.js's
+// identical exclusion in both endpoints) as a clickable row; clicking one selects it
+// (re-rendering the popup to show the highlight), and the action button stays disabled
+// until a stat is actually picked. v0.20.2 restyle: each row (and the header above them) now
+// looks like the item's real view elsewhere in the game -- rarity-colored name+tier+category
+// via craftItemViewHeader(), and each stat rendered through the same IF.formatAffix() every
+// other item display uses, so a perfected-roll 💎 shows up here exactly like it does in the
+// backpack list. Rendered into modalRoot the same way askConfirm() is (see that function's
+// comment for why), but as its own hand-rolled popup instead of reusing askConfirm() since it
+// needs per-row click handlers and a re-render-on-select loop that askConfirm()'s
+// single-message shape can't express.
+function openStatPicker(inst, mode){
+  const isRefine=mode==="refine";
+  const verb=isRefine?"Refine":"Reforge";
+  const actionFn=isRefine?refineBlacksmithItem:reforgeBlacksmithItem;
+  const description=isRefine
+    ? "Pick ONE stat below to keep its type but reroll its VALUE from scratch. Every other stat on this item stays exactly as it is."
+    : "Pick ONE stat below to replace with a fresh, different stat (its value will be rolled from scratch). Every other stat on this item stays exactly as it is.";
   let selectedIdx=null;
   function renderPicker(){
     modalRoot.innerHTML="";
     const rows=inst.affixes.map((a,i)=>{
       if(a.stat==="eyesight") return null;
-      const label=`${IF.affixLabel(a.stat)} ${a.value}${IF.affixIsPercent(a.stat)?"%":""}`;
       const selected=selectedIdx===i;
       return h("div",{
         style:{
@@ -8410,24 +8508,24 @@ function openReforgeStatPicker(inst){
           fontWeight:selected?"bold":"normal",
         },
         onClick:()=>{ selectedIdx=i; renderPicker(); },
-      },[`${selected?"● ":"○ "}${label}`]);
+      },[`${selected?"● ":"○ "}${IF.formatAffix(a,inst)}`]);
     }).filter((r)=>r!==null);
     modalRoot.appendChild(h("div",{class:"modal-backdrop",onClick:(e)=>{ if(e.target===e.currentTarget) closeConfirmModal(); }},[
       h("div",{class:"modal-box"},[
-        h("div",{style:{lineHeight:"1.5",marginBottom:"10px"}},[
-          h("div",{style:{fontWeight:"bold",marginBottom:"4px"}},[`Reforge ${IF.displayName(inst)}`]),
-          "Pick ONE stat below to replace with a fresh, different stat (its value will be rolled from scratch). Every other stat on this item stays exactly as it is.",
-        ]),
+        craftItemViewHeader(inst),
+        h("div",{style:{lineHeight:"1.5",marginBottom:"10px"}},[description]),
         ...rows,
         h("div",{class:"row"},[
           h("button",{onClick:closeConfirmModal},["Cancel"]),
-          h("button",{disabled:selectedIdx===null,onClick:()=>{ const picked=selectedIdx; closeConfirmModal(); return reforgeBlacksmithItem(inst.instance_id, picked); }},["Reforge Selected Stat"]),
+          h("button",{disabled:selectedIdx===null,onClick:()=>{ const picked=selectedIdx; closeConfirmModal(); return actionFn(inst.instance_id, picked); }},[`${verb} Selected Stat`]),
         ]),
       ]),
     ]));
   }
   renderPicker();
 }
+function openReforgeStatPicker(inst){ return openStatPicker(inst, "reforge"); }
+function openRefineStatPicker(inst){ return openStatPicker(inst, "refine"); }
 
 // v0.20.1 CORRECTION: bulk "salvage every backpack item of one rarity" buttons -- the same
 // per-item math PS.salvageGear() already applies one at a time, just looped over every
@@ -8479,7 +8577,7 @@ function screenBlacksmith(){
   // Gwen's request -- salvages every matching-rarity backpack item in one click instead of
   // clicking Salvage on each one individually. Reuses the same busy-gate the Reroll/Reforge/
   // Salvage buttons below already use, so it can't fire mid-craft/reroll/reforge either.
-  const topBusy=!!GF.crafting||!!GF.rerolling||!!GF.reforging;
+  const topBusy=!!GF.crafting||!!GF.rerolling||!!GF.reforging||!!GF.refining;
   root.appendChild(h("div",{class:"row gap",style:{marginBottom:"12px",flexWrap:"wrap"}},[
     h("button",{disabled:topBusy,title:`Salvages every ${Balance.rarityDisplayName("Common")} item in your backpack in one click.`,onClick:()=>salvageAllGearOfRarity("Common",topBusy)},[`Salvage all ${Balance.rarityDisplayName("Common")} items`]),
     h("button",{disabled:topBusy,title:`Salvages every ${Balance.rarityDisplayName("Uncommon")} item in your backpack in one click.`,onClick:()=>salvageAllGearOfRarity("Uncommon",topBusy)},[`Salvage all ${Balance.rarityDisplayName("Uncommon")} items`]),
@@ -8497,7 +8595,7 @@ function screenBlacksmith(){
     // linear scaling) -- the v0.14 design principle of always showing exact numbers, not
     // vague "scales with tier" hand-waving, still applies, so the exact exponent and
     // constants are spelled out here rather than described qualitatively.
-    h("span",{class:"tooltip muted",style:{fontSize:".85em"},"data-tip":`Salvage value = round(Tier^1.5 x number of affixes x ${Balance.SALVAGE_MATERIALS_PER_SLOT}) materials.\nReroll cost = Salvage value x ${Balance.REROLL_MATERIAL_COST_MULT} materials, plus Sell value x ${Balance.REROLL_GOLD_COST_MULT} gold.\nReforge cost = Reroll's material cost x ${Balance.REFORGE_MATERIAL_COST_MULT}, plus Sell value x ${Balance.REFORGE_GOLD_COST_MULT} gold.\nHigher tier (steeply) and higher rarity (more affixes) both mean more materials/gold.`},["(?)"]),
+    h("span",{class:"tooltip muted",style:{fontSize:".85em"},"data-tip":`Salvage value = round(Tier^1.5 x number of affixes x ${Balance.SALVAGE_MATERIALS_PER_SLOT}) materials.\nReroll cost = Salvage value x ${Balance.REROLL_MATERIAL_COST_MULT} materials, plus Sell value x ${Balance.REROLL_GOLD_COST_MULT} gold.\nReforge cost = Reroll's material cost x ${Balance.REFORGE_MATERIAL_COST_MULT}, plus Sell value x ${Balance.REFORGE_GOLD_COST_MULT} gold.\nRefine cost = Reforge's material cost x ${Balance.REFINE_MATERIAL_COST_MULT}, plus Reforge's gold cost x ${Balance.REFINE_GOLD_COST_MULT}.\nHigher tier (steeply) and higher rarity (more affixes) both mean more materials/gold.`},["(?)"]),
   ]));
   if(PS.gear_instances.length===0) root.appendChild(h("div",{class:"muted"},["Bring gear from your backpack to reroll its bonuses."]));
   for(const inst of PS.gear_instances){
@@ -8509,7 +8607,12 @@ function screenBlacksmith(){
     // Net.reforgeGear() and server.js's POST /api/blacksmith/reforge.
     const reforgeMatCost=Balance.reforgeCost(inst.tier,slots);
     const reforgeGoldCost=Balance.reforgeGoldCost(inst.tier,slots);
-    const busy=!!GF.crafting||!!GF.rerolling||!!GF.reforging;
+    // v0.20.2: Refine -- the priciest step of all, keeps every affix's STAT exactly as-is
+    // and just rerolls ONE chosen affix's VALUE. See refineBlacksmithItem()/Net.refineGear()
+    // and server.js's POST /api/blacksmith/refine.
+    const refineMatCost=Balance.refineCost(inst.tier,slots);
+    const refineGoldCost=Balance.refineGoldCost(inst.tier,slots);
+    const busy=!!GF.crafting||!!GF.rerolling||!!GF.reforging||!!GF.refining;
     // v0.17 (#2): Reroll/Salvage are now disabled while a bag craft is actively in
     // progress (GF.crafting), matching the guard startCraftBag() already has on the Craft
     // button itself -- closes the one loose end flagged while investigating a v0.15
@@ -8524,6 +8627,7 @@ function screenBlacksmith(){
     root.appendChild(gearRow(inst,[
       h("button",{disabled:PS.materials<cost||PS.gold<goldCost||busy,title:"Rerolls every existing affix's VALUE only -- keeps the exact same stats, just re-rolls their numbers.",onClick:()=>rerollBlacksmithItem(inst.instance_id)},[GF.rerolling===inst.instance_id?"Rerolling...":`Reroll (${cost} mat, ${goldCost}g)`]),
       h("button",{disabled:PS.materials<reforgeMatCost||PS.gold<reforgeGoldCost||busy,title:"Lets you pick ONE existing affix to replace with a fresh, different stat (never a duplicate already on the item), rolling its value from scratch. Every other affix stays untouched.",onClick:()=>openReforgeStatPicker(inst)},[GF.reforging===inst.instance_id?"Reforging...":`Reforge (${reforgeMatCost} mat, ${reforgeGoldCost}g)`]),
+      h("button",{disabled:PS.materials<refineMatCost||PS.gold<refineGoldCost||busy,title:"Lets you pick ONE existing affix to keep its stat but reroll its VALUE from scratch. The priciest crafting option -- for when every stat on the item is right and you just want a better number on one of them.",onClick:()=>openRefineStatPicker(inst)},[GF.refining===inst.instance_id?"Refining...":`Refine (${refineMatCost} mat, ${refineGoldCost}g)`]),
       h("button",{disabled:busy,title:"Breaks the item down for materials outright. Cannot be undone.",onClick:()=>{PS.salvageGear(inst.instance_id);autosave();render();}},[`Salvage (+${Balance.salvageValue(inst.tier,slots)} mat)`]),
     ]));
   }
@@ -10084,6 +10188,11 @@ function legacyGearSection(){
 // Kept brief on purpose -- players don't need the internal blow-by-blow, just the
 // highlights per version, most recent first.
 const CHANGELOG=[
+  { version:"v0.20.3", notes:[
+    "New Blacksmith service: Refine. Like Reforge, you pick one existing stat on an item, but Refine keeps that stat exactly as it is and only rerolls its value -- the tool for when every stat on an item is right and you just want a better roll on one of them. It's the priciest option of the three (1.4x Reforge's material cost, 4x Reforge's gold cost), reflecting that it's the final step toward a perfected item.",
+    "The Reforge/Refine stat-picker popup now looks like the item's real in-game view: rarity-colored name and tier, category label, and each stat line shows the same 💎 \"perfected roll\" marker used everywhere else when a stat has rolled its maximum possible value.",
+    "Reroll, Reforge, and Refine now all show their result in a proper popup (title, rarity, every stat with its value and perfection marker, and a Continue button) instead of a plain one-line toast message.",
+  ]},
   { version:"v0.20.2", notes:[
     "Blacksmith Reforge correction: you now pick exactly which stat on an item gets replaced (from a popup listing its stats), instead of the game picking one at random. The new stat and its value are still rolled by the game, same as before.",
     "Blacksmith: added three \"Salvage all\" buttons (Crude / Common / Magical) that salvage every backpack item of that rarity in one click.",
@@ -10811,8 +10920,8 @@ function monsterGuideSpawnTypePanel(){
    Balance.rerollGoldCost()/Balance.reforgeCost()/Balance.reforgeGoldCost()/salvageValue(). */
 function blacksmithGuideCostTable(){
   const root=h("div",{class:"panel",style:{maxHeight:"320px",overflowY:"auto"}});
-  const cols="1fr 1fr 1fr 1fr 1fr 1fr";
-  root.appendChild(gridRow(["Tier","Affixes","Salvage (+mat)","Reroll (mat/g)","Reforge (mat/g)","Sell Value (g)"],{cols,header:true}));
+  const cols="1fr 1fr 1fr 1fr 1fr 1fr 1fr";
+  root.appendChild(gridRow(["Tier","Affixes","Salvage (+mat)","Reroll (mat/g)","Reforge (mat/g)","Refine (mat/g)","Sell Value (g)"],{cols,header:true}));
   const rows=[[1,1],[1,5],[3,3],[3,5],[5,5]];
   rows.forEach(([tier,slots],i)=>{
     root.appendChild(gridRow([
@@ -10820,6 +10929,7 @@ function blacksmithGuideCostTable(){
       `+${Balance.salvageValue(tier,slots)}`,
       `${Balance.rerollCost(tier,slots)} / ${Balance.rerollGoldCost(tier,slots)}g`,
       `${Balance.reforgeCost(tier,slots)} / ${Balance.reforgeGoldCost(tier,slots)}g`,
+      `${Balance.refineCost(tier,slots)} / ${Balance.refineGoldCost(tier,slots)}g`,
       `${Balance.sellValue(tier,slots)}g`,
     ],{cols,noBorder:i===rows.length-1}));
   });
@@ -10828,13 +10938,14 @@ function blacksmithGuideCostTable(){
 function screenBlacksmithGuide(){
   const root=h("div",{});
   root.appendChild(h("h2",{},["Blacksmith Guide"]));
-  root.appendChild(h("div",{class:"lore"},["What Reroll, Reforge, and Salvage each actually do to a piece of gear, and exactly what they cost."]));
+  root.appendChild(h("div",{class:"lore"},["What Reroll, Reforge, Refine, and Salvage each actually do to a piece of gear, and exactly what they cost."]));
   root.appendChild(h("button",{style:{marginBottom:"10px"},onClick:()=>{ GF.goto(GF._preBlacksmithGuideScreen||"town"); }},["← Back"]));
 
-  root.appendChild(h("h3",{},["The Three Services"]));
+  root.appendChild(h("h3",{},["The Four Services"]));
   root.appendChild(h("div",{class:"muted",style:{marginBottom:"6px"}},[h("b",{},["Salvage"]),": breaks the item down for materials outright. It's gone afterward -- use this on gear you don't want to keep improving."]));
   root.appendChild(h("div",{class:"muted",style:{marginBottom:"6px"}},[h("b",{},["Reroll"]),": keeps every existing affix STAT exactly as-is, and only re-rolls each one's numeric VALUE. Good when you like what the item rolled (e.g. damage + crit on a weapon) but want a shot at higher numbers."]));
-  root.appendChild(h("div",{class:"muted",style:{marginBottom:"10px"}},[h("b",{},["Reforge"]),": lets YOU pick exactly ONE of the item's existing affixes to replace, and swaps its STAT entirely for a fresh one (never a duplicate of a stat already on the item), rolling that new stat's value from scratch. Every other affix on the item is untouched. Good when an item's rarity/tier is great but one of its rolled stats doesn't fit your build -- you choose which stat goes, the game decides what replaces it."]));
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"6px"}},[h("b",{},["Reforge"]),": lets YOU pick exactly ONE of the item's existing affixes to replace, and swaps its STAT entirely for a fresh one (never a duplicate of a stat already on the item), rolling that new stat's value from scratch. Every other affix on the item is untouched. Good when an item's rarity/tier is great but one of its rolled stats doesn't fit your build -- you choose which stat goes, the game decides what replaces it."]));
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"10px"}},[h("b",{},["Refine"]),": the final, priciest step of the crafting cycle. Lets YOU pick exactly ONE of the item's existing affixes -- same picker as Reforge -- but its STAT stays exactly the same, only its VALUE gets rerolled. Use this once every stat on an item is already exactly the one you want, and all that's left is chasing a better number on one of them."]));
 
   root.appendChild(h("h3",{},["Cost Formulas"]));
   root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},[
@@ -10842,7 +10953,8 @@ function screenBlacksmithGuide(){
     `Sell value = round(Tier^1.5 x affixes x ${Balance.SELL_GOLD_PER_SLOT}) gold (same figure the Merchant's Sell button shows).`, h("br",{}),
     `Reroll cost = Salvage value x ${Balance.REROLL_MATERIAL_COST_MULT} materials, plus Sell value x ${Balance.REROLL_GOLD_COST_MULT} gold.`, h("br",{}),
     `Reforge cost = Reroll's material cost x ${Balance.REFORGE_MATERIAL_COST_MULT}, plus Sell value x ${Balance.REFORGE_GOLD_COST_MULT} gold.`, h("br",{}),
-    "Higher tier (steeply, since it's an exponent) and higher rarity (more affixes) both push every one of these costs up -- Reforge is always the priciest of the three since it's rewriting a stat entirely, not just its value.",
+    `Refine cost = Reforge's material cost x ${Balance.REFINE_MATERIAL_COST_MULT}, plus Reforge's gold cost x ${Balance.REFINE_GOLD_COST_MULT}.`, h("br",{}),
+    "Higher tier (steeply, since it's an exponent) and higher rarity (more affixes) both push every one of these costs up -- Refine is always the priciest of the four, since perfecting a stat you've already locked in is the very last mile of gearing an item up.",
   ]));
   root.appendChild(blacksmithGuideCostTable());
 
