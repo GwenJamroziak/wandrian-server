@@ -667,8 +667,17 @@ function itemIconSvg(itemId){
   const item=DL.getItem(itemId);
   const hue=hashHue(itemId);
   if(item.type==="consumable"){
-    const liquid=`hsl(${hue},70%,52%)`;
-    return `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><rect x="16" y="4" width="8" height="6" rx="1" fill="#8a8a8a"/><path d="M15,10 L15,17 Q9,22 9,29 Q9,36 20,36 Q31,36 31,29 Q31,22 25,17 L25,10 Z" fill="#cfe6ee" stroke="#7a9aa8" stroke-width="1.5"/><path d="M10,25 Q9,33 20,34 Q31,33 30,25 Q31,31 20,32 Q9,31 10,25 Z" fill="${liquid}"/></svg>`;
+    // v0.20 (#13): Health Potions now always render TRUE red liquid (scaled darker/richer
+    // for higher-tier, higher heal_amount potions) instead of the generic per-item hash
+    // tint every other consumable uses -- previously a health potion's liquid color was
+    // whatever hue its item id's hash happened to land on, so a health potion could easily
+    // render green or blue, reading as the wrong kind of potion at a glance. Also adds a
+    // thin white "glass" highlight sliver near the neck, the same glinting-glass cue real
+    // potion-vial art uses, on top of the existing light-blue empty-glass silhouette.
+    const isHealthPotion=!!item.heal_amount;
+    const liquid=isHealthPotion ? `hsl(355,72%,${58-clampf((item.heal_amount-20)/(180-20),0,1)*22}%)` : `hsl(${hue},70%,52%)`;
+    const glassSliver=isHealthPotion ? `<path d="M13,12 Q12,15 13,19" stroke="#ffffff" stroke-width="1.6" fill="none" opacity="0.7" stroke-linecap="round"/>` : "";
+    return `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><rect x="16" y="4" width="8" height="6" rx="1" fill="#8a8a8a"/><path d="M15,10 L15,17 Q9,22 9,29 Q9,36 20,36 Q31,36 31,29 Q31,22 25,17 L25,10 Z" fill="#cfe6ee" stroke="#7a9aa8" stroke-width="1.5"/><path d="M10,25 Q9,33 20,34 Q31,33 30,25 Q31,31 20,32 Q9,31 10,25 Z" fill="${liquid}"/>${glassSliver}</svg>`;
   }
   if(item.type==="scroll"){
     const ribbon=`hsl(${hue},60%,45%)`;
@@ -833,13 +842,24 @@ const Balance = {
   // screen's rendering code at all.
   CRITTER_HITS_REQUIRED:1,
   // v0.18.2.1 CORRECTION: Gwen's original spec described a flat "+10 XP per point" bonus,
-  // but the intent was actually a PERSISTENT PERCENTAGE buff -- +10% experience gained on
-  // every kill for as long as you're exploring that tier's forest, per point of POSITIVE
-  // Forest Reputation, stacking multiplicatively on top of (not replacing) every other XP
-  // multiplier (Community XP, shrines, gear XP Find). Negative reputation never reduces XP;
-  // see PS.getForestReputationXpMult()/getForestReputationExtraRoamers() for how each
-  // direction is actually spent.
-  FOREST_REPUTATION_XP_PCT_PER_POINT:10,
+  // but the intent was actually a PERSISTENT PERCENTAGE buff -- experience gained on every
+  // kill for as long as you're exploring that tier's forest, per point of POSITIVE Forest
+  // Reputation. As of v0.20 (#9.3) this stacks ADDITIVELY (summed as a percentage, applied
+  // once) with every other XP bonus (Community XP, shrines, gear XP Find) instead of
+  // multiplying them together -- see getTotalXpBonusPct()'s comment for the full model.
+  // Negative reputation never reduces XP; see PS.getForestReputationXpMult()/
+  // getForestReputationExtraRoamers() for how each direction is actually spent.
+  // v0.20 (#9.1): +10% per point was WAY too generous once you could rack up dozens of
+  // saved critters over a single tier's playthrough -- dialed down to +1% per point of
+  // positive reputation, per Gwen's spec ("+10% -> +1% per saved critter").
+  FOREST_REPUTATION_XP_PCT_PER_POINT:1,
+  // v0.20 (#9.2): the "Currently playing" community XP buff used to be +100% per EXTRA
+  // active player -- i.e. the raw headcount itself WAS the multiplier (2 players = 2x XP,
+  // 3 = 3x, ...). That compounded into an absurd multiplier once a handful of people were
+  // online at once, especially once (v0.20 #9.3) it started stacking with every other XP
+  // bonus source. Now it's +10% per extra player, additive with the rest -- see
+  // getTotalXpBonusPct()'s comment for the full stacking model.
+  COMMUNITY_XP_PCT_PER_EXTRA_PLAYER:10,
   STAMINA_MAX_BASE:100.0, STAMINA_COST_PER_STEP:1.0,
   SHRINE_STAMINA_BUFF_PCT:1.0, SHRINE_XP_BUFF_MULT:1.5, SHRINE_XP_BUFF_ENCOUNTERS:20,
   // v0.17.1 (#12): three new shrine types, each an even 1-in-5 outcome alongside the
@@ -912,6 +932,11 @@ const Balance = {
   // which made them feel routine rather than a special find. Reduced to a 40% chance per
   // maze -- see generateMaze()'s roll before calling placeStronghold().
   STRONGHOLD_SPAWN_CHANCE:0.40,
+  // v0.20 (#19): Strongholds (guardian tougher/rewards better than an ordinary encounter,
+  // per the comments below) no longer spawn at all below this area level -- same reasoning
+  // and same gating pattern as ROAMING_MOB_MIN_AREA_LEVEL just below: a level-1 maze
+  // shouldn't be able to roll a fight that's meant to feel like a mini-boss.
+  STRONGHOLD_MIN_AREA_LEVEL:2,
   // v0.18.2 (#2): tripled from 0.05 -- Strongholds themselves became 2.5x rarer to even
   // find back in v0.17.2 (100% -> 40% spawn chance per maze, see STRONGHOLD_SPAWN_CHANCE
   // above), so even with this same 5% per-guardian-kill roll, keys had effectively become
@@ -929,6 +954,13 @@ const Balance = {
   // guardian's damage is deliberately left at the normal per-area rate) -- named with a
   // "Roaming " prefix in combat, mirroring how a guardian gets "Guardian " prepended.
   ROAMING_MOB_COUNT_PER_MAZE:3, ROAMING_MOB_HP_MULT:4.0, ROAMING_MOB_DAMAGE_MULT:1.5, ROAMING_MOB_XP_MULT:2.0,
+  // v0.20 (#18): roaming mobs (tougher than a Stronghold guardian in every way that matters,
+  // per the comment above) no longer spawn at all below this area level -- a brand new
+  // character's very first few mazes were getting hit with a roamer before they'd had any
+  // chance to gear up, per Gwen's report. Matches the same "min area level" gating pattern
+  // already used for poison traps (POISON_TRAP_MIN_AREA_LEVEL) and trapdoor falls
+  // (TRAPDOOR_MIN_AREA_LEVEL) just above.
+  ROAMING_MOB_MIN_AREA_LEVEL:4,
   // v0.19.1 (#5): a Hoarding roamer's flat per-tick chance to just stay put instead of
   // moving at all -- see tickRoamingMobs()'s per-behavior branch for the full writeup of
   // all three behavior archetypes (Regular/Charging/Hoarding).
@@ -989,9 +1021,23 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.19.2-web",
+  GAME_VERSION:"v0.20-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
+  // v0.20 (#10): each town tier previously shared the exact same "A quiet camp on the edge
+  // of a vast, overgrown forest." subtext regardless of which of the 5 TOWN_NAMES you'd
+  // actually reached -- differentiated so each camp's one-line lore matches its own name and
+  // the forest around it, mirroring the escalating danger/atmosphere implied by the name
+  // itself (a quiet camp -> a misty hollow -> a fading twilight reach -> a starlit bastion ->
+  // a hushed, ash-choked sanctum at the very edge). Indexed identically to TOWN_NAMES, see
+  // getTownLore().
+  TOWN_LORE:[
+    "A quiet camp on the edge of a vast, overgrown forest.",
+    "A misty hollow where the willows lean low over slow, dark water.",
+    "A wind-scoured reach where the light seems to fade early, no matter the hour.",
+    "A fortified outpost beneath a sky that never quite goes fully dark.",
+    "A hushed sanctum wrapped in drifting ash -- the last camp before the forest ends.",
+  ],
   NPC_BLACKSMITH_NAME:"Grondar Emberhand", NPC_ALCHEMIST_NAME:"Maren Thistlebrew", NPC_MERCHANT_NAME:"Cassius Wraithcoin",
   NPC_GOBLIN_NAME:"Grimsnick the Sackrattler",
   ITEM_TIER_MAX:5, ITEM_STAT_PER_TIER:5, ITEM_TIER_ADJECTIVES:["Withered","Budding","Blooming","Ancient","Eternal"],
@@ -1025,10 +1071,15 @@ const Balance = {
   // Tier 1 read as barely worth equipping for; this is the new target range going forward.
   // Existing items rolled under either older range are untouched by this change (see the
   // Legacy Gear admin tool for identifying/optionally rescaling those on a case-by-case basis).
+  // v0.20 (#11): new "block_chance" gear affix -- a flat percentage-point bonus to Block
+  // Chance (same underlying pool PS.getBlockChance()/combatGetBlockChance() already sum
+  // Dexterity and the Potion of Wardveil temp-buff into, see getBlockChance()'s comment). T1
+  // max of 2 run through the same max(tier)=tier*max(T1) formula as everything else here
+  // lands exactly on Gwen's spec of +2/4/6/8/10% across T1-T5.
   AFFIX_TIER1_MAX:{
     damage:5, hp:15, crit:5, armor:20, regen:5, gold_find:10, xp_find:5,
     stamina_max:15, strength:5, dexterity:5, vitality:5, intelligence:5, poison_resist:5,
-    magic_find:10,
+    magic_find:10, block_chance:2,
   },
   RARITY_TABLE:[{name:"Common",slots:1,weight:60},{name:"Uncommon",slots:2,weight:25},{name:"Rare",slots:3,weight:10},{name:"Epic",slots:5,weight:4},{name:"Legendary",slots:8,weight:1}],
   // v0.12.1: player-facing rarity wording only -- RARITY_TABLE's own `name` values stay
@@ -1048,7 +1099,7 @@ const Balance = {
   // something better (see Balance.rollRarity()'s mfPct param). Its T1 max of 10 run through
   // the SAME max(tier)=tier*max(T1) formula as poison_resist above lands exactly on Gwen's
   // spec of 10/20/30/40/50% across T1-T5, no special-casing needed.
-  AFFIX_POOL:["damage","hp","crit","armor","regen","gold_find","xp_find","stamina_max","strength","dexterity","vitality","intelligence","poison_resist","magic_find"],
+  AFFIX_POOL:["damage","hp","crit","armor","regen","gold_find","xp_find","stamina_max","strength","dexterity","vitality","intelligence","poison_resist","magic_find","block_chance"],
   // v0.16: the ankle-bite trap now applies a Poison effect instead of just a one-time
   // hit -- see PS.applyPoison()/PS.getActiveBonfireBonus()-style getters below. Poison
   // drains for POISON_DURATION_MS, floors at 1 HP on its own (never lethal by itself), and
@@ -1150,10 +1201,67 @@ const Balance = {
   // character's NEXT Level 1 (see PS.bridge_fail_streak / resolveMasterTrial()), until a
   // successful promotion resets the streak (and this bonus) back down to the base value.
   STARTING_STAT_POINTS:3,
-  BLOCK_CHANCE_PER_DEX:0.01, BLOCK_CHANCE_MAX:0.60,
+  // v0.20 (#9.6): dialed down from 1% to 0.5% per point of Dexterity -- with the deeper
+  // level-cap builds this project has accumulated (60 levels, 3 stat points/level, plus
+  // gear affixes on top), 1%/point let a heavily-invested character block an unreasonably
+  // large share of incoming hits well before the 60% cap. Must stay in sync with
+  // server.js's CB.BLOCK_CHANCE_PER_DEX (the real combat calculation).
+  BLOCK_CHANCE_PER_DEX:0.005, BLOCK_CHANCE_MAX:0.60,
 
-  xpRequiredForLevel(level){return Math.round(this.KILLS_PER_LEVEL_TARGET*this.MONSTER_BASE_XP*Math.pow(1.0+this.LEVEL_XP_GROWTH,level));},
+  // v0.20 (#9.7): Vitality rework. The OLD model (see PS._applyLeveledXp()'s pre-v0.20
+  // history) added the character's CURRENT total Vitality to a cumulative bonus pool on
+  // EVERY level-up from then on -- which meant a point invested early got counted again
+  // and again on every subsequent level-up, while a point invested late barely compounded
+  // at all. The total bonus at level cap was effectively a running SUM of "vitality at each
+  // past level-up", not a flat per-point amount, and it grew roughly quadratically with
+  // level -- this is what produced Gwen's reported ~430 HP / ~418 Stamina Level-1 Thornguard
+  // (a stale-singleton bug, see PS.startNewCharacter()'s comment, but only possible in the
+  // first place because the underlying bonus pool could get so large from one character).
+  // NEW model: a flat, non-compounding amount of HP/Stamina PER POINT of Vitality
+  // currently invested, computed live from the attribute (exactly like gearBonus() -- see
+  // getMaxHp()/getMaxStamina()) instead of accumulated at level-up time. It no longer
+  // matters WHEN a point was spent, only how many points are currently in Vitality, which
+  // also means points reallocated in the future (if that ever ships) would just work.
+  // "Class-based" per Gwen's spec: the per-point rate scales off each class's own existing
+  // hp_per_level (already the game's per-class tankiness knob -- Thornguard's 14 vs
+  // Wizard's 8, etc.) rather than a brand new per-class field, so it can never drift out of
+  // proportion with a class's other HP scaling and needs no new data to maintain.
+  // Deliberately NOT migrated for already-saved characters (Gwen's explicit call on this
+  // task) -- unlike gold/levels/items, a derived-stat FORMULA change is expected to shift
+  // everyone's computed max HP/Stamina the moment it ships, the same way v0.20 (#9.6)'s
+  // block-chance rebalance did. bonus_hp_from_attributes/bonus_stamina_from_attributes
+  // remain in the save schema (old saves still parse fine) but are no longer written to or
+  // read from -- see getMaxHp()/getMaxStamina() below and the fields' own declaration.
+  // Must stay in sync with server.js's CB.VIT_HP_PER_POINT_RATIO/VIT_STAMINA_PER_POINT_RATIO
+  // (the real combat/leveling calculation).
+  VIT_HP_PER_POINT_RATIO:0.35, VIT_STAMINA_PER_POINT_RATIO:0.15,
+  vitHpBonus(classData,vit){ return (vit||0)*(classData.hp_per_level||5)*this.VIT_HP_PER_POINT_RATIO; },
+  vitStaminaBonus(classData,vit){ return (vit||0)*(classData.hp_per_level||5)*this.VIT_STAMINA_PER_POINT_RATIO; },
+
+  // v0.20 (#9.4): steepened further on top of the existing exponential LEVEL_XP_GROWTH
+  // curve -- the number of "kills worth" of XP a level demands now itself grows by +1 per
+  // level (level 1 targets KILLS_PER_LEVEL_TARGET kills, level 2 targets +1 more, level 3
+  // +2 more, and so on), instead of staying fixed at KILLS_PER_LEVEL_TARGET forever. This
+  // compounds with the exponential growth already in effect, so the curve gets
+  // progressively steeper at higher levels than a purely exponential curve alone would.
+  // Must stay in sync with server.js's combatXpRequiredForLevel() (real combat leveling)
+  // AND trialXpRequiredForLevel() (Broken Bridge Trial resets) -- all three MUST agree, or
+  // a trial reset could hand out a different xp_to_next than a normal level-up would.
+  xpRequiredForLevel(level){return Math.round((this.KILLS_PER_LEVEL_TARGET+(level-1))*this.MONSTER_BASE_XP*Math.pow(1.0+this.LEVEL_XP_GROWTH,level));},
   monsterXpReward(baseXp,areaLevel){return baseXp*Math.pow(1.0+this.AREA_XP_GROWTH,areaLevel);},
+  // v0.20 (#9.5): farming an area BELOW your own character level now pays out steeply
+  // reduced XP -- multiplier decays geometrically per level of gap (character level minus
+  // area level) once that gap is positive, floored so it never hits a hard 0. Venturing into
+  // an area AT or ABOVE your own level (the "climbing" direction) gets no penalty at all --
+  // that risk is already priced in via tougher mobs. The actual kill-XP grant is computed
+  // server-side (see combatLevelDiffXpMult() in server.js, which this must stay in sync
+  // with); this client copy exists for the Experience Guide's illustrative numbers.
+  UNDERLEVEL_XP_DECAY_PER_LEVEL:0.80, UNDERLEVEL_XP_MIN_MULT:0.05,
+  levelDiffXpMult(charLevel,areaLevel){
+    const gap=(charLevel||1)-(areaLevel||1);
+    if(gap<=0) return 1.0;
+    return Math.max(this.UNDERLEVEL_XP_MIN_MULT, Math.pow(this.UNDERLEVEL_XP_DECAY_PER_LEVEL,gap));
+  },
   // v0.17.3 (#9): extra multiplier stacked on top of the normal area-level curve, active
   // only from LATE_GAME_MONSTER_GROWTH_START_LEVEL (10) onward -- see that constant's
   // comment above for the full rationale and balance_sim.js findings. Below level 10 this
@@ -1657,7 +1765,7 @@ const IF = {
     const effectiveMax=(inst.slot==="weapon" && a.stat==="damage") ? Math.round(baseMax*Balance.WEAPON_DAMAGE_AFFIX_MULT) : baseMax;
     return a.value>=effectiveMax;
   },
-  affixIsPercent(stat){return ["crit","armor","gold_find","xp_find","poison_resist","magic_find"].includes(stat);},
+  affixIsPercent(stat){return ["crit","armor","gold_find","xp_find","poison_resist","magic_find","block_chance"].includes(stat);},
   affixLabel(stat){
     switch(stat){
       case "damage": return "Damage"; case "hp": return "Hit Points"; case "crit": return "Critical Strike";
@@ -1666,6 +1774,8 @@ const IF = {
       case "strength": return "Strength"; case "dexterity": return "Dexterity"; case "vitality": return "Vitality"; case "intelligence": return "Intelligence";
       case "poison_resist": return "Poison Resistance";
       case "magic_find": return "Magic Find";
+      // v0.20 (#11): new gear affix -- see Balance.AFFIX_TIER1_MAX's comment.
+      case "block_chance": return "Block Chance";
       default: return stat;
     }
   },
@@ -2252,7 +2362,25 @@ const PS = {
   // death penalty, Auction House, etc.) keeps working completely unchanged -- it's just
   // reading/writing the account's shared number under the hood instead of a per-character one.
   get gold(){ return Net.accountGold||0; },
-  set gold(v){ Net.accountGold=v; },
+  // v0.20 (#1): every player-caused (or server-confirmed) gold change now automatically
+  // shows a floating "+Ng"/"-Ng" notification right next to the "X gold" figure in the
+  // player tile (see statHeader()'s floatLayer("gold") and notifyGoldChange() below).
+  // Catching it HERE, at the single choke point every `this.gold-=`/`this.gold+=`/
+  // `PS.gold=result.account_gold` call already funnels through (buyConsumable, the death
+  // penalty, Auction House fees/purchases, the Gambling Goblin, admin grants, etc.), means
+  // no individual call site needed to be touched by hand, and none can be missed by a
+  // future one either. Deliberately does NOT fire for the account-gold SYNC paths (login,
+  // character load, the websocket account_gold push, or the combat kill-credit in
+  // applyCombatLoot()) -- those all write straight to Net.accountGold itself rather than
+  // through this setter (see the v0.17 #29 comment on the getter above for why that split
+  // exists), and a combat kill already gets its own monster-anchored "+Ng" float, so
+  // duplicating it here would just be noise on top of noise.
+  set gold(v){
+    const prev=Net.accountGold||0;
+    const delta=v-prev;
+    Net.accountGold=v;
+    if(delta!==0) notifyGoldChange(delta);
+  },
   current_hp:0, current_stamina:0, gear_instances:[], equipped:{}, equipped_bags:[],
   // v0.17.1 (#8) BUG FIX: unequipping a bag used to just splice it out of equipped_bags
   // with nowhere for it to actually go -- the bag was simply deleted. `bags` is a stackable
@@ -2315,12 +2443,14 @@ const PS = {
   temp_buffs:{},
 
   // Stat Points / Attributes (v0.10). `attributes` is base class value + spent points
-  // only, it deliberately excludes gear, see getTotalAttr(). `bonus_hp_from_attributes`/
-  // `bonus_stamina_from_attributes` are cumulative totals built up one level-up at a time
-  // (see addXp()): each level-up adds that moment's Vitality (and, for the paths where
-  // Strength grants HP instead of damage, that moment's Strength too) to these pools, and
-  // the pools only ever grow, previously granted HP/Stamina isn't lost by reallocating
-  // points later, matching a real Diablo-style build where early investment compounds.
+  // only, it deliberately excludes gear, see getTotalAttr().
+  // `bonus_hp_from_attributes`/`bonus_stamina_from_attributes`: v0.20 (#9.7) VESTIGIAL --
+  // pre-v0.20 this was a cumulative pool built up one level-up at a time (see
+  // Balance.VIT_HP_PER_POINT_RATIO's comment for exactly why that model was replaced).
+  // getMaxHp()/getMaxStamina() now compute the Vitality bonus LIVE from attributes.vit via
+  // Balance.vitHpBonus()/vitStaminaBonus() instead, so these two fields are no longer read
+  // or written anywhere -- kept only so old saved character JSON (which still has these
+  // keys) continues to parse without error.
   attributes:{str:0,dex:0,vit:0,int:0}, unspent_stat_points:0,
   bonus_hp_from_attributes:0, bonus_stamina_from_attributes:0,
 
@@ -2405,7 +2535,10 @@ const PS = {
     // where it doubles up as both the damage stat AND the block stat for that path.
     // v0.14: Potion of Wardveil adds a flat temporary block_chance buff (stored as
     // percentage points, e.g. 15 -> +15%) on top of the Dexterity-derived amount.
-    return clampf(this.getTotalAttr("dex")*Balance.BLOCK_CHANCE_PER_DEX+this.getActiveTempBuff("block_chance")/100.0,0,Balance.BLOCK_CHANCE_MAX);
+    // v0.20 (#11): gear can now also roll a "block_chance" affix (see Balance.AFFIX_TIER1_MAX's
+    // comment, +2/4/6/8/10% by tier) -- summed in here the same way every other gear stat
+    // routes through gearBonus(), on top of both the Dexterity-derived and temp-buff amounts.
+    return clampf(this.getTotalAttr("dex")*Balance.BLOCK_CHANCE_PER_DEX+this.getActiveTempBuff("block_chance")/100.0+this.gearBonus("block_chance")/100.0,0,Balance.BLOCK_CHANCE_MAX);
   },
   // v0.17.3 (#2/#3): `startingPoints` lets callers grant more than the default -- a failed
   // Broken Bridge Trial attempt bumps this above Balance.STARTING_STAT_POINTS (see
@@ -2441,7 +2574,10 @@ const PS = {
     const inst=this.equipped[slot];
     return !!(inst && !this.canEquipGear(inst));
   },
-  getMaxHp(){const c=this.getClassData(); return (c.base_hp||50)+(c.hp_per_level||5)*(this.level-1)+this.gearBonus("hp")+this.bonus_hp_from_attributes;},
+  // v0.20 (#9.7): Vitality's HP contribution is now computed LIVE from attributes.vit via
+  // Balance.vitHpBonus() instead of the old bonus_hp_from_attributes accumulator -- see that
+  // constant's comment for the full rationale.
+  getMaxHp(){const c=this.getClassData(); return (c.base_hp||50)+(c.hp_per_level||5)*(this.level-1)+this.gearBonus("hp")+Balance.vitHpBonus(c,this.attributes.vit);},
   // v0.12: split out so the UI can show "base damage (from level+stats)" separately from
   // "bonus damage (from currently equipped gear)" -- previously these were only visible
   // combined, so a player had no way to tell whether e.g. +5 damage on a ring was actually
@@ -2516,7 +2652,9 @@ const PS = {
     if(this.magic_find_rounds_left>0) this.magic_find_rounds_left--;
   },
   getRegen(){const c=this.getClassData(); return (c.regen||0.0)+this.gearBonus("regen");},
-  getMaxStamina(){return Balance.STAMINA_MAX_BASE+this.gearBonus("stamina_max")+this.bonus_stamina_from_attributes;},
+  // v0.20 (#9.7): same live-computed switch as getMaxHp() above, see
+  // Balance.VIT_HP_PER_POINT_RATIO's comment for the full rationale.
+  getMaxStamina(){return Balance.STAMINA_MAX_BASE+this.gearBonus("stamina_max")+Balance.vitStaminaBonus(this.getClassData(),this.attributes.vit);},
   getGoldFindMult(){return 1.0+this.gearBonus("gold_find")/100.0;},
   getXpFindMult(){return 1.0+this.gearBonus("xp_find")/100.0;},
 
@@ -2544,29 +2682,50 @@ const PS = {
     // gear stat with no line here at all -- nothing wrong with the stat itself, it just never
     // got added to this summary alongside every other affix.
     const eye=this.gearBonus("eyesight"); if(eye) parts.push(`+${Math.round(eye)} Eyesight (wider maze reveal radius)`);
+    // v0.20 (#11): new Block Chance gear affix -- see Balance.AFFIX_TIER1_MAX's comment.
+    const bc=this.gearBonus("block_chance"); if(bc) parts.push(`+${Math.round(bc)}% Block Chance`);
     return parts;
   },
 
-  addXp(amount){
-    let buffed=amount*this.getXpFindMult();
-    if(this.xp_buff_encounters_left>0) buffed*=this.xp_buff_multiplier;
-    this.xp+=Math.round(buffed);
-    this.lifetime_xp+=Math.round(buffed);
+  // v0.20 (#9.3): pure bookkeeping -- adds EXACTLY `amount` XP (already fully bonus-adjusted
+  // by whoever computed it) and runs the level-up loop, with no multiplier applied here.
+  // Factored out of addXp() below so both it and the real-combat-kill flow (which receives
+  // an already-server-finalized amount in k.xp_gained, see applyAttackResult() in
+  // screenCombat()) can share the exact same level-up bookkeeping without either one
+  // double-applying a bonus the other already accounted for.
+  _applyLeveledXp(amount){
+    const rounded=Math.round(amount);
+    this.xp+=rounded;
+    this.lifetime_xp+=rounded;
     let leveled=false;
     while(this.xp>=this.xp_to_next && this.level<Balance.LEVEL_CAP){
       this.xp-=this.xp_to_next; this.level++; this.xp_to_next=Balance.xpRequiredForLevel(this.level);
       this.unspent_stat_points+=Balance.STAT_POINTS_PER_LEVEL;
-      // Vitality always adds to both pools (base+points only, never gear, see the
-      // attributes/bonus_* fields' comment for why). Strength has no effect at all for
-      // Wizard or Windrider (only Thornguard uses Strength, for damage, see
-      // getDamageRange()) -- as of v0.11 it no longer grants HP for those two paths
-      // either, so there's a real choice per point instead of Vitality always winning.
-      this.bonus_hp_from_attributes+=(this.attributes.vit||0);
-      this.bonus_stamina_from_attributes+=(this.attributes.vit||0);
+      // v0.20 (#9.7): no longer touches bonus_hp_from_attributes/bonus_stamina_from_attributes
+      // here -- Vitality's HP/Stamina contribution is now computed LIVE from attributes.vit
+      // every time getMaxHp()/getMaxStamina() is called (see Balance.VIT_HP_PER_POINT_RATIO's
+      // comment), so a level-up needs no special bookkeeping for it beyond the full-HP heal
+      // below. Strength still has no effect at all for Wizard or Windrider either way (only
+      // Thornguard uses Strength, for damage, see getDamageRange()).
       this.current_hp=this.getMaxHp(); leveled=true;
     }
     if(this.level>=Balance.LEVEL_CAP) this.xp=0;
     return leveled;
+  },
+  // Applies this client's own full additive XP-bonus stack (see getTotalXpBonusPct()'s
+  // comment for the v0.20 (#9.3) stacking model) to a RAW/base amount before adding it --
+  // used by callers that hand this a pre-bonus number (the admin dev-tool's "+Levels"
+  // button, primarily). Real combat kills do NOT go through here (see addXpRaw() below):
+  // the server already computed and applied this exact same stack server-side, so re-doing
+  // it here on an already-final amount would double the bonus.
+  addXp(amount){
+    return this._applyLeveledXp(amount*(1+getTotalXpBonusPct()/100));
+  },
+  // v0.20 (#9.3): adds an amount that's ALREADY final (every XP bonus already baked in by
+  // whoever computed it -- namely the server, for a real combat kill) with no further
+  // multiplier applied. See applyAttackResult()'s kill branch in screenCombat().
+  addXpRaw(amount){
+    return this._applyLeveledXp(amount);
   },
   canAttemptTrial(){return this.level>=Balance.trialLevelRequirement(this.getClassData().tier||1);},
   gamblingUnlocked(){return this.highest_tier_reached>=2 || this.season_won;},
@@ -3292,6 +3451,14 @@ const PS = {
       // v0.18.2 (#8): the lifetime Kill Streak record, needed server-side for the new
       // "Max Killstreak" leaderboard tab -- see max_kill_streak's declaration/_applyLoadedData().
       max_kill_streak:this.max_kill_streak||0,
+      // v0.20 (#16) BUG FIX: the CURRENT streak (this.kill_streak) was never actually
+      // included in this payload -- only its lifetime-record cousin (max_kill_streak) above
+      // was. Since combat is server-authoritative and every attack/step immediately triggers
+      // an autosave() (a full-blob PUT /api/characters/:slot, not a per-field merge -- see
+      // server.js), the very next autosave after a kill silently overwrote the server's
+      // just-incremented kill_streak back to undefined/0, so the counter could never climb
+      // past 1 in normal play. Kept alongside max_kill_streak, same reasoning.
+      kill_streak:this.kill_streak||0,
       // v0.18.2 (#6): per-tier Forest Reputation, must survive a save/reload -- see its
       // declaration/_applyLoadedData() above.
       forest_reputation:this.forest_reputation||{},
@@ -3435,6 +3602,21 @@ const GF = {
   pending_chest_hits_required:3, pending_chest_tier:1, pending_chest_area_level:1,
   overworld_snapshot:null,
   chatOpen:false, inventory_return_to:"town",
+  // v0.20 (#23/#24): both of these are "live in-progress typing" state for an uncontrolled
+  // <input> that a periodic background tick (the 30s "Currently playing" refresh, the 1s
+  // idle-roamer tick, etc. -- see their own setInterval blocks near the bottom of this file)
+  // can wipe out from under the player, because render() unconditionally does
+  // app.innerHTML="" and rebuilds every screen's inputs from scratch with whatever default
+  // value they're given at construction time. Rather than chase down and special-case every
+  // current AND FUTURE setInterval callsite that might call render() while the player is
+  // mid-keystroke, the input's live value is mirrored into one of these fields on every
+  // keystroke (see chatBody()/screenClassPicker()) and read back out as that same input's
+  // starting value on every rebuild -- so no matter which tick triggers the next render(),
+  // the freshly-rebuilt input picks up right where the old (destroyed) one left off. Neither
+  // field is ever written into save data (screenClassPicker()'s draft only matters before a
+  // character even exists to save; chatDraft is pure ephemeral UI state), same category as
+  // GF.chatOpen/GF.leaderboardTab above.
+  chatDraft:"", charCreationDraft:{name:"",hardcore:false},
   brewing:null, brewInterval:null, crafting:null, craftInterval:null,
   trialJustFailed:false, trialFailedPlankIndex:null, trialFailedStepIndex:-1,
   ventureDepth:null, mazeOverlay:null, gambleReveal:null,
@@ -3625,6 +3807,18 @@ function spawnFloat(anchor,text,cls){
   const durationMs=(cls==="float-text-xp"||cls==="float-text-gold")?FLOAT_LOOT_DURATION_MS:FLOAT_COMBAT_DURATION_MS;
   GF.floatingTexts.push({id:++_floatSeq,anchor,kind:"text",text,cls,t:Date.now(),durationMs});
 }
+// v0.20 (#1): called from PS's `gold` setter (see its own comment for the full "why here,
+// not at each call site" story) any time the account's shared gold pool actually changes
+// by a nonzero amount outside of combat. Anchored to "gold" -- statHeader() wraps its
+// gold-text figure in floatLayer("gold") so this always surfaces right where the number
+// itself lives, regardless of which screen triggered the change. Always uses the existing
+// gold-colored .float-text-gold class (matching the sign already baked into the +/- text
+// itself), the same convention combat's own "+Ng" kill-credit float and the old per-call-site
+// merchant purchase float both already used -- not introducing a separate loss color here
+// so gold notifications stay visually consistent everywhere they appear.
+function notifyGoldChange(delta){
+  spawnFloat("gold",`${delta>0?"+":""}${delta}g`,"float-text-gold");
+}
 // Same idea, but for a gear drop: shows the item's own SVG icon (gearIcon()) next to its name,
 // colored by the same .rarity-* class used everywhere else gear names are shown.
 function spawnFloatItem(anchor,inst){
@@ -3700,38 +3894,65 @@ function activePlayersLine(){
 
 // v0.18.2 (#7): the same server-verified "active in the last 5 minutes" account count
 // activePlayersLine() already fetches (Net.activePlayersCache, see fetchActivePlayers())
-// doubles as a community XP buff -- Gwen's spec: 1 player (just yourself) = no bonus, 2 =
-// double XP for everyone, 3 = triple, 4 = 4x, and so on (count itself IS the multiplier).
-// Deliberately keyed off the raw entry count, not "entries minus yourself", since the server
-// route makes no attempt to exclude the caller's own account and Gwen's examples ("when you
-// are the only player online") clearly mean the total headcount including yourself.
+// doubles as a community XP buff. Deliberately keyed off the raw entry count, not "entries
+// minus yourself", since the server route makes no attempt to exclude the caller's own
+// account and Gwen's examples ("when you are the only player online") clearly mean the
+// total headcount including yourself.
+// v0.20 (#9.2): used to be "+100% per EXTRA player" -- the raw headcount itself WAS the
+// multiplier (2 players = 2x, 3 = 3x, ...), which compounded into an ever-larger number as
+// more people logged on. Now it's +10% per extra player. getCommunityXpBonusPct() is the
+// new, canonical form (a plain percentage, ready to feed into getTotalXpBonusPct()'s
+// additive stack) -- getGlobalXpMultiplier() is kept as a thin "1 + that percentage"
+// convenience wrapper purely for callers that still want an actual multiplier value (there
+// is no longer any code path that needs the raw headcount itself).
+function getCommunityXpBonusPct(){
+  const entries=Net.activePlayersCache;
+  if(!entries) return 0;
+  return Math.max(0, entries.length-1)*Balance.COMMUNITY_XP_PCT_PER_EXTRA_PLAYER;
+}
 // Returns 1 (no bonus, never a penalty) while the very first fetch hasn't resolved yet
 // (cache still null) rather than guessing at a count nobody has confirmed.
 function getGlobalXpMultiplier(){
-  const entries=Net.activePlayersCache;
-  if(!entries) return 1;
-  return Math.max(1, entries.length);
+  return 1+getCommunityXpBonusPct()/100;
 }
 
-// v0.18.2 (#7): the always-visible banner announcing the current community XP multiplier
-// (or its absence). Rendered once at the very top of the page, right above
-// activePlayersLine(), on every screen that shows the top bar -- see render() -- so it's
-// "permanently visible" exactly as Gwen's spec asks, not a toast that fades away. Renders an
-// empty (but still real, appendChild-safe) div until the first /api/active-players fetch
-// resolves, matching activePlayersLine()'s own loading behavior, rather than flashing a
-// possibly-wrong "alone" message before the real count is known.
+// v0.20 (#9.3): every XP bonus source (gear XP Find, the Experience Shrine, Community XP,
+// Forest Reputation) now stacks ADDITIVELY -- summed into a single combined percentage and
+// applied exactly once -- instead of each one multiplying the running total in turn. Under
+// the old multiplicative model, stacking a handful of buffs at once could compound into a
+// wildly disproportionate number (e.g. +20% XP Find gear * 1.5x shrine * 4x community *
+// 2x forest rep = 14.4x); summing the percentages instead (20+50+300+100=470% under those
+// same OLD per-source magnitudes, or a far saner 20+50+30+10=110% under the v0.20 #9.1/#9.2
+// rebalanced magnitudes) means no single combination of buffs can multiply the others'
+// effect. Mirrors server.js's combatGetTotalXpBonusPct() exactly -- the server is what
+// actually decides a real combat kill's XP, this client copy exists purely for local
+// bookkeeping call sites (see PS.addXp()) and any UI that wants to preview the number.
+function getTotalXpBonusPct(){
+  const shrinePct=(PS.xp_buff_encounters_left>0)?(PS.xp_buff_multiplier-1)*100:0;
+  return PS.gearBonus("xp_find")+shrinePct+getCommunityXpBonusPct()+Math.max(0,PS.getCurrentForestReputation())*Balance.FOREST_REPUTATION_XP_PCT_PER_POINT;
+}
+
+// v0.18.2 (#7): the always-visible banner announcing the current community XP bonus (or its
+// absence). Rendered once at the very top of the page, right above activePlayersLine(), on
+// every screen that shows the top bar -- see render() -- so it's "permanently visible"
+// exactly as Gwen's spec asks, not a toast that fades away. Renders an empty (but still
+// real, appendChild-safe) div until the first /api/active-players fetch resolves, matching
+// activePlayersLine()'s own loading behavior, rather than flashing a possibly-wrong "alone"
+// message before the real count is known.
 function globalXpMultiplierLine(){
   const entries=Net.activePlayersCache;
   if(!entries) return h("div",{});
   const n=Math.max(1, entries.length);
+  const pct=getCommunityXpBonusPct();
   let text;
   // v0.19.2 (#11): spell out explicitly that solo play means no bonus, rather than just
   // implying it by omission -- previously this line just said you were alone and left it
   // to the player to infer that no multiplier was active.
+  // v0.20 (#9.2): dropped the old "doubled"/"tripled"/"Nx" wording -- it described the OLD
+  // "headcount IS the multiplier" formula and is no longer accurate now that it's +10% per
+  // extra player instead.
   if(n<=1) text="You are all alone in the dark forest. No bonus effects applied until more players join.";
-  else if(n===2) text="Two players are currently in the Wandrian realm -- experience gained is doubled for everyone!";
-  else if(n===3) text="Three players are currently in the Wandrian realm -- experience gained is tripled for everyone!";
-  else text=`${n} players are currently in the Wandrian realm -- experience gained is ${n}x for everyone!`;
+  else text=`${n} players are currently in the Wandrian realm -- experience gained is increased by ${pct}% for everyone!`;
   // v0.18.2 (#7): reuse the same purple already used for XP floating text (.float-text-xp)
   // to tie this banner visually to "more XP", rather than introducing a brand new color.
   const style=n>=2?{fontSize:".9em",marginBottom:"6px",fontWeight:"bold",color:"#b46cff"}:{fontSize:".9em",marginBottom:"6px"};
@@ -3802,8 +4023,13 @@ function chatLogEntries(){
 function chatBody(closeBtn){
   Net.ensureChat();
   const log=h("div",{class:"panel",style:{flex:"1",overflowY:"auto",display:"flex",flexDirection:"column",gap:"4px",marginBottom:"8px"}},chatLogEntries());
-  const input=h("input",{type:"text",placeholder:"Say something...",style:{flex:"1"}});
-  const send=()=>{ const msg=input.value.trim(); if(!msg) return; Net.sendChat(msg); input.value=""; };
+  // v0.20 (#24): value seeded from GF.chatDraft (see its own declaration for why) instead of
+  // always starting blank, and every keystroke mirrors back into it -- so a periodic tick's
+  // render() rebuilding this whole panel from scratch no longer erases a message the player
+  // was still typing.
+  const input=h("input",{type:"text",placeholder:"Say something...",style:{flex:"1"},value:GF.chatDraft||""});
+  input.addEventListener("input",()=>{ GF.chatDraft=input.value; });
+  const send=()=>{ const msg=input.value.trim(); if(!msg) return; Net.sendChat(msg); input.value=""; GF.chatDraft=""; };
   input.addEventListener("keydown",(e)=>{ if(e.key==="Enter") send(); });
   const root=h("div",{style:{display:"flex",flexDirection:"column",height:"100%"}},[
     h("div",{class:"row",style:{justifyContent:"space-between",marginBottom:"8px"}},[h("h2",{style:{margin:0}},["Global Chat"]), closeBtn?h("span",{class:"linklike",onClick:closeBtn},["Close ✕"]):null]),
@@ -4140,7 +4366,9 @@ function herbPreviewRow(){
   if(herbEntries.length===0) return h("div",{class:"muted"},["Herbs: none"]);
   return h("div",{class:"row gap",style:{alignItems:"center",flexWrap:"wrap"}},[
     h("span",{class:"muted"},["Herbs:"]),
-    ...herbEntries.map(k=>h("span",{class:"row",title:DL.getHerb(k).name,style:{alignItems:"center",gap:"2px",cursor:"help"}},[
+    // v0.20 (#12): the hover tooltip now folds in HERBS[id].found_in below the name, instead
+    // of just the bare name -- same real content the Alchemist screen has always shown.
+    ...herbEntries.map(k=>h("span",{class:"row",title:`${DL.getHerb(k).name}\n${DL.getHerb(k).found_in||""}`,style:{alignItems:"center",gap:"2px",cursor:"help"}},[
       herbIcon(k,18),
       h("span",{class:"muted"},[`${PS.herbs[k]}x`]),
     ])),
@@ -4156,7 +4384,9 @@ function consumablePreviewRow(){
   if(consEntries.length===0) return h("div",{class:"muted"},["Consumables: none"]);
   return h("div",{class:"row gap",style:{alignItems:"center",flexWrap:"wrap"}},[
     h("span",{class:"muted"},["Consumables:"]),
-    ...consEntries.map(k=>h("span",{class:"row",title:DL.getItem(k).name,style:{alignItems:"center",gap:"2px",cursor:"help"}},[
+    // v0.20 (#12): the hover tooltip now folds in DL.itemEffectDescription() below the name,
+    // instead of just the bare name -- same real content the Alchemist screen has always shown.
+    ...consEntries.map(k=>h("span",{class:"row",title:`${DL.getItem(k).name}\n${DL.itemEffectDescription(k)}`,style:{alignItems:"center",gap:"2px",cursor:"help"}},[
       itemIcon(k,18),
       h("span",{class:"muted"},[`${PS.consumables[k]}x`]),
     ])),
@@ -4303,7 +4533,14 @@ function statHeader(opts={}){
         (PS.unspent_stat_points>0 && GF.screen!=="inventory")?h("span",{class:"stat-point-cta",title:`${PS.unspent_stat_points} unspent stat point${PS.unspent_stat_points===1?"":"s"} -- click to assign them`,onClick:()=>GF.goto("inventory",{inventory_return_to:GF.screen})},["+"]):null,
       ]),
       h("div",{class:"col",style:{alignItems:"flex-end"}},[
-        h("div",{class:"gold-text"},[`${PS.gold} gold`]),
+        // v0.20 (#1): position:relative wrapper + floatLayer("gold") is the render-side half
+        // of the gold change notification -- see notifyGoldChange() and PS's `gold` setter
+        // for where the "+Ng"/"-Ng" entries actually get queued. Every screen that shows the
+        // player tile (statHeader() is used almost everywhere) gets this for free.
+        h("div",{style:{position:"relative"}},[
+          h("div",{class:"gold-text"},[`${PS.gold} gold`]),
+          floatLayer("gold"),
+        ]),
         h("div",{class:"muted"},[`${PS.materials} materials`]),
       ]),
     ]),
@@ -4592,21 +4829,32 @@ function screenClassPicker(){
   root.appendChild(h("h2",{},["Create Your Hero"]));
   // v0.16: Back moved up here, right under the title, instead of below the whole class
   // grid -- no need to scroll past all 3 classes just to back out.
-  root.appendChild(h("div",{style:{marginBottom:"10px"}},[h("span",{class:"linklike",onClick:()=>GF.goto("mainMenuSlots")},["← Back"])]));
-  const nameInput=h("input",{type:"text",value:"",placeholder:"Enter a character name...",maxlength:String(Balance.CHARACTER_NAME_MAX_LEN)});
+  root.appendChild(h("div",{style:{marginBottom:"10px"}},[h("span",{class:"linklike",onClick:()=>{ GF.charCreationDraft={name:"",hardcore:false}; GF.goto("mainMenuSlots"); }},["← Back"])]));
+  if(!GF.charCreationDraft) GF.charCreationDraft={name:"",hardcore:false};
+  // v0.20 (#23): value/checked seeded from GF.charCreationDraft (see its own declaration for
+  // why) instead of always starting blank/unchecked, and every change mirrors back into it --
+  // so the 30s "Currently playing" tick's render() (or any future tick that does the same)
+  // rebuilding this whole screen from scratch no longer erases an in-progress name or silently
+  // resets a checked Hardcore box while the player is still filling out the form.
+  const nameInput=h("input",{type:"text",value:GF.charCreationDraft.name||"",placeholder:"Enter a character name...",maxlength:String(Balance.CHARACTER_NAME_MAX_LEN)});
   const nameError=h("div",{class:"muted",style:{color:"#e07a7a",marginTop:"4px",minHeight:"1.2em"}},[""]);
-  const hardcoreBox=h("input",{type:"checkbox",id:"hcbox"});
+  const hardcoreBox=h("input",{type:"checkbox",id:"hcbox",checked:!!GF.charCreationDraft.hardcore});
   hardcoreBox.addEventListener("change",()=>{
     if(hardcoreBox.checked){
       hardcoreBox.checked=false; // provisionally uncheck until the player actually confirms
       askConfirm(
         "Hardcore characters only have 1 life. Upon death, they are moved to the graveyard as a memorial, but are no longer accessible for play.",
-        ()=>{ hardcoreBox.checked=true; },
+        ()=>{ hardcoreBox.checked=true; GF.charCreationDraft.hardcore=true; },
         {confirmLabel:"I understand, go Hardcore",cancelLabel:"Never mind",danger:true}
       );
+    } else {
+      GF.charCreationDraft.hardcore=false;
     }
   });
-  nameInput.addEventListener("input",()=>{ if(nameInput.value.trim()){ nameError.textContent=""; nameInput.style.borderColor=""; } });
+  nameInput.addEventListener("input",()=>{
+    GF.charCreationDraft.name=nameInput.value;
+    if(nameInput.value.trim()){ nameError.textContent=""; nameInput.style.borderColor=""; }
+  });
   root.appendChild(h("div",{class:"panel",style:{marginBottom:"14px"}},[
     h("div",{class:"row gap"},[h("span",{},["Character name:"]), nameInput]),
     nameError,
@@ -4629,6 +4877,7 @@ function screenClassPicker(){
         PS.startNewCharacter(classId, name, GF.selected_slot, hardcoreBox.checked);
         PS.saveGame();
         Net.announceCreated({character_name:name, class_name:c.display_name});
+        GF.charCreationDraft={name:"",hardcore:false};
         GF.goto("town");
       }},["Begin as "+c.display_name]),
     ]));
@@ -4779,7 +5028,7 @@ function screenClassProgression(){
       iconBadge(primaryAttrBadgeSvg(chainId),32),
       h("div",{style:{fontWeight:"bold",fontSize:"1.35em"}},[DL.getClass(chainId).display_name+" Path"]),
     ]));
-    grid.appendChild(h("ul",{class:"muted",style:{gridColumn:col,gridRow:String(r++),zIndex:"1",fontSize:".82em",lineHeight:"1.4em",margin:"0",padding:"0 22px 10px 26px"}},attributeSummaryLines(chainId).map(l=>h("li",{style:{marginBottom:"2px"}},[l]))));
+    grid.appendChild(h("ul",{class:"muted",style:{gridColumn:col,gridRow:String(r++),zIndex:"1",fontSize:".82em",lineHeight:"1.4em",margin:"0",padding:"0 22px 10px 26px"}},attributeSummaryLines(chainId,DL.getClass(chainId)).map(l=>h("li",{style:{marginBottom:"2px"}},[l]))));
     entries.forEach(([classId,c],idx)=>{
       const isFinal=!c.next_class;
       grid.appendChild(h("div",{class:"tile row",style:{gridColumn:col,gridRow:String(r++),zIndex:"1",alignItems:"center",gap:"0",margin:"0 14px"+(isFinal?" 16px":"")}},[
@@ -5284,6 +5533,15 @@ function getTownName(){
   return names[idx];
 }
 
+// v0.20 (#10): the per-town lore line matching getTownName() above -- see
+// Balance.TOWN_LORE's comment for why this exists (previously every tier showed the same
+// generic subtext). Indexed identically to getTownName() so the two can never drift apart.
+function getTownLore(){
+  const lore=Balance.TOWN_LORE||[];
+  const idx=Math.min(lore.length-1,(PS.highest_tier_reached||1)-1);
+  return lore[idx]||"A quiet camp on the edge of a vast, overgrown forest.";
+}
+
 function getVentureDepth(){
   const max=PS.max_maze_depth_reached||1;
   if(GF.ventureDepth==null || GF.ventureDepth<1){
@@ -5351,7 +5609,7 @@ function kindleBonfirePanel(){
 function screenTown(){
   const root=h("div",{});
   root.appendChild(h("h2",{},[getTownName()]));
-  root.appendChild(h("div",{class:"lore"},["A quiet camp on the edge of a vast, overgrown forest."]));
+  root.appendChild(h("div",{class:"lore"},[getTownLore()]));
   const t=toastBox(); if(t) root.appendChild(t);
 
   const ventureDepth=getVentureDepth();
@@ -5482,7 +5740,8 @@ function generateMaze(depth){
   // an actual event again rather than routine. A maze that doesn't roll a stronghold at
   // all skips placeStronghold() entirely, leaving `stronghold` null (same as the existing
   // "no valid anchor found in 80 tries" fallback already handled everywhere else).
-  const stronghold=Math.random()<Balance.STRONGHOLD_SPAWN_CHANCE ? placeStronghold({size,sizeH,cells,depth}, dist, exitIdx) : null;
+  // v0.20 (#19): gated below STRONGHOLD_MIN_AREA_LEVEL -- see that constant's own comment.
+  const stronghold=depth>=Balance.STRONGHOLD_MIN_AREA_LEVEL && Math.random()<Balance.STRONGHOLD_SPAWN_CHANCE ? placeStronghold({size,sizeH,cells,depth}, dist, exitIdx) : null;
 
   // Content only ever lands on reachable, plain (grass/dirt) tiles. Placement doesn't need
   // to avoid "obvious" spots -- even the trap tile (which can resolve into a trapdoor fall,
@@ -5526,7 +5785,12 @@ function generateMaze(depth){
   // see PS.getCurrentForestReputation()) adds one extra roaming mob per point below zero --
   // "a player can choose his path, go for a large amount of roaming mobs, or be peaceful and
   // accumulate bonus experience gain" per Gwen's spec. Positive/zero reputation adds none.
-  const roamerCount=Balance.ROAMING_MOB_COUNT_PER_MAZE+PS.getForestReputationExtraRoamers();
+  // v0.20 (#18): no roamers at all below ROAMING_MOB_MIN_AREA_LEVEL -- see that constant's
+  // own comment. Note this also suppresses the negative-Forest-Reputation "extra roamers"
+  // bonus below that same floor, which is the correct call: a brand new character can't
+  // have accrued negative reputation yet anyway, but this keeps the floor absolute rather
+  // than something a weird edge case could poke a hole in.
+  const roamerCount=depth<Balance.ROAMING_MOB_MIN_AREA_LEVEL ? 0 : Balance.ROAMING_MOB_COUNT_PER_MAZE+PS.getForestReputationExtraRoamers();
   for(let r=0;r<Math.min(roamerCount, openTiles.length);r++){
     const tile=openTiles[r];
     const spawnIdx=idx(tile.x,tile.y);
@@ -5789,6 +6053,18 @@ function screenMaze(){
   // out of view at 100% zoom on a typical screen.
   root.appendChild(h("div",{class:"lore"},["Overgrown paths wind through the trees -- arrows or click to move."]));
   root.appendChild(statHeader());
+  // v0.20 (#17): a full backpack used to only ever surface REACTIVELY, per-drop, the
+  // instant a piece of gear was already lost ("Found gear but your bags are full, it was
+  // left behind." -- see grantLoot()). That's too late to act on. This is a persistent,
+  // always-visible warning banner shown for the entire time the backpack is full while
+  // wandering the maze, so the player can see it coming and choose to sell/salvage/return
+  // to town before the next chest or kill quietly drops something on the ground for them.
+  if(!PS.hasInventorySpace()){
+    root.appendChild(h("div",{class:"panel",style:{marginBottom:"10px",background:"rgba(160,40,40,.28)",borderColor:"#a04a4a"}},[
+      h("div",{style:{color:"#e07a7a",fontWeight:"bold"}},["⚠ Your backpack is full."]),
+      h("div",{class:"muted",style:{fontSize:".9em"}},["Any gear you find will be left behind until you make room -- sell, salvage, or store items in your Vault."]),
+    ]));
+  }
 
   // Grid pixel size (tiles + 1px gaps + 2px border on each side), the dramatic
   // Advanced!/Trapdoor! overlay is sized to exactly cover this box, not the full
@@ -6708,11 +6984,14 @@ function screenCombat(){
       // originate from; gold (like the item drop above) floats from the slain monster.
       spawnFloat("xpbar",`+${Math.round(k.xp_gained)} XP`,"float-text-xp");
       spawnFloat("monster",`+${k.gold}g`,"float-text-gold");
-      // The XP AMOUNT was decided server-side; spending it (the level-up loop, stat points,
-      // HP/Stamina pool growth) is deterministic bookkeeping this client function already
-      // did safely before -- reusing it here just means "apply this server-given number",
-      // not "roll anything".
-      const leveled=PS.addXp(k.xp_gained);
+      // The XP AMOUNT was decided server-side (already including every bonus -- gear XP
+      // Find, Experience Shrine, Community XP, Forest Reputation -- summed into ONE
+      // percentage server-side, see combatGetTotalXpBonusPct() in server.js); spending it
+      // (the level-up loop, stat points, HP/Stamina pool growth) is deterministic
+      // bookkeeping this client function already did safely before. v0.20 (#9.3): calls
+      // addXpRaw(), NOT addXp() -- addXp() would apply this client's OWN full bonus stack a
+      // SECOND time on top of a number that's already final, silently doubling every bonus.
+      const leveled=PS.addXpRaw(k.xp_gained);
       // Gold is account-bound (PS.gold is a thin proxy onto Net.accountGold) -- the server
       // already credited the account directly; mirror that exact delta locally so the
       // header's gold figure updates without waiting on a full character reload.
@@ -6828,7 +7107,11 @@ function screenCombat(){
         render();
         return;
       }
-      GF.combat=null; resetMazePositionToStart(); PS.saveGame(); setToast("You flee back to camp, but remember your way through these woods."); GF.goto("town");
+      // v0.20 (#16): a successful flee is also "returning to town" -- the streak must reset
+      // here too, same as the Play/Venture handlers already do (see PS.resetKillStreak()'s
+      // own comment). This was the one path that forgot to, leaving a stale streak/Magic
+      // Find bonus visible until the player's next Play/Venture click quietly cleared it.
+      GF.combat=null; resetMazePositionToStart(); PS.resetKillStreak(); PS.saveGame(); setToast("You flee back to camp, but remember your way through these woods."); GF.goto("town");
     }catch(e){
       GF.combatResolving=false;
       setToast("Could not flee: "+e.message);
@@ -7096,9 +7379,20 @@ function screenHerbEncounter(){
         const qty=randIntRange(1,12);
         PS.addHerb(node.herb_id,qty);
         if(GF.overworld_snapshot) GF.overworld_snapshot.cells[node.cell_idx].cleared=true;
+        const returnDepth=GF.maze_depth;
         GF.herbNode=null; autosave();
-        setToast(`You gather ${qty}x ${herb.name}.`+(skillResult.leveledUp?` Your Herbalism proficiency reaches level ${skillResult.newLevel}!`:""));
-        GF.goto("maze",{maze_depth:GF.maze_depth});
+        // v0.20 (#2): reuses the exact same ceremonial loot-reveal screen a chest opens into
+        // (screenChestReveal()/chestLootEntryNode(), see the v0.19.1 #20 comment on those) --
+        // an instant toast + snap back to the maze made a gather easy to miss entirely,
+        // especially the Herbalism level-up line, which used to get buried in that one toast
+        // string. GF.chestReveal itself is generic (title/entries/returnDepth), so no new
+        // screen or state was needed, just a differently-titled reveal with a "herb" entry.
+        GF.chestReveal={
+          title:skillResult.leveledUp?`You gather ${herb.name}! (Herbalism reaches level ${skillResult.newLevel})`:`You gather ${herb.name}!`,
+          entries:[{kind:"herb", herbId:node.herb_id, qty}],
+          returnDepth,
+        };
+        GF.goto("chestReveal");
         return;
       }
       render();
@@ -7270,28 +7564,39 @@ function gearRow(inst, actions){
 // Shared attribute-role copy: which stat drives damage for this class chain, and what
 // the other three do for it. Used both on the Inventory's Attributes panel (live values)
 // and the Player Classes screen (base values per class) so the wording always matches.
-function attributeSummaryLines(chain){
+function attributeSummaryLines(chain,classData){
+  // v0.20 (#9.6): Dexterity's block-chance-per-point rate is pulled live from
+  // Balance.BLOCK_CHANCE_PER_DEX (dialed from 1% to 0.5% per point) so this copy can never
+  // drift out of sync with the real formula again.
+  const blockPct=Balance.BLOCK_CHANCE_PER_DEX*100;
+  // v0.20 (#9.7): Vitality's HP/Stamina-per-point is now class-based and applies
+  // immediately (see Balance.VIT_HP_PER_POINT_RATIO's comment) instead of the old
+  // "waits for your next level-up" wording -- pulled live off `classData.hp_per_level` so
+  // this copy can never drift out of sync with the real formula either.
+  const vitHp=Math.round(Balance.vitHpBonus(classData||{},1));
+  const vitStam=Math.round(Balance.vitStaminaBonus(classData||{},1));
+  const vitLine=`Vitality: +${vitHp} HP and +${vitStam} Stamina per point, applied immediately.`;
   if(chain==="thornguard"){
     return [
       "Strength: +1 damage per point.",
-      "Dexterity: +1% Block Chance per point, a chance to take 0 damage from a hit.",
-      "Vitality: on every level-up, permanently adds that much HP and Stamina.",
+      `Dexterity: +${blockPct}% Block Chance per point, a chance to take 0 damage from a hit.`,
+      vitLine,
       "Intelligence: no effect for this path.",
     ];
   }
   if(chain==="windrider"){
     return [
       "Strength: no effect for this path.",
-      "Dexterity: +1 damage per point, and +1% Block Chance per point, a chance to take 0 damage from a hit.",
-      "Vitality: on every level-up, permanently adds that much HP and Stamina.",
+      `Dexterity: +1 damage per point, and +${blockPct}% Block Chance per point, a chance to take 0 damage from a hit.`,
+      vitLine,
       "Intelligence: no effect for this path.",
     ];
   }
   if(chain==="wizard"){
     return [
       "Strength: no effect for this path.",
-      "Dexterity: +1% Block Chance per point, a chance to take 0 damage from a hit.",
-      "Vitality: on every level-up, permanently adds that much HP and Stamina.",
+      `Dexterity: +${blockPct}% Block Chance per point, a chance to take 0 damage from a hit.`,
+      vitLine,
       "Intelligence: +1 damage per point.",
     ];
   }
@@ -7308,7 +7613,7 @@ function attributeSummaryLines(chain){
 function attributesPanel(){
   const c=PS.getClassData();
   const rows=[{key:"str",label:"Strength",gearStat:"strength"},{key:"dex",label:"Dexterity",gearStat:"dexterity"},{key:"vit",label:"Vitality",gearStat:"vitality"},{key:"int",label:"Intelligence",gearStat:"intelligence"}];
-  const summaryLines=attributeSummaryLines(c.chain);
+  const summaryLines=attributeSummaryLines(c.chain,c);
   // v0.16: each attribute's benefit line renders directly beneath that attribute's own
   // row, instead of all 4 sentences being dumped together in one block (which made it hard
   // to tell which sentence described which stat at a glance). rows and summaryLines are
@@ -7698,8 +8003,13 @@ function screenInventory(){
     if(consEntries.length===0) root.appendChild(h("div",{class:"muted"},["None."]));
     for(const itemId of consEntries){
       const item=DL.getItem(itemId);
+      // v0.20 (#12): the name is now wrapped in a real hover tooltip (what does this potion/
+      // scroll/bag actually DO) via DL.itemEffectDescription() -- previously this row showed
+      // only the name and a bare category word ("Potion"/"Scroll"), with no way to see the
+      // effect without leaving the screen to check the Alchemist, the only place this text
+      // was ever wired up before.
       root.appendChild(h("div",{class:"row gap",style:{marginBottom:"4px",alignItems:"center",justifyContent:"space-between"}},[
-        h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId,22), h("div",{},[`${item.name} x${PS.consumables[itemId]}`, h("div",{class:"muted",style:{fontSize:".85em"}},[DL.itemCategoryLabel(itemId)])])]),
+        h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId,22), h("div",{},[h("span",{class:"tooltip","data-tip":DL.itemEffectDescription(itemId)},[`${item.name} x${PS.consumables[itemId]}`]), h("div",{class:"muted",style:{fontSize:".85em"}},[DL.itemCategoryLabel(itemId)])])]),
         item.type==="consumable"?h("button",{disabled:!PS.canUseConsumable(itemId),onClick:()=>{PS.useConsumable(itemId);autosave();render();}},["Use"]):
           h("button",{onClick:()=>{PS.useScroll(itemId);autosave();setToast(`${item.name} will boost your next descent by ${item.level_bonus} levels.`);render();}},["Use"]),
       ]));
@@ -7709,7 +8019,8 @@ function screenInventory(){
     const herbEntries=Object.keys(PS.herbs).filter(k=>PS.herbs[k]>0);
     if(herbEntries.length===0) root.appendChild(h("div",{class:"muted"},["None."]));
     for(const herbId of herbEntries){
-      root.appendChild(h("div",{class:"row gap",style:{marginBottom:"4px",alignItems:"center"}},[herbIcon(herbId,22), h("div",{},[`${DL.getHerb(herbId).name} x${PS.herbs[herbId]}`, h("div",{class:"muted",style:{fontSize:".85em"}},["Herb"])])]));
+      // v0.20 (#12): same treatment as consumables above, using HERBS[id].found_in.
+      root.appendChild(h("div",{class:"row gap",style:{marginBottom:"4px",alignItems:"center"}},[herbIcon(herbId,22), h("div",{},[h("span",{class:"tooltip","data-tip":DL.getHerb(herbId).found_in||""},[`${DL.getHerb(herbId).name} x${PS.herbs[herbId]}`]), h("div",{class:"muted",style:{fontSize:".85em"}},["Herb"])])]));
     }
   }
 
@@ -8184,12 +8495,15 @@ function screenVault(){
       // v0.17 (#9): gear stored in the Vault now gets the exact same full stat/property
       // tooltip (IF.tooltipText + category label) as the backpack grid already shows --
       // previously this only ever showed the item's plain name, forcing a withdraw just to
-      // see what an item actually rolled. Consumables/herbs keep their simple name+qty tip,
-      // matching what the backpack itself shows for those (no per-stat breakdown exists for
-      // non-gear items anywhere in the game yet).
+      // see what an item actually rolled.
+      // v0.20 (#12): consumables/herbs used to only show a bare name+qty tip here (no
+      // per-stat breakdown existed for non-gear items anywhere in the game) -- they now
+      // fold in DL.itemEffectDescription()/HERBS[id].found_in, the same real "what does this
+      // actually do" text the Alchemist screen has always shown for these, so a Vault hover
+      // is no longer a dead end for consumables/herbs the way it used to be for gear.
       if(entry.kind==="gear"){ label=IF.displayName(entry.inst)+` (${tierRomanNumeral(entry.inst.tier)})`; icon=gearIcon(entry.inst,24); tip=`${IF.tooltipText(entry.inst)}\n${IF.categoryLabel(entry.inst)}`+(PS.canEquipGear(entry.inst)?"":`\n${PS.gearInvalidReason(entry.inst)}`); }
-      else if(entry.kind==="consumable"){ label=`${DL.getItem(entry.item_id).name} x${entry.qty}`; icon=itemIcon(entry.item_id,24); tip=`${label}\n${DL.itemCategoryLabel(entry.item_id)}`; }
-      else if(entry.kind==="herb"){ label=`${DL.getHerb(entry.herb_id).name} x${entry.qty}`; icon=herbIcon(entry.herb_id,24); tip=label; }
+      else if(entry.kind==="consumable"){ label=`${DL.getItem(entry.item_id).name} x${entry.qty}`; icon=itemIcon(entry.item_id,24); tip=`${label}\n${DL.itemCategoryLabel(entry.item_id)}\n${DL.itemEffectDescription(entry.item_id)}`; }
+      else if(entry.kind==="herb"){ label=`${DL.getHerb(entry.herb_id).name} x${entry.qty}`; icon=herbIcon(entry.herb_id,24); tip=`${label}\n${DL.getHerb(entry.herb_id).found_in||""}`; }
     }
     // v0.17.1 (#14): a stackable entry (qty > 1) opens the split-quantity panel below the
     // grid instead of immediately confirming a withdraw-everything -- see that panel's
@@ -8274,8 +8588,10 @@ function screenVault(){
   const consEntries=Object.keys(PS.consumables).filter(k=>PS.consumables[k]>0);
   if(consEntries.length===0) root.appendChild(h("div",{class:"muted"},["None."]));
   for(const itemId of consEntries){
+    // v0.20 (#12): the name is now a real hover tooltip (DL.itemEffectDescription()) instead
+    // of plain unhoverable text, matching the Alchemist screen's existing pattern.
     root.appendChild(h("div",{class:"row gap",style:{marginBottom:"4px",alignItems:"center",justifyContent:"space-between"}},[
-      h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId,22), `${DL.getItem(itemId).name} x${PS.consumables[itemId]}`]),
+      h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId,22), h("span",{class:"tooltip","data-tip":DL.itemEffectDescription(itemId)},[`${DL.getItem(itemId).name} x${PS.consumables[itemId]}`])]),
       h("button",{onClick:()=>vaultDepositConsumable(itemId)},["Store"]),
     ]));
   }
@@ -8284,8 +8600,9 @@ function screenVault(){
   const herbEntries=Object.keys(PS.herbs).filter(k=>PS.herbs[k]>0);
   if(herbEntries.length===0) root.appendChild(h("div",{class:"muted"},["None."]));
   for(const herbId of herbEntries){
+    // v0.20 (#12): same treatment as consumables above, using HERBS[id].found_in.
     root.appendChild(h("div",{class:"row gap",style:{marginBottom:"4px",alignItems:"center",justifyContent:"space-between"}},[
-      h("div",{class:"row gap",style:{alignItems:"center"}},[herbIcon(herbId,22), `${DL.getHerb(herbId).name} x${PS.herbs[herbId]}`]),
+      h("div",{class:"row gap",style:{alignItems:"center"}},[herbIcon(herbId,22), h("span",{class:"tooltip","data-tip":DL.getHerb(herbId).found_in||""},[`${DL.getHerb(herbId).name} x${PS.herbs[herbId]}`])]),
       h("button",{onClick:()=>vaultDepositHerb(herbId)},["Store"]),
     ]));
   }
@@ -8371,11 +8688,14 @@ function merchantConsumablesTab(){
       // v0.18.1 (#10): gold-colored, right-aligned, sits right next to the Buy button.
       h("div",{class:"gold-text",style:{fontWeight:"bold",minWidth:"64px",textAlign:"right"}},[`${totalPrice}g`]),
       // v0.18 (#12): the old "Bought X." toast banner popped in above the whole screen and
-      // shifted the list on every purchase -- replaced with a brief gold-colored "-Ng"
-      // floating overlay near the HP bar (same spawnFloat() infra as combat's gold pickups),
+      // shifted the list on every purchase -- replaced with a brief floating "-Ng" overlay,
       // so nothing on this screen ever moves just from buying potions.
+      // v0.20 (#1) BUG FIX: this used to call its own spawnFloat("player",...) here directly.
+      // Now that PS's `gold` setter spawns that notification automatically for every gold
+      // change (buyConsumable() below sets `this.gold-=price` internally), keeping this
+      // explicit call too would have fired it TWICE for the same purchase.
       h("button",{disabled:PS.gold<totalPrice,onClick:()=>{
-        if(PS.buyConsumable(itemId,qty)){ autosave(); spawnFloat("player",`-${totalPrice}g`,"float-text-gold"); }
+        if(PS.buyConsumable(itemId,qty)){ autosave(); }
         render();
       }},["Buy"]),
     ]));
@@ -8762,6 +9082,32 @@ function getTrialProgress(){
   return p;
 }
 
+// v0.20 (#14): a failed Broken Bridge Trial attempt used to just fire a one-line toast
+// ("The plank gives way beneath you!...") that shared the same easy-to-miss panel every
+// other minor event uses. This is a proper consolation popup instead -- built on the same
+// #modalRoot layer askConfirm() uses (see closeConfirmModal()'s comment for why that's a
+// separate DOM root from #app) -- mirroring the "don't just report the outcome, spell out
+// what you still get to keep" treatment triggerClassPromotionCelebration() already gives
+// the opposite (successful) outcome. Leads with reassurance (unharmed, bridge remembers
+// the plank), then the concrete permanent reward banked for the next attempt.
+function showTrialFailureConsolation(failStreak){
+  modalRoot.innerHTML="";
+  modalRoot.appendChild(h("div",{class:"modal-backdrop",onClick:(e)=>{ if(e.target===e.currentTarget) closeConfirmModal(); }},[
+    h("div",{class:"modal-box"},[
+      h("div",{style:{fontWeight:"bold",fontSize:"1.15em",marginBottom:"8px"}},["The plank gives way..."]),
+      h("div",{style:{lineHeight:"1.5",marginBottom:"10px"}},[
+        "You tumble from the bridge, unharmed. The attempt ends here, but the elders note exactly which plank failed you -- you won't have to guess it again.",
+      ]),
+      h("div",{class:"panel",style:{background:"#2a3a20",borderColor:"#5a7a3a",marginBottom:"10px"}},[
+        `+1 permanent starting stat point banked for your next attempt at this tier (currently +${failStreak}, for ${Balance.STARTING_STAT_POINTS+failStreak} total) -- kept until you finally cross.`,
+      ]),
+      h("div",{class:"row"},[
+        h("button",{onClick:closeConfirmModal},["Got it"]),
+      ]),
+    ]),
+  ]));
+}
+
 function screenMasterTrial(){
   const root=h("div",{});
   const c=PS.getClassData();
@@ -8867,8 +9213,10 @@ function screenMasterTrial(){
       PS.bonus_hp_from_attributes=0; PS.bonus_stamina_from_attributes=0;
       PS.current_hp=result.current_hp; PS.current_stamina=result.current_stamina;
       PS.max_maze_depth_reached=result.max_maze_depth_reached;
-      setToast("The plank gives way beneath you! The attempt ends here, but you'll remember this plank next time.");
+      // v0.20 (#14): the old one-line toast is replaced by a full consolation popup --
+      // see showTrialFailureConsolation()'s comment.
       render();
+      showTrialFailureConsolation(result.bridge_fail_streak);
       return;
     }
 
@@ -9292,6 +9640,28 @@ function legacyGearSection(){
 // Kept brief on purpose -- players don't need the internal blow-by-blow, just the
 // highlights per version, most recent first.
 const CHANGELOG=[
+  { version:"v0.20", notes:[
+    "Fixed Touch of Unicorn (Invulnerability), Quad Damage, and Magic Find shrines never actually wearing off in combat -- once triggered they silently stuck around forever instead of expiring after their intended number of rounds. (Contribution by dcfroggert)",
+    "Fixed the Kill Streak counter getting stuck at 1 instead of climbing with consecutive kills, and made a successful flee reset your streak the same way returning to town already did.",
+    "The player tile now shows a brief floating +/- animation whenever your gold changes.",
+    "Gathering a herb now opens the same ceremonial loot-reveal screen a chest does, instead of a quick toast.",
+    "The Adventure Log moved below the maze grid, and the maze screen's instructional text was shortened (with a link to the Gameplay Guide for the full rules).",
+    "The trapdoor is no longer a hidden surprise -- stepping on a trap tile now visibly resolves into one of three equally-likely outcomes (a bite, poison, or a fall to the level below), same as any other trap.",
+    "Magic Find's shrine buff now lasts a fixed number of battle rounds instead of wall-clock time, matching how Invulnerability and Quad Damage already work.",
+    "Backpack and Storage Vault tiles for gear you can't currently equip (wrong class, or below your level) now get a faint red tint so it's obvious at a glance.",
+    "Rebalanced how XP bonuses combine: Forest Reputation, the Experience Shrine, Community XP, and gear XP Find are now added together into one percentage instead of each multiplying the running total, and the per-level XP curve was steepened. Forest Reputation's bonus was dialed from +10% to +1% per point, and Community XP from +100% to +10% per extra player online, to keep pace with the new additive model. A level-difference XP penalty now kicks in when farming areas well below your own level. Dexterity's block-chance bonus was halved to 0.5% per point, and Vitality now grants a flat, class-based amount of HP/Stamina per point instead of a percentage.",
+    "Each town now has its own distinct subtext instead of sharing generic copy.",
+    "New gear affix: increased Block Chance, rolling higher at higher item tiers.",
+    "Consumable and herb tooltips now show their full effect/location description on hover, instead of just the bare name.",
+    "Health Potions now render with true red liquid art (darker and richer at higher tiers) instead of a generic per-item color tint.",
+    "Failing a Broken Bridge Trial attempt now opens a proper consolation popup explaining you're unharmed and citing the permanent stat point you banked for next time, instead of a one-line toast.",
+    "The \"Character Sheet\" label itself is now clickable, not just its icon.",
+    "The maze screen now shows a persistent warning banner while your backpack is full, instead of only finding out after a piece of gear was already left behind.",
+    "Roaming mobs no longer spawn at all below area level 4, and Strongholds no longer spawn below area level 2 -- both used to be able to ambush a brand new character before they'd had any chance to gear up.",
+    "Verified and fixed poison traps being gated to area level 6+, and confirmed trapdoors can no longer drop you from area level 1.",
+    "Removed the Inspect icon from dead Hardcore characters' leaderboard rows.",
+    "Fixed the character-name field and Hardcore checkbox on the character-creation screen (and the Global Chat message box) occasionally getting wiped mid-typing by an unrelated background refresh (the \"Currently playing\" count, or the maze's roaming-mob tick).",
+  ]},
   { version:"v0.19.2", notes:[
     "Fixed a bug where drinking a Health Potion mid-combat didn't actually heal you. (Contribution by ImpulseBE)",
     "Class promotion now shows a richer celebration popup instead of a plain toast.",
@@ -9765,13 +10135,13 @@ function screenGameplayGuide(){
 
   root.appendChild(h("h3",{},["Community XP Bonus"]));
   root.appendChild(h("div",{class:"panel",style:{marginBottom:"16px"}},[
-    h("div",{style:{marginBottom:"8px"}},[`Right under the top bar on every screen, a banner tracks how many Wandrian accounts have been active in the last few minutes -- the same headcount the "Currently playing" line uses. That count is also a shared XP multiplier for everyone currently playing: alone, there's no bonus; with 2 players active, everyone's kill XP is doubled; with 3, tripled; and so on, one whole multiple per additional player online at the same time. There's no way to lose this bonus other than everyone else logging off -- it only ever helps, never hurts, and it applies automatically to every kill without anything you need to do.`]),
+    h("div",{style:{marginBottom:"8px"}},[`Right under the top bar on every screen, a banner tracks how many Wandrian accounts have been active in the last few minutes -- the same headcount the "Currently playing" line uses. That count is also a shared XP bonus for everyone currently playing: alone, there's no bonus; each additional player online at the same time adds +${Balance.COMMUNITY_XP_PCT_PER_EXTRA_PLAYER}% to everyone's kill XP (2 players active = +${Balance.COMMUNITY_XP_PCT_PER_EXTRA_PLAYER}%, 3 = +${Balance.COMMUNITY_XP_PCT_PER_EXTRA_PLAYER*2}%, and so on), stacking additively with every other XP bonus below rather than multiplying them. There's no way to lose this bonus other than everyone else logging off -- it only ever helps, never hurts, and it applies automatically to every kill without anything you need to do.`]),
   ]));
 
   root.appendChild(h("h3",{},["Critters & Forest Reputation"]));
   root.appendChild(h("div",{class:"panel",style:{marginBottom:"16px"}},[
     h("div",{style:{marginBottom:"8px"}},[`Occasionally you'll come across a small, harmless critter in the maze -- it won't fight back. You choose: squash it, or spare its life. Each choice moves your Forest Reputation for your CURRENT class tier by 1 (squashing: -1, sparing: +1) -- it starts at 0 and can go negative, and it's tracked separately per tier, since your class tier determines which forest (and town) you're exploring. Your current tier's reputation is always shown on your Character Sheet.`]),
-    h("div",{style:{marginBottom:"8px"}},[`A POSITIVE reputation grants a persistent +${Balance.FOREST_REPUTATION_XP_PCT_PER_POINT}% bonus to all experience gained per point, for as long as you're exploring that tier's forest -- it stacks multiplicatively on top of every other XP bonus (Community XP, shrines, gear) and applies to every kill automatically, no need to re-earn it each fight. A NEGATIVE reputation doesn't touch your XP at all, but adds 1 extra roaming mob to that forest's mazes per point below zero. Play it however you like: rack up roaming mobs to farm kills, or stay peaceful and let the bonus XP add up -- the choice, and its consequences, are entirely yours.`]),
+    h("div",{style:{marginBottom:"8px"}},[`A POSITIVE reputation grants a persistent +${Balance.FOREST_REPUTATION_XP_PCT_PER_POINT}% bonus to all experience gained per point, for as long as you're exploring that tier's forest -- it stacks ADDITIVELY (summed as a percentage, applied once) with every other XP bonus (Community XP, shrines, gear) rather than multiplying them together, and applies to every kill automatically, no need to re-earn it each fight. A NEGATIVE reputation doesn't touch your XP at all, but adds 1 extra roaming mob to that forest's mazes per point below zero. Play it however you like: rack up roaming mobs to farm kills, or stay peaceful and let the bonus XP add up -- the choice, and its consequences, are entirely yours.`]),
   ]));
 
   root.appendChild(h("h3",{},["Maze Tile Reference"]));
@@ -9854,7 +10224,7 @@ function screenExperienceGuide(){
 
   root.appendChild(h("h3",{},["Experience: How Much You Need, How Much You Get"]));
   root.appendChild(h("div",{class:"panel",style:{marginBottom:"16px"}},[
-    h("div",{style:{marginBottom:"8px"}},[`Leveling up costs more XP at higher character levels: roughly ${Balance.KILLS_PER_LEVEL_TARGET} same-level kills' worth per level, growing steeper as you climb. A monster's XP reward, on the other hand, scales with the AREA level it's fought in, not your character level -- these are two DIFFERENT curves on purpose. That's the entire reason farming a low area eventually stops working (next section). The table below lines both curves up level-by-level, alongside how much tougher (HP/damage) a monster gets at that same area level, relative to area level 1.`]),
+    h("div",{style:{marginBottom:"8px"}},[`Leveling up costs more XP at higher character levels: roughly ${Balance.KILLS_PER_LEVEL_TARGET} same-level kills' worth at level 1, and that requirement itself keeps climbing further with every level on top of the normal exponential growth -- so the curve gets progressively steeper the higher you go, not just from compounding growth alone. A monster's XP reward, on the other hand, scales with the AREA level it's fought in, not your character level -- these are two DIFFERENT curves on purpose. That's the entire reason farming a low area eventually stops working (next section). The table below lines both curves up level-by-level, alongside how much tougher (HP/damage) a monster gets at that same area level, relative to area level 1.`]),
     // v0.19.2 (#15): full level 1-60 reference table replacing the old 2-sentence,
     // 4-example-points summary -- every row pulled live from Balance so it can never
     // drift out of sync with the real formulas, same principle as the rest of this page.
@@ -9863,7 +10233,7 @@ function screenExperienceGuide(){
 
   root.appendChild(h("h3",{},["Playing Outside Your Level Range"]));
   root.appendChild(h("div",{class:"panel",style:{marginBottom:"16px"}},[
-    h("div",{style:{marginBottom:"8px"}},[`Farming an area well BELOW your character level: the monsters there still pay out XP based on THEIR area level, not yours -- so as your own Level-up cost keeps climbing on its own steeper curve, a trivial area's monsters contribute less and less toward your next level, even though they're still just as easy to kill. There's no explicit "penalty" applied -- it's simply that the two curves above drift apart the further behind the area level falls.`]),
+    h("div",{style:{marginBottom:"8px"}},[`Farming an area well BELOW your character level: on top of the two curves above naturally drifting apart, an explicit penalty now also shrinks the XP itself the further behind the area level falls -- ${Math.round((1-Balance.levelDiffXpMult(6,1))*100)}% less at 5 levels behind, ${Math.round((1-Balance.levelDiffXpMult(11,1))*100)}% less at 10 levels behind, bottoming out at a small fraction of the normal reward beyond that. An area AT or ABOVE your own level never carries this penalty -- it only kicks in once you're deliberately farming something trivial.`]),
     h("div",{},[`Venturing into an area well ABOVE your character level: monsters there hit much harder and have much more HP (the normal per-area-level growth, plus the level-${Balance.LATE_GAME_MONSTER_GROWTH_START_LEVEL}+ difficulty bump from the section above) -- real risk of a bad fight, not just a wasted trip. The XP and loot on offer scale up to match, so it can be worth it with good gear and healing on hand, but it's genuinely dangerous rather than free extra experience.`]),
   ]));
 

@@ -711,8 +711,10 @@ const TRIAL_KILLS_PER_LEVEL_TARGET = 20, TRIAL_MONSTER_BASE_XP = 8.0, TRIAL_LEVE
 function trialClampi(n, lo, hi) { return Math.max(lo, Math.min(hi, Math.round(n))); }
 function trialBridgePlankCount(tier) { return trialClampi((tier || 1) + 1, TRIAL_BRIDGE_MIN_PLANKS, TRIAL_BRIDGE_MAX_PLANKS); }
 function trialLevelRequirement(tier) { return trialClampi(tier || 1, 1, 4) * TRIAL_LEVEL_REQUIREMENT_PER_TIER; }
+// v0.20 (#9.4): must stay in sync with Balance.xpRequiredForLevel() in index.html and
+// combatXpRequiredForLevel() above.
 function trialXpRequiredForLevel(level) {
-  return Math.round(TRIAL_KILLS_PER_LEVEL_TARGET * TRIAL_MONSTER_BASE_XP * Math.pow(1.0 + TRIAL_LEVEL_XP_GROWTH, level));
+  return Math.round((TRIAL_KILLS_PER_LEVEL_TARGET + (level - 1)) * TRIAL_MONSTER_BASE_XP * Math.pow(1.0 + TRIAL_LEVEL_XP_GROWTH, level));
 }
 
 // Mirrors PS._resetAttributesToClassBase() + the surrounding reset lines in
@@ -926,14 +928,18 @@ const ITEM_TIER_MAX = 5;
 const ITEM_AFFIX_POOL = [
   "damage", "hp", "crit", "armor", "regen", "gold_find", "xp_find", "stamina_max",
   "strength", "dexterity", "vitality", "intelligence", "poison_resist", "magic_find",
+  "block_chance",
 ];
 // v0.19.1 (#15): xp_find raised from a T1 max of 1 back up to 5 (5/10/15/20/25% across
 // T1-T5) -- mirrors index.html's Balance.AFFIX_TIER1_MAX. Still well within
 // ITEM_AFFIX_TIER1_MAX_CEILING's xp_find:10 below, so no ceiling change is needed.
+// v0.20 (#11): new "block_chance" gear affix -- must stay in sync with index.html's
+// Balance.AFFIX_TIER1_MAX (see that constant's comment). T1 max of 2 (2/4/6/8/10% across
+// T1-T5) feeds into combatGetBlockChance() below via combatGearBonus(data,"block_chance").
 const ITEM_AFFIX_TIER1_MAX = {
   damage: 5, hp: 15, crit: 5, armor: 20, regen: 5, gold_find: 10, xp_find: 5,
   stamina_max: 15, strength: 5, dexterity: 5, vitality: 5, intelligence: 5, poison_resist: 5,
-  magic_find: 10,
+  magic_find: 10, block_chance: 2,
 };
 // index.html's RARITY_TABLE's `slots` field, keyed by the RARITY_TABLE `name` (internal
 // name, not the player-facing RARITY_DISPLAY_NAMES wording -- items store the internal
@@ -1229,7 +1235,15 @@ const COMBAT_RARITY_TABLE = [{ name: "Common", slots: 1, weight: 60 }, { name: "
 // object (see that file's own comments for the full rationale behind each number).
 const CB = {
   CRIT_MULTIPLIER: 1.75, FLEE_FAIL_CHANCE: 0.20, MONSTER_FIRST_STRIKE_CHANCE: 0.5,
-  BLOCK_CHANCE_PER_DEX: 0.01, BLOCK_CHANCE_MAX: 0.60,
+  // v0.20 (#9.6): dialed down from 1% to 0.5% per point of Dexterity -- must stay in sync
+  // with Balance.BLOCK_CHANCE_PER_DEX in index.html (see its comment for the full rationale).
+  BLOCK_CHANCE_PER_DEX: 0.005, BLOCK_CHANCE_MAX: 0.60,
+  // v0.20 (#9.7): Vitality rework -- must stay in sync with Balance.VIT_HP_PER_POINT_RATIO/
+  // VIT_STAMINA_PER_POINT_RATIO in index.html (see that constant's comment for the full
+  // rationale). Replaces the old per-level-up bonus_hp_from_attributes/bonus_stamina_from_
+  // attributes accumulator (see combatAddXp()) with a flat, non-compounding, class-based
+  // per-point amount computed live in combatGetMaxHp()/combatGetMaxStamina() instead.
+  VIT_HP_PER_POINT_RATIO: 0.35, VIT_STAMINA_PER_POINT_RATIO: 0.15,
   MOB_BLOCK_CHANCE_BASE: 0.05, MOB_BLOCK_CHANCE_PER_LEVEL: 0.005,
   MONSTER_HP_MULT: 2.0, MONSTER_DAMAGE_MULT: 2.0,
   AREA_HP_GROWTH: 0.15, AREA_DAMAGE_GROWTH: 0.12, AREA_XP_GROWTH: 0.062,
@@ -1249,7 +1263,27 @@ const CB = {
   SHRINE_MAGIC_FIND_PCT: 25,
   STAT_POINTS_PER_LEVEL: 3, LEVEL_CAP: 60,
   KILLS_PER_LEVEL_TARGET: 20, MONSTER_BASE_XP: 8.0, LEVEL_XP_GROWTH: 0.11,
-  FOREST_REPUTATION_XP_PCT_PER_POINT: 10,
+  // v0.20 (#9.1): dialed down from +10% to +1% per point of positive Forest Reputation --
+  // must stay in sync with Balance.FOREST_REPUTATION_XP_PCT_PER_POINT in index.html.
+  FOREST_REPUTATION_XP_PCT_PER_POINT: 1,
+  // v0.20 (#9.2): the "Currently playing" community XP buff used to be +100% per EXTRA
+  // active player (i.e. the raw headcount doubled/tripled/etc. as a multiplier) -- way too
+  // generous once more than a couple people were online at once. Now it's +10% per extra
+  // player, and (v0.20 #9.3) stacks ADDITIVELY with every other XP bonus source instead of
+  // multiplying them together -- see combatGetTotalXpBonusPct()'s comment for the full
+  // stacking model. Must stay in sync with Balance.COMMUNITY_XP_PCT_PER_EXTRA_PLAYER.
+  COMMUNITY_XP_PCT_PER_EXTRA_PLAYER: 10,
+  // v0.20 (#9.5): farming an area BELOW your own character level now pays out steeply
+  // reduced XP -- previously the only thing discouraging this was the two independent XP
+  // curves drifting apart over time (see combatXpRequiredForLevel() vs
+  // combatMonsterXpReward()), which did nothing for a character who deliberately stayed
+  // camped in a trivial area right after leveling up. Multiplier decays geometrically per
+  // level of gap (character level minus area level) once the gap is positive, floored so it
+  // never hits a hard 0. Venturing into an area AT or ABOVE your own level (the "climbing"
+  // direction) gets no penalty at all -- that risk is already priced in via tougher mobs.
+  // Must stay in sync with Balance.UNDERLEVEL_XP_DECAY_PER_LEVEL/UNDERLEVEL_XP_MIN_MULT in
+  // index.html.
+  UNDERLEVEL_XP_DECAY_PER_LEVEL: 0.80, UNDERLEVEL_XP_MIN_MULT: 0.05,
   POTION_HEAL_DURATION_MS: 5000,
   ITEM_TIER_BRACKET_WIDTH: 5,
   TIER_DROP_WEIGHTS_BY_OFFSET: [40, 30, 20, 6, 4],
@@ -1268,8 +1302,20 @@ function cbRandIntRange(a, b) { return a + Math.floor(Math.random() * (b - a + 1
 function cbPick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 function cbShuffle(arr) { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[arr[i], arr[j]] = [arr[j], arr[i]]; } }
 
-function combatXpRequiredForLevel(level) { return Math.round(CB.KILLS_PER_LEVEL_TARGET * CB.MONSTER_BASE_XP * Math.pow(1.0 + CB.LEVEL_XP_GROWTH, level)); }
+// v0.20 (#9.4): must stay in sync with Balance.xpRequiredForLevel() in index.html (see its
+// comment for the full rationale) AND trialXpRequiredForLevel() below -- all three compute
+// the exact same curve.
+function combatXpRequiredForLevel(level) { return Math.round((CB.KILLS_PER_LEVEL_TARGET + (level - 1)) * CB.MONSTER_BASE_XP * Math.pow(1.0 + CB.LEVEL_XP_GROWTH, level)); }
 function combatMonsterXpReward(baseXp, areaLevel) { return baseXp * Math.pow(1.0 + CB.AREA_XP_GROWTH, areaLevel); }
+// v0.20 (#9.5): see CB.UNDERLEVEL_XP_DECAY_PER_LEVEL's comment for the full rationale. Only
+// a POSITIVE gap (character level above area level) is ever penalized; an equal or negative
+// gap (area at or above character level -- i.e. climbing into harder-than-you content) always
+// returns exactly 1.0 (no penalty, no bonus).
+function combatLevelDiffXpMult(charLevel, areaLevel) {
+  const gap = (charLevel || 1) - (areaLevel || 1);
+  if (gap <= 0) return 1.0;
+  return Math.max(CB.UNDERLEVEL_XP_MIN_MULT, Math.pow(CB.UNDERLEVEL_XP_DECAY_PER_LEVEL, gap));
+}
 function combatLateGameGrowthMult(areaLevel) {
   const lvl = areaLevel || 1;
   if (lvl < CB.LATE_GAME_MONSTER_GROWTH_START_LEVEL) return 1.0;
@@ -1393,14 +1439,28 @@ function combatGetTotalAttr(data, key) {
   const gearStat = { str: "strength", dex: "dexterity", vit: "vitality", int: "intelligence" }[key];
   return ((data.attributes && data.attributes[key]) || 0) + combatGearBonus(data, gearStat) + combatGetActiveTempBuff(data, gearStat);
 }
+// v0.20 (#11): now also sums the "block_chance" gear affix (see ITEM_AFFIX_TIER1_MAX's
+// comment, +2/4/6/8/10% by tier) on top of the Dexterity-derived and temp-buff amounts --
+// mirrors index.html's PS.getBlockChance() exactly.
 function combatGetBlockChance(data) {
-  return cbClampf(combatGetTotalAttr(data, "dex") * CB.BLOCK_CHANCE_PER_DEX + combatGetActiveTempBuff(data, "block_chance") / 100.0, 0, CB.BLOCK_CHANCE_MAX);
+  return cbClampf(combatGetTotalAttr(data, "dex") * CB.BLOCK_CHANCE_PER_DEX + combatGetActiveTempBuff(data, "block_chance") / 100.0 + combatGearBonus(data, "block_chance") / 100.0, 0, CB.BLOCK_CHANCE_MAX);
 }
+// v0.20 (#9.7): Vitality's HP/Stamina contribution is computed LIVE from attributes.vit
+// (see CB.VIT_HP_PER_POINT_RATIO's comment) instead of reading the old bonus_hp_from_
+// attributes/bonus_stamina_from_attributes accumulator fields, which are no longer written
+// to anywhere (see combatAddXp()) but are left untouched in the data model for old saves.
+function combatVitHpBonus(classData, vit) { return (vit || 0) * (classData.hp_per_level || 5) * CB.VIT_HP_PER_POINT_RATIO; }
+function combatVitStaminaBonus(classData, vit) { return (vit || 0) * (classData.hp_per_level || 5) * CB.VIT_STAMINA_PER_POINT_RATIO; }
 function combatGetMaxHp(data) {
   const c = COMBAT_CLASSES[data.class_id] || {};
-  return (c.base_hp || 50) + (c.hp_per_level || 5) * ((data.level || 1) - 1) + combatGearBonus(data, "hp") + (data.bonus_hp_from_attributes || 0);
+  const vit = (data.attributes && data.attributes.vit) || 0;
+  return (c.base_hp || 50) + (c.hp_per_level || 5) * ((data.level || 1) - 1) + combatGearBonus(data, "hp") + combatVitHpBonus(c, vit);
 }
-function combatGetMaxStamina(data) { return CB.STAMINA_MAX_BASE + combatGearBonus(data, "stamina_max") + (data.bonus_stamina_from_attributes || 0); }
+function combatGetMaxStamina(data) {
+  const c = COMBAT_CLASSES[data.class_id] || {};
+  const vit = (data.attributes && data.attributes.vit) || 0;
+  return CB.STAMINA_MAX_BASE + combatGearBonus(data, "stamina_max") + combatVitStaminaBonus(c, vit);
+}
 function combatGetEquippedWeaponType(data) { return combatWeaponTypeForInstance(data.equipped && data.equipped.weapon); }
 function combatWeaponSkillCumulativeHitsForLevel(level) { return CB.WEAPON_SKILL_HIT_STEP * level * (level + 1) / 2; }
 function combatWeaponSkillLevelForHits(hits) {
@@ -1445,17 +1505,47 @@ function combatGetMagicFind(data) {
   return cbClampf(combatGearBonus(data, "magic_find") + shrineBonus + (data.kill_streak || 0) * CB.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL, 0, 500);
 }
 function combatGetGoldFindMult(data) { return 1.0 + combatGearBonus(data, "gold_find") / 100.0; }
-function combatGetXpFindMult(data) { return 1.0 + combatGearBonus(data, "xp_find") / 100.0; }
-function combatGetForestReputationXpMult(data) {
+// v0.20 (#9.3): XP Find is expressed as a plain percentage (gear affixes already store it
+// that way), so it plugs directly into combatGetTotalXpBonusPct()'s additive stack without
+// any 1+x/100 conversion -- unlike Gold Find, which still stays its own independent
+// multiplier (only XP bonuses were asked to become cumulative, not every "Find" stat).
+function combatGetXpFindPct(data) { return combatGearBonus(data, "xp_find"); }
+// v0.20 (#9.3): the Experience Shrine buff (SHRINE_XP_BUFF_MULT=1.5, i.e. "+50% XP") is
+// still stored/persisted as a multiplier (data.xp_buff_multiplier) for backward
+// compatibility with already-saved characters -- converting it to a percentage here, right
+// at the point it joins the additive stack, avoids a persisted-field rename that could
+// silently drop an in-flight buff for any player who happens to have one active the moment
+// this update deploys (see this function's caller for the full stacking rationale).
+function combatGetShrineXpPct(data) { return (data.xp_buff_encounters_left > 0) ? ((data.xp_buff_multiplier || 1) - 1) * 100 : 0; }
+function combatGetForestReputationXpPct(data) {
   const tier = data.highest_tier_reached || 1;
   const rep = (data.forest_reputation && data.forest_reputation[tier]) || 0;
-  return 1 + Math.max(0, rep) * CB.FOREST_REPUTATION_XP_PCT_PER_POINT / 100;
+  return Math.max(0, rep) * CB.FOREST_REPUTATION_XP_PCT_PER_POINT;
 }
-// v0.18.2 (#7)'s "Currently playing" community XP multiplier -- the server already knows
-// the live active-player count (getActiveCharacters(), defined further down this file but
+// v0.18.2 (#7)'s "Currently playing" community XP bonus -- the server already knows the
+// live active-player count (getActiveCharacters(), defined further down this file but
 // hoisted, so callable here), so this reads that directly instead of trusting the client's
 // own Net.activePlayersCache the way index.html's getGlobalXpMultiplier() has to.
-function combatGetCommunityXpMult() { return Math.max(1, getActiveCharacters(100).length); }
+// v0.20 (#9.2): used to be "+100% per EXTRA player" (the raw headcount WAS the multiplier --
+// 3 players = 3x). Now it's +10% per extra player (2 players = +10%, 4 players = +30%, ...),
+// expressed directly as a percentage so it feeds combatGetTotalXpBonusPct() below.
+function combatGetCommunityXpPct() {
+  const n = Math.max(1, getActiveCharacters(100).length);
+  return (n - 1) * CB.COMMUNITY_XP_PCT_PER_EXTRA_PLAYER;
+}
+// v0.20 (#9.3): EVERY XP bonus source now stacks ADDITIVELY (summed percentages, applied
+// once) instead of multiplicatively (each factor compounding on the last). Before this, a
+// player with +20% XP Find gear, an active Experience Shrine (+50%), 3 other people online
+// (previously a flat 4x from combatGetCommunityXpMult()), and +10 Forest Reputation
+// (previously +100%) would have multiplied ALL of those together into a wildly compounding
+// number (1.2 * 1.5 * 4 * 2 = 14.4x) -- Gwen's spec calls that out explicitly as too
+// swingy/exploitable. The additive model instead sums the four percentages (20+50+300+100=
+// 470% under the OLD per-source magnitudes, or a much saner 20+50+30+10=110% under the NEW
+// v0.20 #9.1/#9.2 magnitudes) and applies that ONE combined bonus once, so no single stacked
+// combination of buffs can multiply the others' effect the way compounding factors could.
+function combatGetTotalXpBonusPct(data) {
+  return combatGetXpFindPct(data) + combatGetShrineXpPct(data) + combatGetCommunityXpPct() + combatGetForestReputationXpPct(data);
+}
 function combatIsInvulnerable(data) { return (data.invuln_rounds_left || 0) > 0; }
 function combatHasQuadDamage(data) { return (data.quad_dmg_rounds_left || 0) > 0; }
 // v0.20 BUG FIX (credit: dcfroggert): a player reported that Touch of Unicorn
@@ -1540,25 +1630,36 @@ function combatSettleAllHeals(data) {
   }
 }
 
+// v0.20 (#9.3): `amount` is now the RAW, un-buffed base XP (session.xp) -- every bonus
+// source (gear XP Find, Experience Shrine, Community XP, Forest Reputation) is summed into
+// ONE combined percentage (see combatGetTotalXpBonusPct()) and applied exactly once here,
+// instead of the old chain of independent multiplications a caller had to pre-apply some of
+// before even calling this function. Returns the actual, final, post-bonus XP amount that
+// was awarded (not just whether it leveled up) so the caller can show the player the REAL
+// number in the kill result text -- previously the displayed "+X XP" was only the
+// community/forest-rep-multiplied amount and silently underreported the true total whenever
+// XP Find gear or an active shrine buff was involved (those were folded in afterward,
+// invisibly, right here).
 function combatAddXp(data, amount) {
-  let buffed = amount * combatGetXpFindMult(data);
-  if (data.xp_buff_encounters_left > 0) buffed *= (data.xp_buff_multiplier || 1);
-  data.xp = (data.xp || 0) + Math.round(buffed);
-  data.lifetime_xp = (data.lifetime_xp || 0) + Math.round(buffed);
+  const totalPct = combatGetTotalXpBonusPct(data);
+  const buffed = amount * (1 + totalPct / 100);
+  const xpGained = Math.round(buffed);
+  data.xp = (data.xp || 0) + xpGained;
+  data.lifetime_xp = (data.lifetime_xp || 0) + xpGained;
   let leveled = false;
   while (data.xp >= data.xp_to_next && (data.level || 1) < CB.LEVEL_CAP) {
     data.xp -= data.xp_to_next;
     data.level = (data.level || 1) + 1;
     data.xp_to_next = combatXpRequiredForLevel(data.level);
     data.unspent_stat_points = (data.unspent_stat_points || 0) + CB.STAT_POINTS_PER_LEVEL;
-    const vit = (data.attributes && data.attributes.vit) || 0;
-    data.bonus_hp_from_attributes = (data.bonus_hp_from_attributes || 0) + vit;
-    data.bonus_stamina_from_attributes = (data.bonus_stamina_from_attributes || 0) + vit;
+    // v0.20 (#9.7): no longer touches bonus_hp_from_attributes/bonus_stamina_from_attributes
+    // here -- see combatGetMaxHp()'s comment. The full-HP heal below is still needed on
+    // every level-up regardless.
     data.current_hp = combatGetMaxHp(data);
     leveled = true;
   }
   if (data.level >= CB.LEVEL_CAP) data.xp = 0;
-  return leveled;
+  return { leveled, xpGained };
 }
 function combatRegisterWeaponHit(data, weaponType) {
   if (!data.weapon_skills) data.weapon_skills = {};
@@ -1678,7 +1779,11 @@ app.post("/api/combat/start", requireAuth, (req, res) => {
   const maxHp = combatMonsterHp(monster.base_hp, areaLevel) * hpMult;
   const dmgMin = combatMonsterDamage(monster.base_damage_min, areaLevel) * dmgMult;
   const dmgMax = combatMonsterDamage(monster.base_damage_max, areaLevel) * dmgMult;
-  const xp = combatMonsterXpReward(monster.base_xp, areaLevel) * xpMult;
+  // v0.20 (#9.5): session.xp is the RAW pre-bonus-stack base reward (see combatAddXp()) --
+  // the level-difference penalty is baked in here, at the source, alongside the
+  // guardian/roamer multiplier, so it applies uniformly regardless of which bonus sources
+  // later stack on top of it.
+  const xp = combatMonsterXpReward(monster.base_xp, areaLevel) * xpMult * combatLevelDiffXpMult(data.level, areaLevel);
   const name = isGuardian ? `Guardian ${monster.name}` : isRoamer ? `Roaming ${monster.name}` : monster.name;
 
   combatSettleAllHeals(data);
@@ -1754,8 +1859,12 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
     newMonsterHp = 0;
     const gold = cbRandIntRange(session.gold_min, session.gold_max);
     const goldCredited = Math.round(gold * combatGetGoldFindMult(data));
-    const xpGained = session.xp * combatGetCommunityXpMult() * combatGetForestReputationXpMult(data);
-    const leveled = combatAddXp(data, xpGained);
+    // v0.20 (#9.3): session.xp (the monster's raw base reward) is now handed to
+    // combatAddXp() UNMODIFIED -- every bonus (Community XP, Forest Reputation, XP Find
+    // gear, Experience Shrine) is summed and applied exactly once inside that function
+    // instead of being partly pre-multiplied here and partly multiplied again inside it.
+    const xpResult = combatAddXp(data, session.xp);
+    const leveled = xpResult.leveled;
     creditAccountGold(req.account.id, goldCredited);
     combatIncrementKillStreak(data);
     // v0.19.1 (#19): this endpoint used to persist the raw characters-table row via
@@ -1794,7 +1903,7 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
     }
 
     kill = {
-      gold, gold_credited: goldCredited, xp_gained: xpGained, leveled,
+      gold, gold_credited: goldCredited, xp_gained: xpResult.xpGained, leveled,
       loot, key_drop: keyDrop, kill_streak: data.kill_streak, max_kill_streak: data.max_kill_streak,
       is_guardian: !!session.is_guardian, is_roamer: !!session.is_roamer,
     };
