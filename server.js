@@ -949,6 +949,15 @@ const ITEM_GENERATION_SLOTS = ["weapon", "head", "shoulders", "armor", "pants", 
 const ITEM_ELEMENT_IDS = ["fire", "wind", "earth", "water"];
 const ITEM_WEAPON_DAMAGE_AFFIX_MULT = 1.40;
 const ITEM_SALVAGE_MATERIALS_PER_SLOT = 3, ITEM_REROLL_MATERIAL_COST_MULT = 2;
+// v0.20.1 (#17/#18): Reroll gains a gold cost on top of its existing material cost, and a
+// new "Reforge" feature (changes ONE existing affix's STAT to a fresh random stat, unlike
+// Reroll which keeps the same stats and only rerolls their values) is added alongside it.
+// Both gold costs key off the same sellValue() figure the Merchant's "Sell" button already
+// shows (mirrors index.html's Balance.SELL_GOLD_PER_SLOT/sellValue() exactly, so the
+// Blacksmith's cost preview and this server-side charge always agree).
+const ITEM_SELL_GOLD_PER_SLOT = 4;
+const ITEM_REROLL_GOLD_COST_MULT = 3;
+const ITEM_REFORGE_MATERIAL_COST_MULT = 6, ITEM_REFORGE_GOLD_COST_MULT = 12;
 
 // Upper-bound-only override, used SOLELY by validateGearItem's "is this affix value even
 // plausible" check below -- never by the actual reroll/generation math, which always uses
@@ -971,6 +980,11 @@ function itemAffixCeilingForTier(stat, tier) {
 }
 function itemSalvageValue(tier, slots) { return Math.round(Math.pow(tier, 1.5) * slots * ITEM_SALVAGE_MATERIALS_PER_SLOT); }
 function itemRerollCost(tier, slots) { return itemSalvageValue(tier, slots) * ITEM_REROLL_MATERIAL_COST_MULT; }
+// v0.20.1 (#17/#18): mirrors index.html's Balance.sellValue(tier,slots) exactly.
+function itemSellValue(tier, slots) { return Math.round(Math.pow(tier, 1.5) * slots * ITEM_SELL_GOLD_PER_SLOT); }
+function itemRerollGoldCost(tier, slots) { return itemSellValue(tier, slots) * ITEM_REROLL_GOLD_COST_MULT; }
+function itemReforgeMaterialCost(tier, slots) { return itemRerollCost(tier, slots) * ITEM_REFORGE_MATERIAL_COST_MULT; }
+function itemReforgeGoldCost(tier, slots) { return itemSellValue(tier, slots) * ITEM_REFORGE_GOLD_COST_MULT; }
 
 // Returns null if `item` is a plausible gear item the game's own generation rules could
 // have produced, or a short player-facing string describing what's wrong with it.
@@ -1058,6 +1072,13 @@ app.post("/api/blacksmith/reroll", requireAuth, (req, res) => {
   const cost = itemRerollCost(inst.tier, totalSlotCount);
   const materials = data.materials || 0;
   if (materials < cost) return res.status(400).json({ error: `Not enough materials -- this reroll costs ${cost}.` });
+  // v0.20.1 (#18): Reroll now ALSO costs gold (3x the item's sell value), on top of the
+  // pre-existing material cost above -- gold is account-bound (see getAccountGold/
+  // creditAccountGold), same charge pattern the Auction House listing fee already uses.
+  const goldCost = itemRerollGoldCost(inst.tier, totalSlotCount);
+  if (getAccountGold(req.account.id) < goldCost) {
+    return res.status(400).json({ error: `Not enough gold -- this reroll costs ${goldCost}g.` });
+  }
 
   // The actual roll: the SERVER picks a fresh value for every existing affix (same stats,
   // same count -- only the numbers change), exactly mirroring IF.reroll()'s algorithm.
@@ -1076,6 +1097,9 @@ app.post("/api/blacksmith/reroll", requireAuth, (req, res) => {
   data.gear_instances = gearList;
   data.materials = materials - cost;
   data._save_seq = (data._save_seq || 0) + 1;
+  // Gold is account-bound, not part of this character's own `data` blob -- deduct it via
+  // the shared accounts.gold column, same as every other gold-touching route.
+  const accountGoldAfter = creditAccountGold(req.account.id, -goldCost);
 
   db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(
     JSON.stringify(data),
@@ -1084,7 +1108,91 @@ app.post("/api/blacksmith/reroll", requireAuth, (req, res) => {
     slot
   );
 
-  res.json({ ok: true, item: rerolled, materials: data.materials, _save_seq: data._save_seq });
+  res.json({ ok: true, item: rerolled, materials: data.materials, account_gold: accountGoldAfter, _save_seq: data._save_seq });
+});
+
+// v0.20.1 (#17): "Reforge" -- unlike Reroll (keeps every existing affix's STAT, only
+// rerolls their numeric values), Reforge changes exactly ONE existing normal affix's STAT
+// to a fresh, different, randomly-chosen stat (with a freshly rolled value), leaving every
+// other affix on the item completely untouched. Costs considerably more than Reroll (6x
+// Reroll's material cost, 12x the item's sell value in gold) since it can fix a bad-stat
+// roll entirely, not just a bad-VALUE roll. Same server-authoritative pattern as Reroll --
+// the server picks both which affix gets replaced and what it becomes; a modified client
+// can only ask for a reforge, never dictate its outcome.
+app.post("/api/blacksmith/reforge", requireAuth, (req, res) => {
+  const slot = Number(req.body?.slot);
+  const instanceId = req.body?.instance_id;
+  if (!Number.isInteger(slot) || slot < 0 || slot >= MAX_CHARACTER_SLOTS) {
+    return res.status(400).json({ error: "Invalid slot." });
+  }
+  if (typeof instanceId !== "string" || !instanceId) {
+    return res.status(400).json({ error: "Invalid instance_id." });
+  }
+
+  const row = db.prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?").get(req.account.id, slot);
+  if (!row) return res.status(404).json({ error: "No character in that slot." });
+  let data;
+  try {
+    data = JSON.parse(row.data);
+  } catch (e) {
+    return res.status(500).json({ error: "Corrupt character save." });
+  }
+
+  const gearList = Array.isArray(data.gear_instances) ? data.gear_instances : [];
+  const idx = gearList.findIndex((g) => g && g.instance_id === instanceId);
+  if (idx === -1) return res.status(404).json({ error: "That item isn't in your backpack." });
+  const inst = gearList[idx];
+
+  const itemError = validateGearItem(inst);
+  if (itemError) return res.status(400).json({ error: `This item can't be reforged: ${itemError}` });
+
+  const totalSlotCount = (inst.affixes || []).length;
+  const materialCost = itemReforgeMaterialCost(inst.tier, totalSlotCount);
+  const goldCost = itemReforgeGoldCost(inst.tier, totalSlotCount);
+  const materials = data.materials || 0;
+  if (materials < materialCost) return res.status(400).json({ error: `Not enough materials -- this reforge costs ${materialCost}.` });
+  if (getAccountGold(req.account.id) < goldCost) {
+    return res.status(400).json({ error: `Not enough gold -- this reforge costs ${goldCost}g.` });
+  }
+
+  // Pick exactly one NORMAL affix (never the rare fixed-value "eyesight" bonus roll --
+  // there's nothing to "reforge" about a flat +2 that never varies) to replace. An item
+  // always has at least 1 normal affix (even Common-rarity's 1 slot), so this is safe.
+  const normalIdx = inst.affixes.map((a, i) => (a.stat !== "eyesight" ? i : -1)).filter((i) => i !== -1);
+  const targetPos = normalIdx[Math.floor(Math.random() * normalIdx.length)];
+
+  // The new stat must be one the item doesn't already carry (matches IF.generate()'s own
+  // no-duplicate-stat rule -- a legitimate item never has the same stat twice) -- pick
+  // uniformly at random from whatever's left in the pool.
+  const existingStats = new Set(inst.affixes.map((a) => a.stat));
+  const candidatePool = ITEM_AFFIX_POOL.filter((s) => !existingStats.has(s));
+  // Every item has at most 8 normal affixes (Legendary) out of a 15-stat pool, so a fresh
+  // stat is always available; this fallback only exists as a defensive no-op guard.
+  const newStat = candidatePool.length > 0
+    ? candidatePool[Math.floor(Math.random() * candidatePool.length)]
+    : inst.affixes[targetPos].stat;
+
+  let max = itemAffixMaxForTier(newStat, inst.tier);
+  if (inst.slot === "weapon" && newStat === "damage") max = Math.round(max * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
+  const newValue = 1 + Math.floor(Math.random() * Math.max(1, max));
+
+  const newAffixes = inst.affixes.slice();
+  newAffixes[targetPos] = { stat: newStat, value: newValue };
+  const reforged = Object.assign({}, inst, { affixes: newAffixes });
+  gearList[idx] = reforged;
+  data.gear_instances = gearList;
+  data.materials = materials - materialCost;
+  data._save_seq = (data._save_seq || 0) + 1;
+  const accountGoldAfter = creditAccountGold(req.account.id, -goldCost);
+
+  db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(
+    JSON.stringify(data),
+    nowIso(),
+    req.account.id,
+    slot
+  );
+
+  res.json({ ok: true, item: reforged, materials: data.materials, account_gold: accountGoldAfter, _save_seq: data._save_seq });
 });
 
 /* ================= Server-authoritative Combat (v0.19) =================
@@ -1250,6 +1358,19 @@ const CB = {
   LATE_GAME_MONSTER_GROWTH_START_LEVEL: 10, LATE_GAME_MONSTER_GROWTH_PER_LEVEL: 0.10,
   STRONGHOLD_GUARDIAN_HP_MULT: 3.0, STRONGHOLD_GUARDIAN_XP_MULT: 1.5, STRONGHOLD_KEY_DROP_CHANCE: 0.15,
   ROAMING_MOB_HP_MULT: 4.0, ROAMING_MOB_DAMAGE_MULT: 1.5, ROAMING_MOB_XP_MULT: 2.0,
+  // v0.20.1 (#10): every kill now gets a shot at a SECOND (and rarely third) loot drop, on
+  // top of the always-resolved first drop above -- base chance is deliberately small so it
+  // reads as a nice surprise rather than the new normal, but climbs with Magic Find so
+  // stacking that stat (gear affix + kill streak + shrine buff, see combatGetMagicFind())
+  // has a second lever to pull beyond just rarity. Roaming mobs/Stronghold guardians (the
+  // "special" spawns) get a flat bonus on top of that -- both to the chance of a bonus drop
+  // happening at all, AND to the effective Magic Find used when rolling what that bonus drop
+  // actually IS, so their extra loot skews toward better quality too, exactly per Gwen's spec.
+  EXTRA_LOOT_BASE_CHANCE_PCT: 8, EXTRA_LOOT_MAGIC_FIND_SCALING_PCT: 0.5, EXTRA_LOOT_MAX_CHANCE_PCT: 60,
+  EXTRA_LOOT_SPECIAL_SPAWN_CHANCE_BONUS_PCT: 15, EXTRA_LOOT_SPECIAL_SPAWN_QUALITY_BONUS_PCT: 20,
+  // Chance of a THIRD drop is this fraction of whatever the (already-boosted) 2nd-drop chance
+  // rolled out to, so triple-drops stay meaningfully rarer than doubles even at very high MF.
+  EXTRA_LOOT_THIRD_DROP_FACTOR: 0.35,
   // v0.19.1 (#14): % damage per level now, not a flat +1/level -- must stay in sync with
   // Balance.WEAPON_SKILL_DAMAGE_PCT_PER_LEVEL in index.html (see combatGetDamageRange()).
   WEAPON_SKILL_HIT_STEP: 100, WEAPON_SKILL_DAMAGE_PCT_PER_LEVEL: 0.01,
@@ -1348,6 +1469,22 @@ function combatRollRarity(mfPct) {
     return si > fi ? second : first;
   }
   return first;
+}
+// v0.20.1 (#10): decides how many BONUS loot entries (beyond the always-resolved first
+// drop) a kill produces -- 0 by default, occasionally 1, rarely 2. isSpecialSpawn is true
+// for roaming mobs and Stronghold guardians, which get their own flat chance bonus on top
+// of whatever Magic Find is already contributing (see CB.EXTRA_LOOT_* above).
+function combatRollExtraLootCount(mfPct, isSpecialSpawn) {
+  mfPct = mfPct || 0;
+  let chance = CB.EXTRA_LOOT_BASE_CHANCE_PCT + mfPct * CB.EXTRA_LOOT_MAGIC_FIND_SCALING_PCT;
+  if (isSpecialSpawn) chance += CB.EXTRA_LOOT_SPECIAL_SPAWN_CHANCE_BONUS_PCT;
+  chance = Math.min(chance, CB.EXTRA_LOOT_MAX_CHANCE_PCT);
+  let count = 0;
+  if (Math.random() * 100 < chance) {
+    count++;
+    if (Math.random() * 100 < chance * CB.EXTRA_LOOT_THIRD_DROP_FACTOR) count++;
+  }
+  return count;
 }
 function combatRollLoot(tableId, mfPct) {
   mfPct = mfPct || 0;
@@ -1527,11 +1664,15 @@ function combatGetForestReputationXpPct(data) {
 // hoisted, so callable here), so this reads that directly instead of trusting the client's
 // own Net.activePlayersCache the way index.html's getGlobalXpMultiplier() has to.
 // v0.20 (#9.2): used to be "+100% per EXTRA player" (the raw headcount WAS the multiplier --
-// 3 players = 3x). Now it's +10% per extra player (2 players = +10%, 4 players = +30%, ...),
-// expressed directly as a percentage so it feeds combatGetTotalXpBonusPct() below.
+// 3 players = 3x). Became "+10% per EXTRA player" (2 players = +10%, 4 players = +30%, ...).
+// v0.20.1 (#25) CORRECTION: Gwen's actual spec is the raw headcount itself times 10%, not
+// headcount-minus-one -- "2 players online" should read +20%, not +10% -- while a solo
+// player (nobody else online) still gets exactly 0%, same as before (see the solo-player
+// message added back in v0.19.2 #11). So: 1 player -> 0%, 2 players -> 20%, 3 -> 30%, etc.
 function combatGetCommunityXpPct() {
   const n = Math.max(1, getActiveCharacters(100).length);
-  return (n - 1) * CB.COMMUNITY_XP_PCT_PER_EXTRA_PLAYER;
+  if (n < 2) return 0;
+  return n * CB.COMMUNITY_XP_PCT_PER_EXTRA_PLAYER;
 }
 // v0.20 (#9.3): EVERY XP bonus source now stacks ADDITIVELY (summed percentages, applied
 // once) instead of multiplicatively (each factor compounding on the last). Before this, a
@@ -1890,6 +2031,32 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
       loot = { type: "herb", herb_id: rolled.herb_id };
     }
 
+    // v0.20.1 (#10): roll for bonus loot beyond the guaranteed drop above. Roaming mobs and
+    // Stronghold guardians ("special" spawns) both boost the CHANCE of a bonus drop AND the
+    // effective Magic Find used to decide what it actually is, so their extra items skew
+    // toward better quality too -- everything else about the roll (same loot table, same
+    // gear-tier/auto-equip/consumable/herb handling as the guaranteed drop) is identical.
+    const isSpecialSpawn = !!(session.is_roamer || session.is_guardian);
+    const bonusMagicFind = isSpecialSpawn ? magicFind + CB.EXTRA_LOOT_SPECIAL_SPAWN_QUALITY_BONUS_PCT : magicFind;
+    const extraLootCount = combatRollExtraLootCount(magicFind, isSpecialSpawn);
+    const bonusLoot = [];
+    for (let i = 0; i < extraLootCount; i++) {
+      const extraRolled = combatRollLoot(session.loot_table, bonusMagicFind);
+      if (extraRolled.type === "gear") {
+        const extraTier = combatRollItemTier(session.area_level);
+        const extraInst = combatGenerateGearItem(extraTier, bonusMagicFind);
+        const extraPlacement = combatAddGearAutoEquip(data, extraInst);
+        bonusLoot.push({ type: "gear", item: extraInst, fit: extraPlacement.fit, auto_equipped: extraPlacement.autoEquipped });
+      } else if (extraRolled.type === "consumable") {
+        combatAddConsumable(data, extraRolled.item_id, 1);
+        bonusLoot.push({ type: "consumable", item_id: extraRolled.item_id });
+      } else if (extraRolled.type === "herb") {
+        combatAddHerb(data, extraRolled.herb_id, 1);
+        bonusLoot.push({ type: "herb", herb_id: extraRolled.herb_id });
+      }
+      // "nothing" results simply contribute no entry -- same as the guaranteed roll can do.
+    }
+
     let keyDrop = null;
     if (session.is_guardian) {
       const keyEligible = combatStrongholdKeyEligible(session.area_level, data.level);
@@ -1904,7 +2071,7 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
 
     kill = {
       gold, gold_credited: goldCredited, xp_gained: xpResult.xpGained, leveled,
-      loot, key_drop: keyDrop, kill_streak: data.kill_streak, max_kill_streak: data.max_kill_streak,
+      loot, bonus_loot: bonusLoot, key_drop: keyDrop, kill_streak: data.kill_streak, max_kill_streak: data.max_kill_streak,
       is_guardian: !!session.is_guardian, is_roamer: !!session.is_roamer,
     };
     updateCombatSession(session.id, { hp: 0, status: "won" });

@@ -39,6 +39,12 @@ body{
 #app{max-width:1100px;margin:0 auto;padding:28px 24px 60px;transition:opacity .18s ease;}
 h1,h2,h3{margin:0 0 6px;}
 h1{font-size:2.4em;color:#fff;text-shadow:0 0 12px rgba(255,180,80,.35);}
+/* v0.20.1 (#24): every screen uses an <h2> as its top page title (Character Sheet,
+   Blacksmith, Auction House, Town, guides, etc.) -- one sitewide rule here gives every one
+   of them a thin divider line underneath, instead of touching each individual screen
+   function. Deliberately subtle (low-opacity hairline) so it reads as a section separator,
+   not a bold new UI element. */
+h2{padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,.14);margin-bottom:12px;}
 .subtitle{color:#f0d9a0;font-size:1.05em;margin-bottom:10px;}
 .lore{color:#d8d4c8;max-width:600px;line-height:1.5em;margin-bottom:14px;}
 .muted{color:var(--muted);font-size:.85em;}
@@ -265,6 +271,13 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
    game underneath while it's open is an acceptable tradeoff for a much more readable log. */
 .chat-panel{position:fixed;top:0;right:0;height:100vh;width:50%;min-width:560px;max-width:840px;background:var(--panel);border-left:1px solid var(--border);box-shadow:-6px 0 20px rgba(0,0,0,.55);z-index:80;display:flex;flex-direction:column;padding:14px;}
 .chat-private-msg{background:#2a3a20;border:1px solid #4a6a3a;border-radius:6px;padding:4px 8px;margin:2px 0;}
+/* v0.20.1 (#8): a Broken Bridge Trial class promotion is the single biggest permanent
+   milestone a global-chat announcement can report -- it used to render as identical plain
+   text to every other "has passed/failed the trial" line. Same boxed-message treatment as
+   the Auction House's private green notices (.chat-private-msg above), just gold-toned
+   (matching var(--gold)) so a promotion visibly stands out in the log instead of scrolling
+   by as another line of plain text. */
+.chat-promotion-msg{background:#3a3220;border:1px solid #a8862f;border-radius:6px;padding:4px 8px;margin:2px 0;color:#f0d78a;}
 .trash-btn{flex:0 0 auto;padding:8px 10px;}
 .blocked-icon{opacity:.85;}
 .dim-icon{opacity:.4;}
@@ -312,7 +325,18 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
    depends on this. */
 .equip-doll{display:flex;flex-direction:column;gap:6px;align-items:center;}
 .equip-doll-row{display:flex;gap:6px;justify-content:center;}
-.equip-doll-row>.tile{flex:0 0 auto;width:128px;min-width:0;box-sizing:border-box;}
+/* v0.20.1 (#1/#2): shrunk from 128px -- equipSlotTile() no longer renders the item name
+   (see its own comment), just a slot label + icon + optional Unequip button, so the widest
+   4-tile row now comfortably fits inside a 50%-width column. That's what makes #2's
+   Equipped+Backpack tab merge possible without either half feeling cramped. */
+.equip-doll-row>.tile{flex:0 0 auto;width:76px;min-width:0;box-sizing:border-box;padding:8px 4px;text-align:center;}
+.equip-doll-row>.tile button{padding:2px 4px;font-size:.8em;}
+/* v0.20.1 (#5): shared "section title" treatment for the Character Sheet Overview tab's
+   Attributes/Skill Bonuses/Gear Bonuses panel headers -- matches the same uppercase-label/
+   divider-line language already used for the item tooltip's header/stats divider (see
+   IF.tooltipText()'s "───────────────" line) instead of a plain bold word sitting flush
+   against the first row of content beneath it. */
+.panel-section-title{text-transform:uppercase;letter-spacing:.06em;font-size:.85em;padding-bottom:8px;margin-bottom:12px;border-bottom:1px solid var(--border);}
 .character-sheet-tabs{display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--border);padding-bottom:8px;margin:10px 0;}
 .character-sheet-tab{background:none;}
 .character-sheet-tab.active{background:var(--panel2);border-color:#7ab0e0;color:#9fd0ff;font-weight:bold;}
@@ -666,6 +690,19 @@ function inlineIcon(svg,size=18){ const d=h("span",{style:{display:"inline-flex"
 function itemIconSvg(itemId){
   const item=DL.getItem(itemId);
   const hue=hashHue(itemId);
+  // v0.20.1 (#14): Dry Log is a "consumable" by TYPE (see its own item declaration's comment
+  // on riding the stackable-item plumbing) but is obviously not a potion -- it was falling
+  // through to the generic potion-vial branch below and rendering as one. A simple log
+  // silhouette with a couple of end-grain rings reads correctly at a glance instead.
+  if(itemId==="dry_branch"){
+    return `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><rect x="6" y="16" width="28" height="10" rx="5" fill="#8a5a35" stroke="#5a3a1f" stroke-width="1.5" transform="rotate(-8 20 20)"/><ellipse cx="8" cy="19" rx="3.2" ry="4.6" fill="#c99a6a" stroke="#5a3a1f" stroke-width="1.2" transform="rotate(-8 20 20)"/><ellipse cx="8" cy="19" rx="1.4" ry="2.2" fill="#8a5a35" transform="rotate(-8 20 20)"/><path d="M14,17 Q20,19 26,15" stroke="#5a3a1f" stroke-width="1" fill="none" opacity="0.6" transform="rotate(-8 20 20)"/><path d="M13,23 Q20,25 27,22" stroke="#5a3a1f" stroke-width="1" fill="none" opacity="0.6" transform="rotate(-8 20 20)"/></svg>`;
+  }
+  // v0.20.1 (#15): same issue as Dry Log above -- every Stronghold Key tier is also a
+  // "consumable"-typed stackable item, and was rendering as a potion vial instead of a key.
+  if(itemId.indexOf("stronghold_key")===0){
+    const teeth=`hsl(${hue},55%,50%)`;
+    return `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="14" cy="14" r="7" fill="none" stroke="${teeth}" stroke-width="3.5"/><rect x="18" y="18" width="4" height="16" fill="${teeth}" transform="rotate(45 20 26)"/><rect x="24" y="24" width="6" height="3.4" fill="${teeth}" transform="rotate(45 27 25.7)"/><rect x="28" y="28" width="6" height="3.4" fill="${teeth}" transform="rotate(45 31 29.7)"/></svg>`;
+  }
   if(item.type==="consumable"){
     // v0.20 (#13): Health Potions now always render TRUE red liquid (scaled darker/richer
     // for higher-tier, higher heal_amount potions) instead of the generic per-item hash
@@ -1021,7 +1058,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.20-web",
+  GAME_VERSION:"v0.20.1-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   // v0.20 (#10): each town tier previously shared the exact same "A quiet camp on the edge
@@ -1142,6 +1179,12 @@ const Balance = {
   // old flat per-tier gold add is retired (its 8-per-tier bonus barely moved the needle for
   // a high-tier item), replaced by multiplying the whole slot-based total by Tier^1.5.
   SALVAGE_MATERIALS_PER_SLOT:3, REROLL_MATERIAL_COST_MULT:2, SELL_GOLD_PER_SLOT:4,
+  // v0.20.1 (#17/#18): Reroll now also costs gold (3x the item's sell value) on top of its
+  // existing material cost, and a new pricier "Reforge" feature (6x Reroll's material cost,
+  // 12x sell value in gold) can change one existing affix's STAT entirely, not just its
+  // value -- see rerollGoldCost()/reforgeCost()/reforgeGoldCost() below and their mirrored
+  // server-side constants/functions in evergrind-server/server.js.
+  REROLL_GOLD_COST_MULT:3, REFORGE_MATERIAL_COST_MULT:6, REFORGE_GOLD_COST_MULT:12,
   // Broken Bridge Trial (v0.11 rework): one continuous 10-step crossing per
   // promotion attempt (no more sub-"stages"). The number of planks hidden at each step
   // -- and so the per-step pass chance -- scales with the tier being climbed FROM:
@@ -1420,6 +1463,13 @@ const Balance = {
   // instead of materials) -- a flat per-tier gold add wasn't enough of a difference to feel
   // like a high-tier item was actually worth more to sell.
   sellValue(tier,slots){return Math.round(Math.pow(tier,1.5)*slots*this.SELL_GOLD_PER_SLOT);},
+  // v0.20.1 (#17/#18): Reroll's new gold cost, and Reforge's material/gold costs -- both
+  // derive from the same rerollCost()/sellValue() figures already shown elsewhere in the
+  // Blacksmith, just scaled up by their own multiplier. Mirrored exactly server-side (see
+  // itemRerollGoldCost()/itemReforgeMaterialCost()/itemReforgeGoldCost() in server.js).
+  rerollGoldCost(tier,slots){return this.sellValue(tier,slots)*this.REROLL_GOLD_COST_MULT;},
+  reforgeCost(tier,slots){return this.rerollCost(tier,slots)*this.REFORGE_MATERIAL_COST_MULT;},
+  reforgeGoldCost(tier,slots){return this.sellValue(tier,slots)*this.REFORGE_GOLD_COST_MULT;},
   bagBuyPrice(cap){return cap*this.BAG_BUY_GOLD_PER_CAPACITY;},
   // v0.12: Merchant buy price for any consumable/scroll -- item.buy_price overrides the
   // default sell_value*VENDOR_MARKUP formula when an item needs an exact price point
@@ -1651,6 +1701,15 @@ const IF = {
     if(!weaponType) return true;
     const list=this.WEAPON_TYPE_CLASS_RESTRICTIONS[weaponType];
     return !list || list.includes(classId);
+  },
+  // v0.20.1 (#9): reverse lookup of WEAPON_TYPE_CLASS_RESTRICTIONS -- every weapon type a
+  // given class is allowed to wield, in WEAPON_TYPE_LIST order. Dagger (and any other
+  // intentionally-unrestricted type) always appears for every class, same reasoning as
+  // classCanUseWeaponType() above -- this is just that same check run across the whole
+  // weapon-type list instead of one type at a time, for the Player Classes overview's new
+  // per-class weapon list (screenClassProgression()).
+  weaponTypesForClass(classId){
+    return this.WEAPON_TYPE_LIST.filter(wt=>this.classCanUseWeaponType(classId,wt));
   },
   // True if classId can equip this specific item instance at all, considering ONLY the
   // class/weapon-type restriction (level is handled separately by Balance.tierLevelRequirement).
@@ -2156,6 +2215,16 @@ const Net = {
     const res=await fetch(this.apiBase()+"/api/blacksmith/reroll",{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({slot,instance_id:instanceId})});
     const json=await res.json().catch(()=>({}));
     if(!res.ok) throw new Error(json.error||"That item could not be rerolled.");
+    return json;
+  },
+  // v0.20.1 (#17): "Reforge" -- same server-authoritative pattern as rerollGear() just
+  // above, hitting the new POST /api/blacksmith/reforge instead (see that endpoint for
+  // the full server-side logic: it picks which ONE affix gets replaced and what stat/value
+  // it becomes, so a modified client can only ask for a reforge, never dictate its result).
+  async reforgeGear(slot, instanceId){
+    const res=await fetch(this.apiBase()+"/api/blacksmith/reforge",{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({slot,instance_id:instanceId})});
+    const json=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(json.error||"That item could not be reforged.");
     return json;
   },
   // v0.19: server-authoritative combat (see evergrind-server/server.js's new "Server-
@@ -3416,6 +3485,15 @@ const PS = {
     // characters at all (it isn't even saved to the server). Force a fresh maze on the next
     // Venture for every new character.
     GF.overworld_snapshot=null;
+    // v0.20.1 (#16) BUG FIX (credit: ImpulseBE): same reused-GF-singleton leak class as
+    // GF.overworld_snapshot just above -- GF.trapdoorStreak/GF.ventureLockDepth are also
+    // GF-singleton fields, not per-character ones. Without this reset, a brand new character
+    // could inherit a nonzero trapdoor-fall streak left behind by whichever character was
+    // played last, so their very first trapdoor fall would apply that stale stack's penalty
+    // (-2 or -3 area levels) instead of the correct -1. A fresh character has never fallen
+    // through a trapdoor, so both must start clean.
+    GF.trapdoorStreak=0;
+    GF.ventureLockDepth=null;
   },
   saveGame(){
     if(this.current_slot<0) return;
@@ -3566,6 +3644,15 @@ const PS = {
     // never persisted server-side to begin with, so there's nothing lost by resetting it
     // here; the next Venture simply generates this character's own fresh maze at their depth.
     GF.overworld_snapshot=null;
+    // v0.20.1 (#16) BUG FIX (credit: ImpulseBE): same leak class as GF.overworld_snapshot
+    // right above -- switching TO this character (login, or picking a different save slot)
+    // must not keep whatever trapdoor-fall streak / manual-venture-depth lock the PREVIOUSLY
+    // active character had accumulated. Without this, a player reported dropping 2 area
+    // levels from a single trapdoor -- what was actually happening was a stale trapdoorStreak
+    // of 1 (or 2) surviving a character switch, so this character's very FIRST trapdoor fall
+    // applied a stacked -2 (or -3) penalty instead of the correct -1.
+    GF.trapdoorStreak=0;
+    GF.ventureLockDepth=null;
     return true;
   },
   // v0.17 (#6): the local-storage "offline" fallback here was dead code -- see the Save
@@ -3900,15 +3987,21 @@ function activePlayersLine(){
 // total headcount including yourself.
 // v0.20 (#9.2): used to be "+100% per EXTRA player" -- the raw headcount itself WAS the
 // multiplier (2 players = 2x, 3 = 3x, ...), which compounded into an ever-larger number as
-// more people logged on. Now it's +10% per extra player. getCommunityXpBonusPct() is the
-// new, canonical form (a plain percentage, ready to feed into getTotalXpBonusPct()'s
+// more people logged on. Became "+10% per EXTRA player" (headcount-1). getCommunityXpBonusPct()
+// is the canonical form (a plain percentage, ready to feed into getTotalXpBonusPct()'s
 // additive stack) -- getGlobalXpMultiplier() is kept as a thin "1 + that percentage"
-// convenience wrapper purely for callers that still want an actual multiplier value (there
-// is no longer any code path that needs the raw headcount itself).
+// convenience wrapper purely for callers that still want an actual multiplier value.
+// v0.20.1 (#25) CORRECTION: the actual spec is the raw headcount TIMES 10%, not
+// headcount-minus-one -- 2 players online should read +20%, not +10% -- while a solo
+// player still gets exactly 0% (see the "you're the only one online" message, v0.19.2 #11).
+// So: 1 player -> 0%, 2 players -> 20%, 3 -> 30%, 4 -> 40%, etc. Mirrors server.js's
+// combatGetCommunityXpPct() exactly.
 function getCommunityXpBonusPct(){
   const entries=Net.activePlayersCache;
   if(!entries) return 0;
-  return Math.max(0, entries.length-1)*Balance.COMMUNITY_XP_PCT_PER_EXTRA_PLAYER;
+  const n=entries.length;
+  if(n<2) return 0;
+  return n*Balance.COMMUNITY_XP_PCT_PER_EXTRA_PLAYER;
 }
 // Returns 1 (no bonus, never a penalty) while the very first fetch hasn't resolved yet
 // (cache still null) rather than guessing at a count nobody has confirmed.
@@ -4008,13 +4101,23 @@ function topBar(){
   ]);
 }
 
+// v0.20.1 (#8): the server broadcasts a class promotion as a plain System chat line (see
+// server.js's /api/announce/trial: "... has passed the broken bridge trial and is now a
+// X."), with no separate "kind" flag to key styling off of -- rather than adding a schema/
+// payload change for one cosmetic detail, this pattern-matches that exact, deterministic
+// suffix text (only ever appended on a successful PROMOTION, i.e. new_class_name was set --
+// see that endpoint) to decide whether a given System line gets the gold treatment.
+const PROMOTION_CHAT_PATTERN=/has passed the broken bridge trial and is now a /;
 function chatLogEntries(){
   const entries=[];
   // v0.15: server-generated announcements (logins, trial results, deaths, new characters
   // -- anything broadcastSystemMessage() sends, tagged username==="System" server-side)
   // no longer get a "System: " prefix. They read fine standing on their own, and the
   // prefix was just noise on every single one of them.
-  for(const m of Net.chatMessages) entries.push({t:new Date(m.created_at).getTime(), node:h("div",{},[h("span",{class:"muted"},[`[${new Date(m.created_at).toLocaleTimeString()}] `]), m.username!=="System"?h("span",{style:{fontWeight:"bold"}},[m.username+": "]):null, m.message])});
+  for(const m of Net.chatMessages){
+    const isPromotion=m.username==="System" && PROMOTION_CHAT_PATTERN.test(m.message);
+    entries.push({t:new Date(m.created_at).getTime(), node:h("div",{class:isPromotion?"chat-promotion-msg":""},[h("span",{class:"muted"},[`[${new Date(m.created_at).toLocaleTimeString()}] `]), m.username!=="System"?h("span",{style:{fontWeight:"bold"}},[m.username+": "]):null, isPromotion?"🎉 ":null, m.message])});
+  }
   for(const m of Net.privateMessages) entries.push({t:new Date(m.created_at).getTime(), node:h("div",{class:"chat-private-msg"},[h("span",{class:"muted"},[`[${new Date(m.created_at).toLocaleTimeString()}] `]), m.message])});
   entries.sort((a,b)=>a.t-b.t);
   return entries.map(e=>e.node);
@@ -4422,6 +4525,12 @@ function damageLine(){
   // v0.19.1 (#14): shown as a %, not a flat number, now that weapon-skill proficiency is a
   // % damage bonus rather than a flat add-per-level (see PS.getDamageBreakdown()).
   const skillTip=d.weaponSkillPct>0?`\nFrom skill bonuses: +${Math.round(d.weaponSkillPct*100)}%`:"";
+  // v0.20.1 (#7): the weapon-skill contribution used to be tooltip-only (skillTip above) --
+  // per Gwen's report, a player actively benefiting from a weapon-skill damage bonus had no
+  // way to see it without hovering. Now shown right in the visible text alongside base/gear,
+  // same flat min-end-equivalent number the tooltip and the >0 gate already use (see
+  // getDamageBreakdown()'s own comment on weaponSkillBonus).
+  const skillPart=d.weaponSkillPct>0?`, +${Math.round(d.weaponSkillBonus)} from skill`:"";
   // v0.19.2 (#19): the "Damage: X-Y" spread here used to describe an actual independent RNG
   // roll made on every attack (see the old cbRandRange(lo, hi) in server.js's attack
   // resolution) -- per Gwen's spec, that was a THIRD layer of randomness on top of crit
@@ -4432,7 +4541,7 @@ function damageLine(){
   const flatTotal=Math.round((d.totalMin+d.totalMax)/2);
   const children=[
     h("span",{class:"muted tooltip",style:{fontSize:".85em"},"data-tip":`Base (level + attributes): ${baseFlat}\nFrom equipped gear: +${Math.round(d.gearBonus)}${skillTip}`},[
-      `Damage: ${flatTotal} (${baseFlat} base${gearPart})`
+      `Damage: ${flatTotal} (${baseFlat} base${gearPart}${skillPart})`
     ]),
   ];
   // v0.19.1 (#9): the Quad Damage shrine indicator moves here, right under level/class, next
@@ -4480,6 +4589,19 @@ function activePotionBuffIcons(){
   return icons;
 }
 
+// v0.20.1 (#21): the exact wording for the Forest Reputation mouseover tooltip, split out
+// so both statHeader() (player tile) and any other future site can share the identical
+// three-way (positive/negative/zero) explanation of what the CURRENT number is doing.
+function forestReputationTooltipText(rep){
+  if(rep>0){
+    const pct=rep*Balance.FOREST_REPUTATION_XP_PCT_PER_POINT;
+    return `Positive standing with this tier's forest: +${pct}% bonus to ALL experience gained while exploring it (stacks with every other XP bonus).`;
+  }
+  if(rep<0){
+    return `Negative standing with this tier's forest: ${-rep} extra roaming mob${rep<-1?"s":""} spawn while exploring it.`;
+  }
+  return "Neutral standing with this tier's forest -- no bonus or penalty yet. Squash a Critter encounter to lower it, or spare one to raise it.";
+}
 function statHeader(opts={}){
   const compact=!!opts.compact;
   const c=PS.getClassData();
@@ -4506,7 +4628,12 @@ function statHeader(opts={}){
         // a meaningful, common state for this stat, not something worth hiding. Always shows
         // the CURRENT tier's own reputation, matching whichever forest/town this character is
         // presently exploring (see PS.getCurrentForestReputation()'s comment).
-        h("div",{class:"muted"},[`Forest Reputation (Tier ${tierRomanNumeral(PS.highest_tier_reached||1)}): ${PS.getCurrentForestReputation()}`]),
+        // v0.20.1 (#21): mouseover tooltip explaining what the CURRENT number actually does --
+        // positive standing is a permanent +1%/point XP bonus while exploring this tier's
+        // forest (see Balance.FOREST_REPUTATION_XP_PCT_PER_POINT/PS.getForestReputationXpMult()),
+        // negative standing instead spawns extra roaming mobs, 1 per point below zero (see
+        // PS.getForestReputationExtraRoamers()) -- zero has no effect either way yet.
+        h("div",{class:"tooltip muted","data-tip":forestReputationTooltipText(PS.getCurrentForestReputation())},[`Forest Reputation (Tier ${tierRomanNumeral(PS.highest_tier_reached||1)}): ${PS.getCurrentForestReputation()}`]),
         buffIcons.length?h("div",{style:{marginTop:"2px"}},buffIcons):null,
       ]),
       h("div",{class:"row gap",style:{alignItems:"center"}},[
@@ -4811,6 +4938,16 @@ function screenMainMenuSlots(){
       // making this tile taller than its siblings on the character-select screen.
       h("div",{class:"dim-note",style:{marginTop:"2px"}},["Leveling, Exp penalties, promotion targets"]),
     ]),
+    // v0.20.1 (#11): new Monster Guide, same row/pattern as the other 4 guides.
+    h("button",{class:"wide",style:{textAlign:"center",lineHeight:"1.3",padding:"8px 12px",flex:"1"},onClick:()=>{ GF._preMonsterGuideScreen="mainMenuSlots"; GF.goto("monsterGuide"); }},[
+      h("div",{},["👹 Monster Guide"]),
+      h("div",{class:"dim-note",style:{marginTop:"2px"}},["Stats, scaling, and spawn types compared"]),
+    ]),
+    // v0.20.1 (#19): new Blacksmith Guide, same row/pattern as the other 5 guides.
+    h("button",{class:"wide",style:{textAlign:"center",lineHeight:"1.3",padding:"8px 12px",flex:"1"},onClick:()=>{ GF._preBlacksmithGuideScreen="mainMenuSlots"; GF.goto("blacksmithGuide"); }},[
+      h("div",{},["🔨 Blacksmith Guide"]),
+      h("div",{class:"dim-note",style:{marginTop:"2px"}},["Reroll vs Reforge vs Salvage, and their costs"]),
+    ]),
   ]));
   root.appendChild(content);
   return root;
@@ -5039,6 +5176,11 @@ function screenClassProgression(){
           h("div",{style:{fontWeight:"bold"}},[`Tier ${tierRomanNumeral(c.tier)}: ${c.display_name}`]),
           h("div",{class:"muted"},[c.description]),
           h("div",{class:"muted",style:{fontSize:".82em",marginTop:"2px"}},[`Starting attributes: STR ${c.base_str} · DEX ${c.base_dex} · VIT ${c.base_vit} · INT ${c.base_int}`]),
+          // v0.20.1 (#9): lists every weapon type this exact tier can wield -- Dagger always
+          // appears (unrestricted, see WEAPON_TYPE_CLASS_RESTRICTIONS's own comment) so at a
+          // glance you can spot which classes have only Dagger and nothing else, i.e. the
+          // ones most worth designing a new weapon-type restriction around next.
+          h("div",{class:"muted",style:{fontSize:".82em",marginTop:"2px"}},[`Weapons: ${IF.weaponTypesForClass(classId).map(wt=>IF.WEAPON_TYPE_LABELS[wt]).join(", ")}`]),
           isFinal?h("div",{style:{color:"#e0b23d",fontWeight:"bold",marginTop:"2px"}},["★ Final tier, wins the season"]):null,
         ]),
       ]));
@@ -6558,6 +6700,29 @@ function setKeybindScheme(v){
   Storage_.setItem(KEYBIND_STORAGE_KEY,v);
 }
 
+// v0.20.1 (#12/#13, credit: Marudok for the Character Sheet shortcut suggestion):
+// configurable single-key shortcuts, same "local display/input preference, stored in
+// Storage_ (localStorage), never sent to the server or attached to a character" pattern
+// as the maze movement keybind scheme just above -- so, like that one, this is a per-
+// browser preference rather than a per-account one (it'll follow this device/browser
+// across every character AND every account signed into it, exactly like the movement
+// keybinds already do), and carries zero data-loss risk either way.
+const KEYBOARD_SHORTCUT_STORAGE_KEY="wandrian_keyboard_shortcuts";
+const KEYBOARD_SHORTCUT_DEFAULTS={characterSheet:"c", venture:"v"};
+function getKeyboardShortcuts(){
+  let parsed=null;
+  try{ parsed=JSON.parse(Storage_.getItem(KEYBOARD_SHORTCUT_STORAGE_KEY)||"null"); }catch(e){ parsed=null; }
+  return Object.assign({}, KEYBOARD_SHORTCUT_DEFAULTS, parsed||{});
+}
+function setKeyboardShortcut(name,key){
+  if(!KEYBOARD_SHORTCUT_DEFAULTS.hasOwnProperty(name)) return;
+  const clean=(key||"").trim().toLowerCase().slice(0,1);
+  if(!clean) return;
+  const current=getKeyboardShortcuts();
+  current[name]=clean;
+  Storage_.setItem(KEYBOARD_SHORTCUT_STORAGE_KEY, JSON.stringify(current));
+}
+
 // v0.18 (#16): Settings screen -- currently just the keybind picker, reached via the
 // top-bar "Settings" link. Same "remember where I came from, Back returns there" pattern
 // as screenChangelog()/GF._preChangelogScreen.
@@ -6567,6 +6732,27 @@ function keybindSchemeButton(key){
     style:{background:selected?"var(--accent,#3a6a2a)":undefined,borderColor:selected?"#7ac67a":undefined},
     onClick:()=>{ setKeybindScheme(key); render(); },
   },[KEYBIND_SCHEMES[key].label]);
+}
+// v0.20.1 (#12/#13): one row of this shape per configurable shortcut -- a label, a
+// description of exactly what it does (and any restriction, like Venture's Town-only
+// scope), and a single-character text input that saves on every keystroke. Deliberately a
+// plain editable field (type the letter you want) rather than a "click then press a key"
+// recorder -- simpler to build, simpler to test, and just as fast to use for a single
+// character.
+function keyboardShortcutRow(name,label,description){
+  const current=getKeyboardShortcuts()[name];
+  const input=h("input",{type:"text",maxlength:"1",value:current.toUpperCase(),style:{width:"36px",textAlign:"center",fontWeight:"bold",textTransform:"uppercase"}});
+  input.addEventListener("input",()=>{
+    setKeyboardShortcut(name,input.value);
+    input.value=getKeyboardShortcuts()[name].toUpperCase();
+  });
+  return h("div",{class:"row gap",style:{alignItems:"center",marginBottom:"8px"}},[
+    input,
+    h("div",{style:{flex:"1"}},[
+      h("div",{style:{fontWeight:"bold"}},[label]),
+      h("div",{class:"muted",style:{fontSize:".85em"}},[description]),
+    ]),
+  ]);
 }
 function screenSettings(){
   const root=h("div",{});
@@ -6581,10 +6767,67 @@ function screenSettings(){
       keybindSchemeButton("zqsd"),
     ]),
   ]));
+  // v0.20.1 (#12/#13, credit: Marudok): configurable keyboard shortcuts -- Character Sheet
+  // (works from any screen, toggles closed and returns to wherever you were if pressed
+  // again while already there) and Venture (only actually does anything while in Town;
+  // pressing it again once inside the woods, or from any other screen, is a no-op -- see
+  // the shared window keydown handler below screenSettings() for both implementations).
+  root.appendChild(h("div",{class:"panel"},[
+    h("div",{style:{fontWeight:"bold",marginBottom:"6px"}},["Keyboard Shortcuts"]),
+    h("div",{class:"muted",style:{marginBottom:"10px"}},["Type a single letter to reassign either shortcut below. These never fire while you're typing into a text field (chat, this box, character names, and so on)."]),
+    keyboardShortcutRow("characterSheet","Character sheet","Opens the Character Sheet from anywhere. Press it again while there to close it and return to whatever screen you were on."),
+    keyboardShortcutRow("venture","Venture","Same as clicking \"Venture into the Woods\" -- only works while you're in Town. Does nothing once you're already in the maze, or on any other screen."),
+  ]));
   return root;
 }
 
+// v0.20.1 (#12, credit: Marudok): exactly the same toggle-with-return logic as the
+// "Character Sheet" text link/+ CTA elsewhere (see their onClick handlers) -- pressing it
+// again while already on the Character Sheet returns to whatever screen was active before,
+// via the same GF.inventory_return_to bookkeeping the on-screen Back button already reads.
+// Pulled out into its own named function (rather than left inline in the keydown handler
+// below) so it's directly callable/testable without needing to simulate a real key event.
+function characterSheetShortcutAction(){
+  if(GF.screen==="inventory") GF.goto(GF.inventory_return_to||"town");
+  else GF.goto("inventory",{inventory_return_to:GF.screen});
+}
+// v0.20.1 (#13): identical to Town's "Venture into the Woods" card's own onClick. Per
+// Gwen's exact spec, only actually does anything while in Town -- pressing it again once
+// inside the woods (GF.screen==="maze"), or from any other screen, is a no-op.
+function ventureShortcutAction(){
+  if(GF.screen!=="town") return;
+  PS.resetKillStreak();
+  GF.goto("maze",{maze_depth:getVentureDepth()});
+}
 window.addEventListener("keydown",(e)=>{
+  // v0.20.1 (#26): while focus is on ANY text input or textarea -- the global chat box,
+  // the keyboard-shortcut picker fields in Settings, a character name field, anything --
+  // every keyboard shortcut below (maze movement AND the Character Sheet/Venture shortcuts)
+  // is completely ignored. Chatting (or typing anywhere else) always takes priority; the
+  // maze/shortcut handlers simply don't see the keystroke until focus moves off the field.
+  const activeTag=document.activeElement && document.activeElement.tagName;
+  if(activeTag==="INPUT" || activeTag==="TEXTAREA") return;
+
+  // v0.20.1 (#12/#13): Character Sheet and Venture shortcuts, checked before the maze-only
+  // movement handling below since Character Sheet (at least) needs to work from ANY screen,
+  // not just the maze. Both keys are configurable in Settings (see getKeyboardShortcuts());
+  // comparison is case-insensitive so either Caps Lock state triggers it, matching how the
+  // letter is stored (always lowercased on save).
+  const shortcuts=getKeyboardShortcuts();
+  const keyLower=e.key.length===1?e.key.toLowerCase():e.key;
+  if(keyLower===shortcuts.characterSheet){
+    e.preventDefault();
+    characterSheetShortcutAction();
+    return;
+  }
+  if(keyLower===shortcuts.venture){
+    // Still preventDefault() even on screens where it's a no-op -- the letter is reserved
+    // as a shortcut app-wide once configured, same as Character Sheet's above.
+    e.preventDefault();
+    ventureShortcutAction();
+    return;
+  }
+
   if(GF.screen!=="maze") return;
   // v0.19.1 (#7): keyboard movement is just another input path into attemptMazeMove(), same
   // as the on-screen D-pad/click-adjacent-tile below -- all of them need to be blocked mid
@@ -6701,12 +6944,20 @@ function combatLog(cb,msg){ cb.log.push(msg); if(cb.log.length>10) cb.log.shift(
 // but backed by GF.mazeLog (a single running log for the whole maze session) rather than a
 // per-combat object, since these fire outside of combat (exhaustion warnings, ankle-bite
 // traps, shrines) while the player is just walking around. See mazeLogBox() for rendering.
-function mazeLog(msg){ GF.mazeLog.push(msg); if(GF.mazeLog.length>10) GF.mazeLog.shift(); }
+// v0.20.1 (#22): cap dropped from 10 to 3 -- per Gwen's spec, the Adventure Log (moved
+// below the maze grid in v0.20) should only ever show its 3 most recent lines, with the
+// 4th-oldest simply discarded rather than staying scrollable. Kept as its own separate cap
+// (not shared with combatLog's 10) since these two logs already render in entirely
+// different places for entirely different reasons.
+function mazeLog(msg){ GF.mazeLog.push(msg); if(GF.mazeLog.length>3) GF.mazeLog.shift(); }
 // Renders as a small fixed-height, always-present panel (never conditionally added/removed
 // like the old toastBox() banner was) so new entries scroll within their own box instead of
 // shifting anything else on the maze screen up or down.
+// v0.20.1 (#22): no more overflowY:auto/scrollbar -- with the cap above now holding GF.mazeLog
+// to at most 3 entries, there's never more content than fits, so a scrollbar had nothing left
+// to actually do except sit there implying there was more to scroll to (there wasn't).
 function mazeLogBox(){
-  return h("div",{class:"muted panel",style:{marginTop:"6px",marginBottom:"6px",height:"70px",overflowY:"auto"}},
+  return h("div",{class:"muted panel",style:{marginTop:"6px",marginBottom:"6px"}},
     GF.mazeLog.length===0?[h("div",{},["Nothing has happened yet. Explore..."])]:GF.mazeLog.map(l=>h("div",{},[l])));
 }
 
@@ -6998,8 +7249,15 @@ function screenCombat(){
       Net.accountGold=(Net.accountGold||0)+k.gold_credited;
       PS.kill_streak=k.kill_streak; PS.max_kill_streak=k.max_kill_streak;
       const lootMsg=applyCombatLoot(k.loot);
+      // v0.20.1 (#10): a kill can now also carry bonus_loot -- an array of zero or more
+      // extra drops beyond the guaranteed one above (see combatRollExtraLootCount() in
+      // server.js). Each entry is the exact same {type,...} shape grantLoot()/applyCombatLoot()
+      // already know how to apply, so we just run every one of them through the same function
+      // and stitch their messages on, rather than teaching applyCombatLoot() a new shape.
+      const bonusLootMsgs=(k.bonus_loot||[]).map(applyCombatLoot).filter(m=>m);
       cb.defeated=true;
       cb.result_text=`${cb.name} defeated! +${Math.round(k.xp_gained)} XP, +${Math.round(k.gold_credited)} gold. ${lootMsg}`;
+      if(bonusLootMsgs.length>0) cb.result_text+=` Bonus loot! ${bonusLootMsgs.join(" ")}`;
       if(k.is_guardian){
         // v0.12: beating a Stronghold guardian opens the direct path to that Stronghold's
         // chest -- this bookkeeping is purely client-side maze state (never validated
@@ -7628,10 +7886,13 @@ function attributesPanel(){
       ]),
     ]);
   });
+  // v0.20.1 (#5): "Attributes" now gets the shared uppercase/divider .panel-section-title
+  // treatment (see that class's own comment) instead of a plain bold word sitting right
+  // above the first attribute row with no breathing room.
   return h("div",{class:"panel",style:{marginTop:"12px",marginBottom:"12px",height:"100%"}},[
-    h("div",{class:"row",style:{justifyContent:"space-between",marginBottom:"8px"}},[
-      h("div",{style:{fontWeight:"bold"}},["Attributes"]),
-      h("div",{class:PS.unspent_stat_points>0?"gold-text":"muted"},[PS.unspent_stat_points>0?`${PS.unspent_stat_points} point${PS.unspent_stat_points===1?"":"s"} to spend`:"No unspent points"]),
+    h("div",{class:"row panel-section-title",style:{justifyContent:"space-between",alignItems:"center"}},[
+      h("div",{},["Attributes"]),
+      h("div",{class:PS.unspent_stat_points>0?"gold-text":"muted",style:{textTransform:"none",letterSpacing:"normal",fontSize:"1em"}},[PS.unspent_stat_points>0?`${PS.unspent_stat_points} point${PS.unspent_stat_points===1?"":"s"} to spend`:"No unspent points"]),
     ]),
     ...body,
   ]);
@@ -7666,8 +7927,9 @@ function skillsBonusPanel(){
     h("div",{style:{flex:"1"}},[bar(herbPct,"bar-xp",true)]),
     h("div",{class:"muted",style:{minWidth:"160px",textAlign:"right"}},[`Lv ${hp.level} (${hp.pointsIntoLevel}/${hp.pointsForNextLevel})`]),
   ]);
+  // v0.20.1 (#5): same .panel-section-title treatment as Attributes above.
   return h("div",{class:"panel",style:{marginTop:"12px",marginBottom:"12px"}},[
-    h("div",{style:{fontWeight:"bold",marginBottom:"8px"}},["Skill Bonuses"]),
+    h("div",{class:"panel-section-title"},["Skill Bonuses"]),
     ...rows,
     herbalismRow,
     h("div",{class:"muted",style:{marginTop:"8px",fontStyle:"italic"}},["Permanent. You can only get better -- weapon/herbalism skill progress survives Broken Bridge promotions and season resets."]),
@@ -7717,8 +7979,9 @@ function gearBonusPanel(){
   // not from any single piece of gear.
   const weaponType=PS.getEquippedWeaponType();
   const skillLevel=weaponType?PS.getWeaponSkillLevel(weaponType):0;
+  // v0.20.1 (#5): same .panel-section-title treatment as Attributes/Skill Bonuses above.
   return h("div",{class:"panel",style:{marginTop:"12px",marginBottom:"12px",height:"100%"}},[
-    h("div",{style:{fontWeight:"bold",marginBottom:"8px"}},["Gear Bonuses"]),
+    h("div",{class:"panel-section-title"},["Gear Bonuses"]),
     lines.length===0?h("div",{class:"muted"},["No gear bonuses yet."]):
       h("div",{},lines.map(l=>h("div",{class:"muted",style:{marginBottom:"4px"}},[l]))),
     skillLevel>0?h("div",{style:{marginTop:"10px"}},[
@@ -7746,9 +8009,20 @@ function equipSlotTile(slot){
   // are already silently excluded everywhere by PS.gearBonus(), this just makes that
   // visible so the player understands why and knows to unequip/swap it themselves.
   const invalid=PS.isEquippedSlotInvalid(slot);
+  // v0.20.1 (#1): the item name used to sit next to the icon inside the tile, wrapped in
+  // its own .tooltip/data-tip pair -- that's a LOT of horizontal room spent repeating text
+  // that's already fully spelled out inside the tooltip itself (name, tier, requirements,
+  // stats -- see IF.tooltipText()), and it's what forced the whole doll to stay so wide
+  // that Equipped/Backpack each needed a full-width tab of their own (see #2/#3's own
+  // comments). Dropped the name text entirely and moved the tooltip onto the icon-wrapping
+  // tile instead, exactly the same "bare icon tile carries its own tooltip" shape
+  // backpackGearGrid()'s tiles already use -- that IS the current/most-recently-styled
+  // pattern for gear tooltips sitewide; this equip-doll tile was the one place still
+  // carrying the older "tooltip lives on a text label" shape instead.
+  const tipText=invalid?`${IF.tooltipText(inst)}\nInvalid: ${PS.gearInvalidReason(inst)} Its bonuses are not being applied.`:(inst?IF.tooltipText(inst):"");
   return h("div",{class:"tile",style:invalid?{background:"rgba(160,40,40,.28)",borderColor:"#a04a4a"}:{}},[
     h("div",{class:"muted"},[IF.slotLabel(slot)]),
-    inst?h("div",{class:"row gap",style:{alignItems:"center"}},[gearIcon(inst,26), h("div",{class:"tooltip rarity-"+inst.rarity,"data-tip":invalid?`${IF.tooltipText(inst)}\nInvalid: ${PS.gearInvalidReason(inst)} Its bonuses are not being applied.`:IF.tooltipText(inst)},[IF.displayName(inst)+` (${tierRomanNumeral(inst.tier)})`, invalid?h("span",{style:{color:"#e07a7a",marginLeft:"4px"}},["(Invalid)"]):null])]):h("div",{class:"muted"},["(empty)"]),
+    inst?h("div",{class:"tooltip rarity-"+inst.rarity,style:{display:"inline-flex",alignItems:"center",justifyContent:"center"},"data-tip":tipText},[gearIcon(inst,26), invalid?h("span",{style:{color:"#e07a7a",marginLeft:"4px",fontSize:".85em"}},["(Invalid)"]):null]):h("div",{class:"muted"},["(empty)"]),
     // v0.19.1 (#11): disabled outright (not just a silent no-op) when the backpack is
     // already full -- unequipSlot() itself now also refuses in that case, this just makes
     // the reason visible instead of the button appearing to do nothing when clicked.
@@ -7879,14 +8153,19 @@ function backpackGearGrid(){
 // Consumables -> Herbs). Split into tabs so each visit only shows the section a player
 // actually came for, with a persistent header (title/guide links/Back/stat bar/toast)
 // staying visible no matter which tab is active -- see screenInventory() below.
+// v0.20.1 (#2/#3): Equipped, Backpack, and Consumables used to be 3 separate tabs, each
+// full-width. Shrinking the equip doll (see equipSlotTile()'s #1 comment) freed up enough
+// horizontal room that Equipped+Backpack now fit side by side at 50% width each, and the
+// same is true of Consumables+Herbs -- so all four are now one "Inventory" tab, laid out
+// as a 2x2 grid (doll top-left, backpack/bags top-right, consumables bottom-left, herbs
+// bottom-right). This is strictly a presentation change: every prior tab's content is
+// still here, just no longer split across 3 separate clicks to see it all.
 const CHARACTER_SHEET_TABS=[
   {id:"overview", label:"Overview"},
-  {id:"equipped", label:"Equipped"},
-  {id:"backpack", label:"Backpack"},
-  {id:"consumables", label:"Consumables"},
+  {id:"inventory", label:"Inventory"},
 ];
 function characterSheetTabBar(){
-  const active=GF.characterSheetTab||"equipped";
+  const active=GF.characterSheetTab||"inventory";
   return h("div",{class:"character-sheet-tabs"},CHARACTER_SHEET_TABS.map(tab=>
     h("button",{
       class:"character-sheet-tab"+(tab.id===active?" active":""),
@@ -7895,22 +8174,53 @@ function characterSheetTabBar(){
   ));
 }
 
+// v0.20.1 (#3): Consumables list content, extracted out of screenInventory() so it can be
+// slotted into one quadrant of the merged Inventory tab (see #2/#3's own top-of-tab
+// comment) instead of living in its own now-removed top-level tab.
+function consumablesListPanel(){
+  const wrap=h("div",{});
+  wrap.appendChild(h("h3",{style:{marginTop:"0"}},["Consumables"]));
+  const consEntries=Object.keys(PS.consumables).filter(k=>PS.consumables[k]>0);
+  if(consEntries.length===0) wrap.appendChild(h("div",{class:"muted"},["None."]));
+  for(const itemId of consEntries){
+    const item=DL.getItem(itemId);
+    // v0.20 (#12): the name is now wrapped in a real hover tooltip (what does this potion/
+    // scroll/bag actually DO) via DL.itemEffectDescription() -- previously this row showed
+    // only the name and a bare category word ("Potion"/"Scroll"), with no way to see the
+    // effect without leaving the screen to check the Alchemist, the only place this text
+    // was ever wired up before.
+    wrap.appendChild(h("div",{class:"row gap",style:{marginBottom:"4px",alignItems:"center",justifyContent:"space-between"}},[
+      h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId,22), h("div",{},[h("span",{class:"tooltip","data-tip":DL.itemEffectDescription(itemId)},[`${item.name} x${PS.consumables[itemId]}`]), h("div",{class:"muted",style:{fontSize:".85em"}},[DL.itemCategoryLabel(itemId)])])]),
+      item.type==="consumable"?h("button",{disabled:!PS.canUseConsumable(itemId),onClick:()=>{PS.useConsumable(itemId);autosave();render();}},["Use"]):
+        h("button",{onClick:()=>{PS.useScroll(itemId);autosave();setToast(`${item.name} will boost your next descent by ${item.level_bonus} levels.`);render();}},["Use"]),
+    ]));
+  }
+  return wrap;
+}
+// v0.20.1 (#3): same extraction as consumablesListPanel() above, for the Herbs half of
+// the old Consumables tab.
+function herbsListPanel(){
+  const wrap=h("div",{});
+  wrap.appendChild(h("h3",{style:{marginTop:"0"}},["Herbs"]));
+  const herbEntries=Object.keys(PS.herbs).filter(k=>PS.herbs[k]>0);
+  if(herbEntries.length===0) wrap.appendChild(h("div",{class:"muted"},["None."]));
+  for(const herbId of herbEntries){
+    // v0.20 (#12): same treatment as consumables above, using HERBS[id].found_in.
+    wrap.appendChild(h("div",{class:"row gap",style:{marginBottom:"4px",alignItems:"center"}},[herbIcon(herbId,22), h("div",{},[h("span",{class:"tooltip","data-tip":DL.getHerb(herbId).found_in||""},[`${DL.getHerb(herbId).name} x${PS.herbs[herbId]}`]), h("div",{class:"muted",style:{fontSize:".85em"}},["Herb"])])]));
+  }
+  return wrap;
+}
+
 function screenInventory(){
   const root=h("div",{});
+  // v0.20.1 (#6): the Itemization/Herbalism guide buttons that used to live up here are
+  // gone (they're still reachable from character select and, for Herbalism, the
+  // Alchemist -- see _preItemizationScreen/_preHerbalismScreen's other call sites) and
+  // Back has moved into their old top-right spot, out from under the title entirely.
   root.appendChild(h("div",{class:"row",style:{justifyContent:"space-between",alignItems:"center"}},[
     h("h2",{style:{margin:"0"}},["Character Sheet"]),
-    h("div",{class:"row gap"},[
-      // v0.14: entry point into the new Itemization Guide (Tier/Rarity/affix-roll
-      // reference page) -- see screenItemization().
-      h("button",{onClick:()=>{ GF._preItemizationScreen="inventory"; GF.goto("itemization"); }},["Itemization Guide"]),
-      // v0.17 (#12): same idea, but for herbs/potions -- see screenHerbalismGuide().
-      h("button",{onClick:()=>{ GF._preHerbalismScreen="inventory"; GF.goto("herbalism"); }},["Herbalism & Alchemy Guide"]),
-    ]),
+    h("button",{onClick:()=>GF.goto(GF.inventory_return_to||"town")},["← Back"]),
   ]));
-  // v0.16: Back moved up here instead of below the whole Skills/Attributes/Equipped/
-  // Backpack/Bags/Consumables/Herbs stack -- this is one of the longest screens in the
-  // game, no one should have to scroll past all of that just to leave.
-  root.appendChild(h("button",{style:{marginTop:"8px",marginBottom:"4px"},onClick:()=>GF.goto(GF.inventory_return_to||"town")},["← Back"]));
   // v0.17.2 (#5) HOTFIX: toastBox() must be called exactly once per render (reading it
   // clears GF.toast), but WHERE its returned node gets appended is independent of that.
   // v0.19.1 (#13): now appended right under the persistent stat header, above the tab
@@ -7922,7 +8232,7 @@ function screenInventory(){
   if(t) root.appendChild(t);
   root.appendChild(characterSheetTabBar());
 
-  const activeTab=GF.characterSheetTab||"equipped";
+  const activeTab=GF.characterSheetTab||"inventory";
 
   if(activeTab==="overview"){
     root.appendChild(skillsBonusPanel());
@@ -7930,98 +8240,90 @@ function screenInventory(){
       h("div",{style:{flex:"0 0 50%",maxWidth:"50%",minWidth:"0"}},[attributesPanel()]),
       h("div",{style:{flex:"1",minWidth:"0"}},[gearBonusPanel()]),
     ]));
-    root.appendChild(shrineBonusPanel());
+    // v0.20.1 (#4): margin above Shrine Bonuses -- it used to sit flush against
+    // Attributes/Gear Bonuses right above it with no breathing room at all.
+    root.appendChild(h("div",{style:{marginTop:"14px"}},[shrineBonusPanel()]));
 
-  } else if(activeTab==="equipped"){
-    root.appendChild(h("h3",{style:{marginTop:"0"}},["Equipped"]));
-    const eqDoll=h("div",{class:"equip-doll"});
-    for(const rowSlots of EQUIP_DOLL_ROWS){
-      eqDoll.appendChild(h("div",{class:"equip-doll-row"},rowSlots.map(slot=>equipSlotTile(slot))));
-    }
-    root.appendChild(eqDoll);
-
-  } else if(activeTab==="backpack"){
-    root.appendChild(h("h3",{style:{marginTop:"0"}},[`Backpack (${PS.getInventoryUsed()}/${PS.getInventoryCapacity()})`]));
-    root.appendChild(h("div",{class:"muted",style:{marginBottom:"6px"}},["Click a slot to equip or swap. Visit the Blacksmith to salvage gear, or the Merchant to sell it."]));
-    // v0.17.1 (#13, credit: Marudok for suggesting manual item repositioning): lets a
-    // player custom-sort their backpack into their own groupings instead of always
-    // equip-on-click.
-    root.appendChild(h("div",{class:"row gap",style:{marginBottom:"6px",alignItems:"center"}},[
-      h("button",{onClick:()=>{ GF._bagReorderMode=!GF._bagReorderMode; GF._bagReorderSrcIdx=null; render(); }},[GF._bagReorderMode?"Done Reordering":"Reorder Items"]),
-      // v0.18 (#4): same one-click bulk sort as the Vault -- see backpackSortByTier()'s
-      // comment and vaultSortByTier()'s for why non-gear entries don't apply here (the
-      // backpack grid is gear-only to begin with).
-      h("button",{title:"Arrange your backpack by Tier -- click again to reverse the order.",onClick:backpackSortByTier},[GF._bagSortTierDesc?"Sort by Tier (T5 → T1)":"Sort by Tier (T1 → T5)"]),
-      GF._bagReorderMode?h("div",{class:"muted"},[GF._bagReorderSrcIdx!=null?"Now click the slot you want to move it to (or click it again to cancel)." : "Click an item to pick it up, then click a slot to place it there."]):null,
-    ]));
-    root.appendChild(backpackGearGrid());
-
-    root.appendChild(h("h3",{},["Bags"]));
-    root.appendChild(h("div",{class:"muted"},[`Equipped bags: ${PS.equipped_bags.length}/${Balance.MAX_BAG_SLOTS}`]));
-    for(const bagId of [...PS.equipped_bags]){
-      const wouldOverflow=PS.wouldOverflowWithoutBag(bagId);
-      root.appendChild(h("div",{class:"row",style:{marginBottom:"4px"}},[
-        DL.getItem(bagId).name,
-        h("button",{
-          disabled:wouldOverflow,
-          title:wouldOverflow?`Unequipping this would leave you carrying more gear than your remaining capacity allows -- salvage, sell, or store some gear first.`:"",
-          onClick:()=>{
-            if(!PS.unequipBag(bagId)){ setToast("Can't unequip that bag -- you're carrying more gear than the remaining capacity would allow."); render(); return; }
-            PS.saveGame(); render();
-          },
-        },["Unequip"]),
-      ]));
-    }
-    // v0.17.1 (#8): bags you own but currently have unequipped (see PS.unequipBag()) --
-    // these used to just vanish the moment you unequipped them. Listed here with an Equip
-    // button so they're visibly still yours and can go back on whenever you have a free
-    // bag-rack slot.
-    const storedBagIds=Object.keys(PS.bags||{}).filter(id=>(PS.bags[id]||0)>0);
-    if(storedBagIds.length>0){
-      root.appendChild(h("div",{class:"muted",style:{marginTop:"6px"}},["In storage (unequipped):"]));
-      for(const bagId of storedBagIds){
-        const rackFull=PS.equipped_bags.length>=Balance.MAX_BAG_SLOTS;
-        root.appendChild(h("div",{class:"row",style:{marginBottom:"4px"}},[
-          `${DL.getItem(bagId).name} x${PS.bags[bagId]}`,
-          h("button",{
-            disabled:rackFull,
-            title:rackFull?`Your bag rack is full (${PS.equipped_bags.length}/${Balance.MAX_BAG_SLOTS}), unequip a bag first.`:"",
-            onClick:()=>{
-              const result=PS.equipBag(bagId);
-              if(!result.success){ setToast(result.reason); render(); return; }
-              PS.bags[bagId]--; if(PS.bags[bagId]<=0) delete PS.bags[bagId];
-              PS.saveGame(); render();
-            },
-          },["Equip"]),
+  } else if(activeTab==="inventory"){
+    // v0.20.1 (#2/#3): Equipped, Backpack (+Bags), Consumables, and Herbs used to be
+    // spread across 2-3 separate tabs. Now that the doll itself is narrow (see
+    // equipSlotTile()'s #1 comment), all four fit together as one 2x2 grid: doll
+    // top-left, backpack/bags top-right, consumables bottom-left, herbs bottom-right.
+    root.appendChild(h("div",{class:"row",style:{alignItems:"flex-start",gap:"14px"}},[
+      h("div",{style:{flex:"0 0 50%",maxWidth:"50%",minWidth:"0"}},[(()=>{
+        const eqWrap=h("div",{});
+        eqWrap.appendChild(h("h3",{style:{marginTop:"0"}},["Equipped"]));
+        const eqDoll=h("div",{class:"equip-doll"});
+        for(const rowSlots of EQUIP_DOLL_ROWS){
+          eqDoll.appendChild(h("div",{class:"equip-doll-row"},rowSlots.map(slot=>equipSlotTile(slot))));
+        }
+        eqWrap.appendChild(eqDoll);
+        return eqWrap;
+      })()]),
+      h("div",{style:{flex:"1",minWidth:"0"}},[(()=>{
+        const bpWrap=h("div",{});
+        bpWrap.appendChild(h("h3",{style:{marginTop:"0"}},[`Backpack (${PS.getInventoryUsed()}/${PS.getInventoryCapacity()})`]));
+        bpWrap.appendChild(h("div",{class:"muted",style:{marginBottom:"6px"}},["Click a slot to equip or swap. Visit the Blacksmith to salvage gear, or the Merchant to sell it."]));
+        // v0.17.1 (#13, credit: Marudok for suggesting manual item repositioning): lets a
+        // player custom-sort their backpack into their own groupings instead of always
+        // equip-on-click.
+        bpWrap.appendChild(h("div",{class:"row gap",style:{marginBottom:"6px",alignItems:"center"}},[
+          h("button",{onClick:()=>{ GF._bagReorderMode=!GF._bagReorderMode; GF._bagReorderSrcIdx=null; render(); }},[GF._bagReorderMode?"Done Reordering":"Reorder Items"]),
+          // v0.18 (#4): same one-click bulk sort as the Vault -- see backpackSortByTier()'s
+          // comment and vaultSortByTier()'s for why non-gear entries don't apply here (the
+          // backpack grid is gear-only to begin with).
+          h("button",{title:"Arrange your backpack by Tier -- click again to reverse the order.",onClick:backpackSortByTier},[GF._bagSortTierDesc?"Sort by Tier (T5 → T1)":"Sort by Tier (T1 → T5)"]),
         ]));
-      }
-    }
+        if(GF._bagReorderMode) bpWrap.appendChild(h("div",{class:"muted",style:{marginBottom:"6px"}},[GF._bagReorderSrcIdx!=null?"Now click the slot you want to move it to (or click it again to cancel)." : "Click an item to pick it up, then click a slot to place it there."]));
+        bpWrap.appendChild(backpackGearGrid());
 
-  } else if(activeTab==="consumables"){
-    root.appendChild(h("h3",{style:{marginTop:"0"}},["Consumables"]));
-    const consEntries=Object.keys(PS.consumables).filter(k=>PS.consumables[k]>0);
-    if(consEntries.length===0) root.appendChild(h("div",{class:"muted"},["None."]));
-    for(const itemId of consEntries){
-      const item=DL.getItem(itemId);
-      // v0.20 (#12): the name is now wrapped in a real hover tooltip (what does this potion/
-      // scroll/bag actually DO) via DL.itemEffectDescription() -- previously this row showed
-      // only the name and a bare category word ("Potion"/"Scroll"), with no way to see the
-      // effect without leaving the screen to check the Alchemist, the only place this text
-      // was ever wired up before.
-      root.appendChild(h("div",{class:"row gap",style:{marginBottom:"4px",alignItems:"center",justifyContent:"space-between"}},[
-        h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId,22), h("div",{},[h("span",{class:"tooltip","data-tip":DL.itemEffectDescription(itemId)},[`${item.name} x${PS.consumables[itemId]}`]), h("div",{class:"muted",style:{fontSize:".85em"}},[DL.itemCategoryLabel(itemId)])])]),
-        item.type==="consumable"?h("button",{disabled:!PS.canUseConsumable(itemId),onClick:()=>{PS.useConsumable(itemId);autosave();render();}},["Use"]):
-          h("button",{onClick:()=>{PS.useScroll(itemId);autosave();setToast(`${item.name} will boost your next descent by ${item.level_bonus} levels.`);render();}},["Use"]),
-      ]));
-    }
-
-    root.appendChild(h("h3",{},["Herbs"]));
-    const herbEntries=Object.keys(PS.herbs).filter(k=>PS.herbs[k]>0);
-    if(herbEntries.length===0) root.appendChild(h("div",{class:"muted"},["None."]));
-    for(const herbId of herbEntries){
-      // v0.20 (#12): same treatment as consumables above, using HERBS[id].found_in.
-      root.appendChild(h("div",{class:"row gap",style:{marginBottom:"4px",alignItems:"center"}},[herbIcon(herbId,22), h("div",{},[h("span",{class:"tooltip","data-tip":DL.getHerb(herbId).found_in||""},[`${DL.getHerb(herbId).name} x${PS.herbs[herbId]}`]), h("div",{class:"muted",style:{fontSize:".85em"}},["Herb"])])]));
-    }
+        bpWrap.appendChild(h("h3",{},["Bags"]));
+        bpWrap.appendChild(h("div",{class:"muted"},[`Equipped bags: ${PS.equipped_bags.length}/${Balance.MAX_BAG_SLOTS}`]));
+        for(const bagId of [...PS.equipped_bags]){
+          const wouldOverflow=PS.wouldOverflowWithoutBag(bagId);
+          bpWrap.appendChild(h("div",{class:"row",style:{marginBottom:"4px"}},[
+            DL.getItem(bagId).name,
+            h("button",{
+              disabled:wouldOverflow,
+              title:wouldOverflow?`Unequipping this would leave you carrying more gear than your remaining capacity allows -- salvage, sell, or store some gear first.`:"",
+              onClick:()=>{
+                if(!PS.unequipBag(bagId)){ setToast("Can't unequip that bag -- you're carrying more gear than the remaining capacity would allow."); render(); return; }
+                PS.saveGame(); render();
+              },
+            },["Unequip"]),
+          ]));
+        }
+        // v0.17.1 (#8): bags you own but currently have unequipped (see PS.unequipBag()) --
+        // these used to just vanish the moment you unequipped them. Listed here with an
+        // Equip button so they're visibly still yours and can go back on whenever you have
+        // a free bag-rack slot.
+        const storedBagIds=Object.keys(PS.bags||{}).filter(id=>(PS.bags[id]||0)>0);
+        if(storedBagIds.length>0){
+          bpWrap.appendChild(h("div",{class:"muted",style:{marginTop:"6px"}},["In storage (unequipped):"]));
+          for(const bagId of storedBagIds){
+            const rackFull=PS.equipped_bags.length>=Balance.MAX_BAG_SLOTS;
+            bpWrap.appendChild(h("div",{class:"row",style:{marginBottom:"4px"}},[
+              `${DL.getItem(bagId).name} x${PS.bags[bagId]}`,
+              h("button",{
+                disabled:rackFull,
+                title:rackFull?`Your bag rack is full (${PS.equipped_bags.length}/${Balance.MAX_BAG_SLOTS}), unequip a bag first.`:"",
+                onClick:()=>{
+                  const result=PS.equipBag(bagId);
+                  if(!result.success){ setToast(result.reason); render(); return; }
+                  PS.bags[bagId]--; if(PS.bags[bagId]<=0) delete PS.bags[bagId];
+                  PS.saveGame(); render();
+                },
+              },["Equip"]),
+            ]));
+          }
+        }
+        return bpWrap;
+      })()]),
+    ]));
+    root.appendChild(h("div",{class:"row",style:{alignItems:"flex-start",gap:"14px",marginTop:"14px"}},[
+      h("div",{style:{flex:"0 0 50%",maxWidth:"50%",minWidth:"0"}},[consumablesListPanel()]),
+      h("div",{style:{flex:"1",minWidth:"0"}},[herbsListPanel()]),
+    ]));
   }
 
   return root;
@@ -8037,7 +8339,7 @@ function screenInventory(){
 // applying the server's authoritative result). The button/flow itself is unchanged: same
 // cost preview, same instant-feeling result once the response lands.
 async function rerollBlacksmithItem(instanceId){
-  if(GF.rerolling) return;
+  if(GF.rerolling||GF.reforging) return;
   GF.rerolling=instanceId; render();
   try{
     const result=await Net.rerollGear(PS.current_slot, instanceId);
@@ -8045,6 +8347,11 @@ async function rerollBlacksmithItem(instanceId){
     const idx=PS.findGearIndex(instanceId);
     if(idx!==-1) PS.gear_instances[idx]=result.item;
     PS.materials=result.materials;
+    // v0.20.1 (#18): Reroll now also costs gold -- same "trust the server's authoritative
+    // post-charge total" pattern the Auction House listing fee/buy flows already use (see
+    // their own `if(typeof result.account_gold==="number") PS.gold=result.account_gold`
+    // lines below), rather than guessing the deduction client-side.
+    if(typeof result.account_gold==="number") PS.gold=result.account_gold;
     autosave();
     setToast(`Rerolled! You got a ${IF.displayName(result.item)}.`);
   }catch(e){
@@ -8052,12 +8359,40 @@ async function rerollBlacksmithItem(instanceId){
   }
   GF.rerolling=null; render();
 }
+// v0.20.1 (#17): "Reforge" -- mirrors rerollBlacksmithItem()'s exact async flow (double-
+// submit guard, _save_seq reconciliation, gold sync), calling the new Net.reforgeGear()
+// instead. See POST /api/blacksmith/reforge in server.js for what actually changes: one
+// randomly-chosen existing affix gets swapped for a brand-new stat (and freshly rolled
+// value), while every other affix on the item is left exactly as it was.
+async function reforgeBlacksmithItem(instanceId){
+  if(GF.rerolling||GF.reforging) return;
+  GF.reforging=instanceId; render();
+  try{
+    const result=await Net.reforgeGear(PS.current_slot, instanceId);
+    PS._saveSeqFloor=Math.max(PS._saveSeqFloor||0, result._save_seq);
+    const idx=PS.findGearIndex(instanceId);
+    if(idx!==-1) PS.gear_instances[idx]=result.item;
+    PS.materials=result.materials;
+    if(typeof result.account_gold==="number") PS.gold=result.account_gold;
+    autosave();
+    setToast(`Reforged! You got a ${IF.displayName(result.item)}.`);
+  }catch(e){
+    setToast("Could not reforge: "+e.message);
+  }
+  GF.reforging=null; render();
+}
 
 function screenBlacksmith(){
   const root=h("div",{});
   root.appendChild(h("div",{class:"row gap"},[iconBadge(`<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="19" fill="#5a4028"/><rect x="10" y="26" width="20" height="6" rx="1" fill="#333"/></svg>`,52),h("div",{},[h("h2",{},[Balance.NPC_BLACKSMITH_NAME]),h("div",{class:"flavor"},["\"Bring me your battered gear. I'll see what can be salvaged, or improved.\""])])]));
   // v0.16: Back moved up here instead of below the gear/bag lists.
-  root.appendChild(h("button",{style:{marginBottom:"8px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
+  root.appendChild(h("div",{class:"row gap"},[
+    h("button",{style:{marginBottom:"8px"},onClick:()=>GF.goto("town")},["← Back to Town"]),
+    // v0.20.1 (#19): entry point into the new Blacksmith Guide right from here, same
+    // "own Back button remembers where it came from" pattern as the Alchemist's Herbalism
+    // & Alchemy Guide shortcut (see GF._preHerbalismScreen="alchemist" there).
+    h("button",{style:{marginBottom:"8px"},onClick:()=>{ GF._preBlacksmithGuideScreen="blacksmith"; GF.goto("blacksmithGuide"); }},["Blacksmith Guide"]),
+  ]));
   const t=toastBox(); if(t) root.appendChild(t);
   root.appendChild(statHeader());
 
@@ -8072,20 +8407,34 @@ function screenBlacksmith(){
     // linear scaling) -- the v0.14 design principle of always showing exact numbers, not
     // vague "scales with tier" hand-waving, still applies, so the exact exponent and
     // constants are spelled out here rather than described qualitatively.
-    h("span",{class:"tooltip muted",style:{fontSize:".85em"},"data-tip":`Salvage value = round(Tier^1.5 x number of affixes x ${Balance.SALVAGE_MATERIALS_PER_SLOT}) materials.\nReroll cost = Salvage value x ${Balance.REROLL_MATERIAL_COST_MULT}.\nHigher tier (steeply) and higher rarity (more affixes) both mean more materials.`},["(?)"]),
+    h("span",{class:"tooltip muted",style:{fontSize:".85em"},"data-tip":`Salvage value = round(Tier^1.5 x number of affixes x ${Balance.SALVAGE_MATERIALS_PER_SLOT}) materials.\nReroll cost = Salvage value x ${Balance.REROLL_MATERIAL_COST_MULT} materials, plus Sell value x ${Balance.REROLL_GOLD_COST_MULT} gold.\nReforge cost = Reroll's material cost x ${Balance.REFORGE_MATERIAL_COST_MULT}, plus Sell value x ${Balance.REFORGE_GOLD_COST_MULT} gold.\nHigher tier (steeply) and higher rarity (more affixes) both mean more materials/gold.`},["(?)"]),
   ]));
   if(PS.gear_instances.length===0) root.appendChild(h("div",{class:"muted"},["Bring gear from your backpack to reroll its bonuses."]));
   for(const inst of PS.gear_instances){
-    const cost=Balance.rerollCost(inst.tier,IF.slotCount(inst));
+    const slots=IF.slotCount(inst);
+    const cost=Balance.rerollCost(inst.tier,slots);
+    const goldCost=Balance.rerollGoldCost(inst.tier,slots);
+    // v0.20.1 (#17): Reforge -- pricier alternative to Reroll that swaps ONE existing
+    // affix's STAT entirely (not just its value) for a fresh one. See reforgeBlacksmithItem()/
+    // Net.reforgeGear() and server.js's POST /api/blacksmith/reforge.
+    const reforgeMatCost=Balance.reforgeCost(inst.tier,slots);
+    const reforgeGoldCost=Balance.reforgeGoldCost(inst.tier,slots);
+    const busy=!!GF.crafting||!!GF.rerolling||!!GF.reforging;
     // v0.17 (#2): Reroll/Salvage are now disabled while a bag craft is actively in
     // progress (GF.crafting), matching the guard startCraftBag() already has on the Craft
     // button itself -- closes the one loose end flagged while investigating a v0.15
     // salvage-then-craft total-loss report (the fix for that report's actual root cause
     // shipped back in v0.15.1/v0.16, this is just a defensive belt-and-suspenders so no
     // gear mutation can ever race a pending craft's autosave).
+    // v0.20.1 (#20): per-button hover tooltips (native "title" attr, matching the same
+    // convention already used elsewhere for button-level explanations, e.g. the unequip
+    // button's disabled-reason title) -- spells out exactly what each button DOES, since
+    // the button label itself only has room for the cost, not the mechanic. See the new
+    // Blacksmith Guide page (v0.20.1 #19) for the same wording at greater length.
     root.appendChild(gearRow(inst,[
-      h("button",{disabled:PS.materials<cost||!!GF.crafting||!!GF.rerolling,onClick:()=>rerollBlacksmithItem(inst.instance_id)},[GF.rerolling===inst.instance_id?"Rerolling...":`Reroll (${cost} mat)`]),
-      h("button",{disabled:!!GF.crafting||!!GF.rerolling,onClick:()=>{PS.salvageGear(inst.instance_id);autosave();render();}},[`Salvage (+${Balance.salvageValue(inst.tier,IF.slotCount(inst))} mat)`]),
+      h("button",{disabled:PS.materials<cost||PS.gold<goldCost||busy,title:"Rerolls every existing affix's VALUE only -- keeps the exact same stats, just re-rolls their numbers.",onClick:()=>rerollBlacksmithItem(inst.instance_id)},[GF.rerolling===inst.instance_id?"Rerolling...":`Reroll (${cost} mat, ${goldCost}g)`]),
+      h("button",{disabled:PS.materials<reforgeMatCost||PS.gold<reforgeGoldCost||busy,title:"Replaces ONE existing affix's STAT with a fresh one (never a duplicate already on the item), rolling its value from scratch. Every other affix stays untouched.",onClick:()=>reforgeBlacksmithItem(inst.instance_id)},[GF.reforging===inst.instance_id?"Reforging...":`Reforge (${reforgeMatCost} mat, ${reforgeGoldCost}g)`]),
+      h("button",{disabled:busy,title:"Breaks the item down for materials outright. Cannot be undone.",onClick:()=>{PS.salvageGear(inst.instance_id);autosave();render();}},[`Salvage (+${Balance.salvageValue(inst.tier,slots)} mat)`]),
     ]));
   }
 
@@ -8928,8 +9277,13 @@ function screenAuctionHouse(){
       // same reasoning as the gear/consumable rows elsewhere -- buyers browsing the block
       // shouldn't have to guess what a flavorful item name actually is.
       const categoryLabel=isGear?IF.categoryLabel(listing.item):(listing.type==="herb"?"Herb":DL.itemCategoryLabel(listing.item_key));
-      root.appendChild(h("div",{class:"tile row",style:{marginBottom:"6px",justifyContent:"space-between"}},[
-        h("div",{},[labelEl, categoryLabel?h("span",{class:"muted",style:{fontSize:".85em"}},[` (${categoryLabel})`]):null, h("span",{class:"muted"},[`, listed by ${listing.seller_character_name} (${listing.seller_username})`])]),
+      // v0.20.1 (#23): an item icon to the left of the listing name -- gear reuses
+      // gearIcon() (same tier-badged icon as everywhere else gear shows up), herbs/
+      // consumables reuse herbIcon()/itemIcon(), so a listing is identifiable at a
+      // glance instead of needing to read the (sometimes long, flavorful) name first.
+      const listingIcon=isGear?gearIcon(listing.item,26):(listing.type==="herb"?herbIcon(listing.item_key,24):itemIcon(listing.item_key,24));
+      root.appendChild(h("div",{class:"tile row",style:{marginBottom:"6px",justifyContent:"space-between",alignItems:"center"}},[
+        h("div",{class:"row gap",style:{alignItems:"center"}},[listingIcon, h("div",{},[labelEl, categoryLabel?h("span",{class:"muted",style:{fontSize:".85em"}},[` (${categoryLabel})`]):null, h("span",{class:"muted"},[`, listed by ${listing.seller_character_name} (${listing.seller_username})`])])]),
         h("div",{class:"row gap"},[
           h("span",{class:"gold-text"},[`${listing.price}g`]),
           isMine?h("button",{class:"danger",onClick:async ()=>{
@@ -9640,6 +9994,26 @@ function legacyGearSection(){
 // Kept brief on purpose -- players don't need the internal blow-by-blow, just the
 // highlights per version, most recent first.
 const CHANGELOG=[
+  { version:"v0.20.1", notes:[
+    "Equipped gear doll simplified: item names removed from the doll itself (its tooltip now lives on the icon), and the Character Sheet's Equipped and Backpack tabs merged into one combined \"Inventory\" tab, which also absorbed the separate Consumables tab alongside Herbs.",
+    "Character Sheet Overview tab: added spacing above the Shrine Bonuses panel, and gave the Attributes/Skill Bonuses/Gear Bonuses section titles consistent spacing, a divider, and uppercase styling. The guide-link buttons moved out of the header entirely, and Back moved to the top-right.",
+    "The player tile's damage line now shows your weapon skill's damage bonus alongside your base damage.",
+    "A Broken Bridge Trial class promotion now posts a gold-styled Global Chat announcement instead of a plain one.",
+    "The Player Classes overview now lists which weapon types each class can use.",
+    "Kills can now drop more than one item at once -- the odds scale with Magic Find, and roaming mobs/Stronghold guardians get an extra chance (and quality) bonus on top.",
+    "New Monster Guide page, linked from character select.",
+    "Settings: the keyboard shortcuts for opening the Character Sheet ('C') and starting a Venture ('V') are now configurable. (Contribution by Marudok)",
+    "Fixed the Dry Log and Stronghold Key icons, which were both incorrectly showing a potion.",
+    "Fixed a bug where a brand new character could inherit a leftover trapdoor-fall streak from whichever character was played last, occasionally causing their very first trapdoor fall to drop them 2-3 area levels instead of 1. (Contribution by ImpulseBE)",
+    "Blacksmith: added a new 'Reforge' service (rerolls one chosen affix's stat, keeping the rest untouched) alongside the existing Reroll, and Reroll now also costs gold on top of its material cost, not just materials.",
+    "New Blacksmith Guide page, linked from character select and from an in-screen shortcut button on the Blacksmith itself, plus hover tooltips on the Reforge/Reroll/Salvage buttons explaining what each does and costs.",
+    "The Forest Reputation line on the player tile now has a hover tooltip spelling out exactly what your current standing is doing (the XP bonus, the extra roaming mobs, or that it's neutral).",
+    "The maze's Adventure Log is now capped to 3 visible lines with no scrollbar, instead of growing indefinitely.",
+    "Auction House listings now show the item's icon to the left of its name, matching every other item list in the game.",
+    "Added a thin divider line under every page's top header.",
+    "Fixed the Community XP bonus formula: it's meant to be the full active-player headcount times 10% (2 players online = +20%, 3 = +30%, and so on), but was incorrectly computing headcount-minus-one instead (2 players = +10%, 3 = +20%) -- corrected on both the client and the authoritative server-side formula, and in the Experience Guide's own explanation of it.",
+    "Fixed the Global Chat message box (and the character-name field and Hardcore checkbox on character creation) still being vulnerable to keyboard shortcuts firing while typing -- focus inside chat now fully suppresses every configurable shortcut, not just some of them.",
+  ]},
   { version:"v0.20", notes:[
     "Fixed Touch of Unicorn (Invulnerability), Quad Damage, and Magic Find shrines never actually wearing off in combat -- once triggered they silently stuck around forever instead of expiring after their intended number of rounds. (Contribution by dcfroggert)",
     "Fixed the Kill Streak counter getting stuck at 1 instead of climbing with consecutive kills, and made a successful flee reset your streak the same way returning to town already did.",
@@ -10135,7 +10509,7 @@ function screenGameplayGuide(){
 
   root.appendChild(h("h3",{},["Community XP Bonus"]));
   root.appendChild(h("div",{class:"panel",style:{marginBottom:"16px"}},[
-    h("div",{style:{marginBottom:"8px"}},[`Right under the top bar on every screen, a banner tracks how many Wandrian accounts have been active in the last few minutes -- the same headcount the "Currently playing" line uses. That count is also a shared XP bonus for everyone currently playing: alone, there's no bonus; each additional player online at the same time adds +${Balance.COMMUNITY_XP_PCT_PER_EXTRA_PLAYER}% to everyone's kill XP (2 players active = +${Balance.COMMUNITY_XP_PCT_PER_EXTRA_PLAYER}%, 3 = +${Balance.COMMUNITY_XP_PCT_PER_EXTRA_PLAYER*2}%, and so on), stacking additively with every other XP bonus below rather than multiplying them. There's no way to lose this bonus other than everyone else logging off -- it only ever helps, never hurts, and it applies automatically to every kill without anything you need to do.`]),
+    h("div",{style:{marginBottom:"8px"}},[`Right under the top bar on every screen, a banner tracks how many Wandrian accounts have been active in the last few minutes -- the same headcount the "Currently playing" line uses. That count is also a shared XP bonus for everyone currently playing: alone, there's no bonus at all, but as soon as at least one other player is online too, the FULL headcount times ${Balance.COMMUNITY_XP_PCT_PER_EXTRA_PLAYER}% applies to everyone's kill XP (2 players active = +${2*Balance.COMMUNITY_XP_PCT_PER_EXTRA_PLAYER}%, 3 = +${3*Balance.COMMUNITY_XP_PCT_PER_EXTRA_PLAYER}%, and so on), stacking additively with every other XP bonus below rather than multiplying them. There's no way to lose this bonus other than everyone else logging off -- it only ever helps, never hurts, and it applies automatically to every kill without anything you need to do.`]),
   ]));
 
   root.appendChild(h("h3",{},["Critters & Forest Reputation"]));
@@ -10250,6 +10624,158 @@ function screenExperienceGuide(){
   return root;
 }
 
+// v0.20.1 (#11): Monster Guide -- 3 reference panels: (1) every monster's base stats/loot
+// table as authored in MONSTERS, (2) everything that scales per AREA level (monster HP/
+// damage growth, crit chance, block chance, and the item-tier bracket loot quality maps
+// to), and (3) how the 3 "special" spawn types (Stronghold Guardian, and the 3 Roaming Mob
+// behavior colors) compare to an ordinary grass-tile encounter of the same monster at the
+// same area level. Every number is pulled live from Balance/MONSTERS/CB-equivalent client
+// constants so this page can never drift out of sync with the real combat formulas, same
+// principle as the Experience/Itemization Guides.
+function monsterGuideBaseStatsTable(){
+  const root=h("div",{class:"panel",style:{maxHeight:"420px",overflowY:"auto"}});
+  const cols="1.3fr .8fr .7fr 1fr .7fr 1fr .9fr";
+  root.appendChild(gridRow(["Monster","Tier","HP","Damage","XP","Gold","Loot Table"],{cols,header:true}));
+  MONSTERS.forEach((m,i)=>{
+    const tierLabel=m.tier.charAt(0).toUpperCase()+m.tier.slice(1);
+    root.appendChild(gridRow([
+      m.name, tierLabel, `${m.base_hp}`, `${m.base_damage_min}-${m.base_damage_max}`,
+      `${m.base_xp}`, `${m.gold_min}-${m.gold_max}`, m.loot_table.charAt(0).toUpperCase()+m.loot_table.slice(1),
+    ],{cols,noBorder:i===MONSTERS.length-1}));
+  });
+  return root;
+}
+function monsterGuidePerLevelTable(){
+  const root=h("div",{class:"panel",style:{maxHeight:"360px",overflowY:"auto"}});
+  const cols=".7fr 1.1fr 1.1fr .9fr .9fr 1fr";
+  root.appendChild(gridRow(["Area Lv","HP vs Lv1","Damage vs Lv1","Crit %","Block %","Loot Quality (Item Tier)"],{cols,header:true}));
+  const sampleLevels=[1,5,10,15,20,30,40,60];
+  const baseHpAtOne=Balance.monsterHp(1,1);
+  const baseDmgAtOne=Balance.monsterDamage(1,1);
+  sampleLevels.forEach((lvl,i)=>{
+    const hpPct=Math.round((Balance.monsterHp(1,lvl)/baseHpAtOne-1)*100);
+    const dmgPct=Math.round((Balance.monsterDamage(1,lvl)/baseDmgAtOne-1)*100);
+    const critPct=Math.round(Balance.monsterCritChance(lvl)*100);
+    const blockPct=Math.round(Balance.mobBlockChance(lvl)*100);
+    const itemTier=Balance.itemTierForAreaLevel(lvl);
+    root.appendChild(gridRow([
+      `${lvl}`, `+${hpPct}%`, `+${dmgPct}%`, `${critPct}%`, `${blockPct}%`,
+      `Tier ${tierRomanNumeral(itemTier)}`,
+    ],{cols,noBorder:i===sampleLevels.length-1}));
+  });
+  return root;
+}
+function monsterGuideSpawnTypeRow(swatch,label,hpMult,dmgMult,xpMult,note){
+  return h("div",{class:"row gap",style:{alignItems:"center",padding:"6px 0",borderBottom:"1px solid var(--border)"}},[
+    swatch,
+    h("div",{style:{flex:"1"}},[
+      h("div",{style:{fontWeight:"bold"}},[label]),
+      h("div",{class:"muted",style:{fontSize:".85em"}},[note]),
+    ]),
+    h("div",{style:{width:"70px",textAlign:"right"}},[`${hpMult}x HP`]),
+    h("div",{style:{width:"90px",textAlign:"right"}},[`${dmgMult}x Damage`]),
+    h("div",{style:{width:"70px",textAlign:"right"}},[`${xpMult}x XP`]),
+  ]);
+}
+function monsterGuideSpawnTypePanel(){
+  const panel=h("div",{class:"panel"});
+  panel.appendChild(monsterGuideSpawnTypeRow(
+    mazeTileSwatch(TILE_COLOR.grass,""), "Grass Spawn (baseline)", "1", "1", "1",
+    "An ordinary monster encounter on a grass tile -- every multiplier below is relative to this.",
+  ));
+  panel.appendChild(monsterGuideSpawnTypeRow(
+    mazeTileSwatch(TILE_COLOR.stronghold_guardian,TILE_GLYPH.stronghold_guardian), "Stronghold Guardian",
+    Balance.STRONGHOLD_GUARDIAN_HP_MULT, "1", Balance.STRONGHOLD_GUARDIAN_XP_MULT,
+    "A tough, fixed-position defender -- much more HP and more XP for the extra effort, but hits no harder than an ordinary monster its own level.",
+  ));
+  panel.appendChild(monsterGuideSpawnTypeRow(
+    mazeTileSwatch(ROAMING_MOB_COLOR_BY_BEHAVIOR.regular,ROAMING_MOB_GLYPH), "Roaming Mob (Regular)",
+    Balance.ROAMING_MOB_HP_MULT, Balance.ROAMING_MOB_DAMAGE_MULT, Balance.ROAMING_MOB_XP_MULT,
+    "Wanders the maze on its own clock, taking a uniformly random step each tick. Same stat multipliers as every Roaming Mob -- only the movement behavior differs between the 3 colors below.",
+  ));
+  panel.appendChild(monsterGuideSpawnTypeRow(
+    mazeTileSwatch(ROAMING_MOB_COLOR_BY_BEHAVIOR.charging,ROAMING_MOB_GLYPH), "Roaming Mob (Charging)",
+    Balance.ROAMING_MOB_HP_MULT, Balance.ROAMING_MOB_DAMAGE_MULT, Balance.ROAMING_MOB_XP_MULT,
+    "Same stats as Regular -- but greedily closes the distance to you every tick instead of wandering at random.",
+  ));
+  panel.appendChild(h("div",{style:{padding:"6px 0"}},[
+    monsterGuideSpawnTypeRow(
+      mazeTileSwatch(ROAMING_MOB_COLOR_BY_BEHAVIOR.hoarding,ROAMING_MOB_GLYPH), "Roaming Mob (Hoarding)",
+      Balance.ROAMING_MOB_HP_MULT, Balance.ROAMING_MOB_DAMAGE_MULT, Balance.ROAMING_MOB_XP_MULT,
+      "Same stats as Regular -- but often stays put, and even when it moves it's biased toward staying near its own spawn tile.",
+    ),
+  ]));
+  return panel;
+}
+/* ================= BLACKSMITH GUIDE (v0.20.1 #19) ================= */
+/* Same player-facing-reference pattern as the Monster/Itemization/Herbalism guides above --
+   reachable from the character-select screen's guide row AND from inside the Blacksmith
+   screen itself (mirrors the Herbalism guide's Alchemist shortcut), and its own Back button
+   honors whichever of those it was opened from via GF._preBlacksmithGuideScreen. Exists to
+   spell out exactly what Reroll/Reforge/Salvage each do and their exact cost formulas --
+   see v0.20.1 #17/#18's rerollBlacksmithItem()/reforgeBlacksmithItem()/Balance.rerollCost()/
+   Balance.rerollGoldCost()/Balance.reforgeCost()/Balance.reforgeGoldCost()/salvageValue(). */
+function blacksmithGuideCostTable(){
+  const root=h("div",{class:"panel",style:{maxHeight:"320px",overflowY:"auto"}});
+  const cols="1fr 1fr 1fr 1fr 1fr 1fr";
+  root.appendChild(gridRow(["Tier","Affixes","Salvage (+mat)","Reroll (mat/g)","Reforge (mat/g)","Sell Value (g)"],{cols,header:true}));
+  const rows=[[1,1],[1,5],[3,3],[3,5],[5,5]];
+  rows.forEach(([tier,slots],i)=>{
+    root.appendChild(gridRow([
+      tierRomanNumeral(tier), `${slots}`,
+      `+${Balance.salvageValue(tier,slots)}`,
+      `${Balance.rerollCost(tier,slots)} / ${Balance.rerollGoldCost(tier,slots)}g`,
+      `${Balance.reforgeCost(tier,slots)} / ${Balance.reforgeGoldCost(tier,slots)}g`,
+      `${Balance.sellValue(tier,slots)}g`,
+    ],{cols,noBorder:i===rows.length-1}));
+  });
+  return root;
+}
+function screenBlacksmithGuide(){
+  const root=h("div",{});
+  root.appendChild(h("h2",{},["Blacksmith Guide"]));
+  root.appendChild(h("div",{class:"lore"},["What Reroll, Reforge, and Salvage each actually do to a piece of gear, and exactly what they cost."]));
+  root.appendChild(h("button",{style:{marginBottom:"10px"},onClick:()=>{ GF.goto(GF._preBlacksmithGuideScreen||"town"); }},["← Back"]));
+
+  root.appendChild(h("h3",{},["The Three Services"]));
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"6px"}},[h("b",{},["Salvage"]),": breaks the item down for materials outright. It's gone afterward -- use this on gear you don't want to keep improving."]));
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"6px"}},[h("b",{},["Reroll"]),": keeps every existing affix STAT exactly as-is, and only re-rolls each one's numeric VALUE. Good when you like what the item rolled (e.g. damage + crit on a weapon) but want a shot at higher numbers."]));
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"10px"}},[h("b",{},["Reforge"]),": picks exactly ONE of the item's existing affixes at random and replaces its STAT entirely with a fresh one (never a duplicate of a stat already on the item), rolling that new stat's value from scratch. Every other affix on the item is untouched. Good when an item's rarity/tier is great but one of its rolled stats doesn't fit your build."]));
+
+  root.appendChild(h("h3",{},["Cost Formulas"]));
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},[
+    `Salvage value = round(Tier^1.5 x affixes x ${Balance.SALVAGE_MATERIALS_PER_SLOT}) materials.`, h("br",{}),
+    `Sell value = round(Tier^1.5 x affixes x ${Balance.SELL_GOLD_PER_SLOT}) gold (same figure the Merchant's Sell button shows).`, h("br",{}),
+    `Reroll cost = Salvage value x ${Balance.REROLL_MATERIAL_COST_MULT} materials, plus Sell value x ${Balance.REROLL_GOLD_COST_MULT} gold.`, h("br",{}),
+    `Reforge cost = Reroll's material cost x ${Balance.REFORGE_MATERIAL_COST_MULT}, plus Sell value x ${Balance.REFORGE_GOLD_COST_MULT} gold.`, h("br",{}),
+    "Higher tier (steeply, since it's an exponent) and higher rarity (more affixes) both push every one of these costs up -- Reforge is always the priciest of the three since it's rewriting a stat entirely, not just its value.",
+  ]));
+  root.appendChild(blacksmithGuideCostTable());
+
+  return root;
+}
+
+function screenMonsterGuide(){
+  const root=h("div",{});
+  root.appendChild(h("h2",{},["Monster Guide"]));
+  root.appendChild(h("div",{class:"lore"},["Every monster's base stats, exactly how much tougher (and more rewarding) they get per area level, and how the special spawn types (Stronghold Guardians, Roaming Mobs) compare to an ordinary grass-tile encounter."]));
+  root.appendChild(h("button",{style:{marginBottom:"10px"},onClick:()=>{ GF.goto(GF._preMonsterGuideScreen||"mainMenuSlots"); }},["← Back"]));
+
+  root.appendChild(h("h3",{},["Monster Roster"]));
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},["Base stats as authored at area level 1 -- see the next section for how these actually scale once you venture deeper."]));
+  root.appendChild(monsterGuideBaseStatsTable());
+
+  root.appendChild(h("h3",{},["Scaling Per Area Level"]));
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},["HP and Damage are shown as a percentage increase over area level 1 for that SAME monster -- every monster in the roster scales by this exact same multiplier, only their own base numbers above differ. Loot Quality is the item tier that area level's gear drops are centered on (see the Itemization Guide for what each tier means)."]));
+  root.appendChild(monsterGuidePerLevelTable());
+
+  root.appendChild(h("h3",{},["Spawn Types Compared"]));
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},["All multipliers are relative to an ordinary grass-tile encounter of the SAME monster at the SAME area level -- not to each other."]));
+  root.appendChild(monsterGuideSpawnTypePanel());
+
+  return root;
+}
+
 /* ================= SCREEN ROUTER ================= */
 
 const SCREENS={
@@ -10285,6 +10811,8 @@ const SCREENS={
   herbalism: screenHerbalismGuide,
   gameplayGuide: screenGameplayGuide,
   experienceGuide: screenExperienceGuide,
+  monsterGuide: screenMonsterGuide,
+  blacksmithGuide: screenBlacksmithGuide,
   settings: screenSettings,
 };
 
