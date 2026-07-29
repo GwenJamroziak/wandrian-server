@@ -1240,6 +1240,13 @@ const CB = {
   // Balance.WEAPON_SKILL_DAMAGE_PCT_PER_LEVEL in index.html (see combatGetDamageRange()).
   WEAPON_SKILL_HIT_STEP: 100, WEAPON_SKILL_DAMAGE_PCT_PER_LEVEL: 0.01,
   KILL_STREAK_MAGIC_FIND_PCT_PER_KILL: 1,
+  // v0.20 (#7): must stay in sync with Balance.SHRINE_MAGIC_FIND_PCT in index.html -- this
+  // was missing entirely server-side until the same bug-hunt that fixed the round-tick sync
+  // issue below turned it up: combatGetMagicFind() was still reading the OLD wall-clock
+  // temp_buffs bag (combatGetActiveTempBuff(data, "magic_find")) that Magic Find moved off
+  // of in #7, which the client stopped ever populating -- so the shrine's bonus silently
+  // never affected a single server-resolved loot roll after that change shipped.
+  SHRINE_MAGIC_FIND_PCT: 25,
   STAT_POINTS_PER_LEVEL: 3, LEVEL_CAP: 60,
   KILLS_PER_LEVEL_TARGET: 20, MONSTER_BASE_XP: 8.0, LEVEL_XP_GROWTH: 0.11,
   FOREST_REPUTATION_XP_PCT_PER_POINT: 10,
@@ -1431,7 +1438,11 @@ function combatGetCritChance(data) { const c = COMBAT_CLASSES[data.class_id] || 
 function combatGetMonsterCritChance(areaLevel) { return cbClampf(0.10 + (Math.max(1, areaLevel) - 1) * 0.01, 0, 0.95); }
 function combatGetArmor(data) { const c = COMBAT_CLASSES[data.class_id] || {}; return cbClampf((c.armor || 0.0) + combatGearBonus(data, "armor") / 100.0, 0, 0.75); }
 function combatGetMagicFind(data) {
-  return cbClampf(combatGearBonus(data, "magic_find") + combatGetActiveTempBuff(data, "magic_find") + (data.kill_streak || 0) * CB.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL, 0, 500);
+  // v0.20 BUG FIX: this used to read combatGetActiveTempBuff(data, "magic_find") -- the OLD
+  // wall-clock temp-buff bag Magic Find moved off of in v0.20 (#7) -- see CB.SHRINE_MAGIC_FIND_PCT's
+  // comment for why that silently zeroed the shrine's effect on server-resolved loot.
+  const shrineBonus = (data.magic_find_rounds_left || 0) > 0 ? CB.SHRINE_MAGIC_FIND_PCT : 0;
+  return cbClampf(combatGearBonus(data, "magic_find") + shrineBonus + (data.kill_streak || 0) * CB.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL, 0, 500);
 }
 function combatGetGoldFindMult(data) { return 1.0 + combatGearBonus(data, "gold_find") / 100.0; }
 function combatGetXpFindMult(data) { return 1.0 + combatGearBonus(data, "xp_find") / 100.0; }
@@ -1447,9 +1458,40 @@ function combatGetForestReputationXpMult(data) {
 function combatGetCommunityXpMult() { return Math.max(1, getActiveCharacters(100).length); }
 function combatIsInvulnerable(data) { return (data.invuln_rounds_left || 0) > 0; }
 function combatHasQuadDamage(data) { return (data.quad_dmg_rounds_left || 0) > 0; }
+// v0.20 BUG FIX (credit: dcfroggert): a player reported that Touch of Unicorn
+// (Invulnerability) never expired as long as they avoided maze traps -- it turns out this
+// DID tick down correctly right here,
+// on the server, every real combat round (see the /attack and /flee handlers below), but the
+// decremented value was never sent back to the client. The client's OWN copy of
+// invuln_rounds_left (in PS, held in the browser) stayed frozen at whatever it was when the
+// shrine was triggered, because nothing in screenCombat() ever wrote the server's answer back
+// into it -- and every autosave() after a combat round (see index.html) pushes that stale,
+// un-decremented client copy right back up to the server, silently undoing the tick that had
+// just happened moments earlier in this very request. Net effect: as long as combat was the
+// only thing ticking it (maze traps have their own separate, correctly-synced decrement path
+// in onStepMaze()), the shrine was permanent. The exact same blind spot affected Quad Damage
+// AND Magic Find too -- neither had ANY other decrement path at all, so once triggered they
+// never expired, full stop, combat or no combat.
+// The fix is two-sided: this function now also ticks magic_find_rounds_left (previously only
+// invuln/quad damage were even considered "combat round" buffs here), and every combat
+// endpoint below now echoes the current post-tick values back in its `player` payload (see
+// combatRoundBuffsPayload()) so the client can adopt them as the one authoritative source
+// instead of trusting its own untouched copy.
 function combatTickCombatRoundBuffs(data) {
   if (data.invuln_rounds_left > 0) data.invuln_rounds_left--;
   if (data.quad_dmg_rounds_left > 0) data.quad_dmg_rounds_left--;
+  if (data.magic_find_rounds_left > 0) data.magic_find_rounds_left--;
+}
+// Shared fragment merged into every combat endpoint's `player` response object so the client
+// always has a fresh, authoritative snapshot of all 3 round-based shrine buffs to overwrite
+// its own local copy with -- see the comment above combatTickCombatRoundBuffs() for why that
+// matters even on endpoints (like use-item) that don't tick anything themselves.
+function combatRoundBuffsPayload(data) {
+  return {
+    invuln_rounds_left: data.invuln_rounds_left || 0,
+    quad_dmg_rounds_left: data.quad_dmg_rounds_left || 0,
+    magic_find_rounds_left: data.magic_find_rounds_left || 0,
+  };
 }
 
 // Lazy heal-over-time settlement -- the "hard part" server_authoritative_combat_design.md
@@ -1665,7 +1707,7 @@ app.post("/api/combat/start", requireAuth, (req, res) => {
   res.json({
     ok: true, session_id: id,
     monster: { name, hp: maxHp, max_hp: maxHp },
-    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data) },
+    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
     first_strike: firstStrike, log, _save_seq: saveSeq,
   });
 });
@@ -1771,7 +1813,7 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
     ok: true, mob_blocked: mobBlocked, player_hit: playerHit, weapon_skill: weaponSkill,
     monster: { hp: Math.max(0, newMonsterHp), max_hp: session.max_hp, defeated: monsterDefeated },
     kill, monster_turn: monsterTurn,
-    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data) },
+    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), ...combatRoundBuffsPayload(data) },
     fatal, _save_seq: saveSeq,
   });
 });
@@ -1787,7 +1829,14 @@ app.post("/api/combat/:sessionId/flee", requireAuth, (req, res) => {
   const failed = Math.random() < CB.FLEE_FAIL_CHANCE;
   let monsterTurn = null, fatal = false;
   if (failed) {
-    monsterTurn = combatResolveMonsterTurn(data, session, combatIsInvulnerable(data));
+    // v0.20 BUG FIX: a failed flee attempt still gives the monster a turn (see
+    // combatResolveMonsterTurn() below) -- that's exactly the kind of round Touch of
+    // Unicorn/Quad Damage/Magic Find are meant to count against, so it needs to tick the
+    // same as a real attack does. Captured BEFORE the tick so a shield that's about to
+    // expire still blocks THIS round's hit, matching /attack's exact ordering.
+    const invulnActiveThisRound = combatIsInvulnerable(data);
+    combatTickCombatRoundBuffs(data);
+    monsterTurn = combatResolveMonsterTurn(data, session, invulnActiveThisRound);
     fatal = monsterTurn.fatal;
     if (fatal) updateCombatSession(session.id, { status: "lost" });
   } else {
@@ -1796,7 +1845,7 @@ app.post("/api/combat/:sessionId/flee", requireAuth, (req, res) => {
   const saveSeq = saveCharacterRow(req.account.id, session.slot, data);
   res.json({
     ok: true, failed, monster_turn: monsterTurn, fatal,
-    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data) },
+    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), ...combatRoundBuffsPayload(data) },
     _save_seq: saveSeq,
   });
 });
@@ -1845,7 +1894,7 @@ app.post("/api/combat/:sessionId/use-item", requireAuth, (req, res) => {
   const saveSeq = saveCharacterRow(req.account.id, session.slot, data);
   res.json({
     ok: true,
-    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data) },
+    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
     _save_seq: saveSeq,
   });
 });

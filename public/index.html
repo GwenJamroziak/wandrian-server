@@ -801,18 +801,26 @@ const Balance = {
   // gate), plus a slightly higher per-step chance on those grass tiles. GRASS_PATCH_COUNT
   // 18->26 (each patch is still 3-6 tiles, see the patch-growing loop below) and
   // ENCOUNTER_CHANCE_PER_STEP 0.12->0.15.
-  ENCOUNTER_CHANCE_PER_STEP:0.15, TRAP_CHANCE_PER_TILE:0.05,
+  // v0.20 (#6): the trapdoor used to be a separate, fully-invisible tile type rolled at its
+  // own MAZE_TRAPDOOR_CHANCE_PER_TILE (0.5%) alongside this visible ankle-bite trap's 5%.
+  // Per Gwen's explicit correction, a trapdoor fall is no longer a hidden surprise tile at
+  // all -- it's now just one of 3 equally-likely outcomes (bite/poison/fall) of stepping on
+  // this same announced "trap" tile (see Balance.rollTrapOutcome()). TRAP_CHANCE_PER_TILE
+  // absorbs the old trapdoor chance into itself (0.05+0.005=0.055) so the overall rate of
+  // "a trap tile exists somewhere in this maze" is unchanged from before -- only its
+  // visibility and its resolution into 3 possible outcomes are new.
+  ENCOUNTER_CHANCE_PER_STEP:0.15, TRAP_CHANCE_PER_TILE:0.055,
   OBSTACLE_DENSITY:0.25, GRASS_PATCH_COUNT:26,
   // Independent per-tile roll chances (a 20x10 maze = 200 tiles), replacing the old
   // fixed-count-per-maze model: chest 0.05% (~1 chest per 10 mazes), herb 0.20%
-  // (~1 per 2.5 mazes), shrine 0.10% (~1 per 5 mazes), trapdoor 0.5% (~1 per maze).
+  // (~1 per 2.5 mazes), shrine 0.10% (~1 per 5 mazes).
   MAZE_CHEST_CHANCE_PER_TILE:0.0005,
   // v0.17.1 (#12): shrine spawn chance roughly doubled (0.001 -> 0.002, ~1 per 2.5 mazes
   // instead of ~1 per 5) now that there are 5 possible shrine outcomes instead of 2 -- so
   // players actually run into (and learn about) the 3 new shrine types at a reasonable
   // clip, instead of them being buried under 5x rarer odds of the same total shrine rate.
   MAZE_SHRINE_CHANCE_PER_TILE:0.002,
-  MAZE_HERB_CHANCE_PER_TILE:0.002, MAZE_TRAPDOOR_CHANCE_PER_TILE:0.005,
+  MAZE_HERB_CHANCE_PER_TILE:0.002,
   // v0.18.2 (#6): non-moving critter encounters -- a small, harmless creature you can
   // squash (Forest Reputation -1, see PS.adjustForestReputation()) or spare (+1). Rolled in
   // the same per-tile sequence as chest/shrine/herb/trapdoor above, at roughly the same
@@ -838,11 +846,12 @@ const Balance = {
   // existing Stamina/XP shrines (see onStepMaze()'s "shrine" case). Invulnerability and
   // Quad Damage are both COMBAT-ROUND-scoped (not wall-clock) per Gwen's exact spec --
   // they tick down once per exchange of blows, not per second, so a long walk back to town
-  // doesn't burn them and a fast, back-to-back string of fights does. Magic Find instead
-  // uses the same wall-clock temp-buff pattern as the stat potions (Alchemist), since it
-  // affects loot rolls (chests, kills) rather than anything round-based.
+  // doesn't burn them and a fast, back-to-back string of fights does.
+  // v0.20 (#7): Magic Find shrine moved off the wall-clock temp-buff system onto this same
+  // round-based pattern -- a fixed real-time duration was awkward to reason about (afk time,
+  // menu-browsing time, etc. all burned it down), so it now ticks down in battle rounds too.
   SHRINE_INVULN_ROUNDS:15, SHRINE_QUAD_DAMAGE_ROUNDS:15,
-  SHRINE_MAGIC_FIND_PCT:25, SHRINE_MAGIC_FIND_DURATION_MS:10*60*1000,
+  SHRINE_MAGIC_FIND_PCT:25, SHRINE_MAGIC_FIND_ROUNDS:25,
   // v0.17 (#368): replaced the old flat "(4-12) * areaLevel" trap damage formula -- which
   // scaled linearly hard enough to hit 40-120 damage at area level 10, capable of one-
   // shotting a mid-progress character out of nowhere ("snipe, out" per Gwen's report) --
@@ -853,11 +862,18 @@ const Balance = {
   // v0.17 (#369): the ankle-bite trap used to poison on literally every non-lethal hit,
   // regardless of area level -- player reports said this made poison (and needing to
   // stockpile Antidotes / chase Poison Resistance gear) feel oppressive even at the very
-  // start of the game. Poison now simply can't happen at all below area level 6, and even
-  // from level 6 on only has a per-hit chance to actually take hold (see
-  // Balance.trapShouldPoison()), giving new players real time to prepare before it becomes
+  // start of the game. Poison still simply can't happen at all below area level 6 -- see
+  // Balance.rollTrapOutcome() -- giving new players real time to prepare before it becomes
   // a factor.
-  POISON_TRAP_MIN_AREA_LEVEL:6, POISON_TRAP_CHANCE_FROM_MIN_LEVEL:0.35,
+  // v0.20 (#6): POISON_TRAP_CHANCE_FROM_MIN_LEVEL is retired -- poison used to be a 35%
+  // chance layered UNDER the trap's damage roll once area level 6+ was reached. Now that
+  // bite/poison/fall are 3 equally-likely outcomes of the same trap tile (per Gwen's exact
+  // spec), poison's odds are simply "1 of however many outcomes are unlocked at this area
+  // level" -- see rollTrapOutcome() below.
+  POISON_TRAP_MIN_AREA_LEVEL:6,
+  // v0.20 (#21): a trapdoor "fall" outcome can't roll at all on area level 1 -- dropping
+  // from level 1 to level 1 was a pointless non-event, per Gwen's report.
+  TRAPDOOR_MIN_AREA_LEVEL:2,
   // v0.18.1 (#28): the poison drain tick used to apply a whole second's worth of damage in
   // one lump every 1000ms, which made the HP bar visibly SNAP downward once a second instead
   // of draining smoothly -- same jarring effect the Health/Stamina Potion heal-over-time
@@ -1176,9 +1192,22 @@ const Balance = {
   // compounding curve off a flat 8-12 base -- see the TRAP_DAMAGE_* constants above for
   // the full rationale/example numbers.
   trapDamage(areaLevel){ const lvl=Math.max(1,areaLevel||1); return randRange(this.TRAP_DAMAGE_MIN,this.TRAP_DAMAGE_MAX)*Math.pow(1+this.TRAP_DAMAGE_GROWTH_PER_LEVEL,lvl-1); },
-  // v0.17 (#27): whether THIS particular ankle-bite trap hit also poisons -- always false
-  // below POISON_TRAP_MIN_AREA_LEVEL, otherwise a POISON_TRAP_CHANCE_FROM_MIN_LEVEL roll.
-  trapShouldPoison(areaLevel){ return (areaLevel||1)>=this.POISON_TRAP_MIN_AREA_LEVEL && Math.random()<this.POISON_TRAP_CHANCE_FROM_MIN_LEVEL; },
+  // v0.20 (#6): a trap tile's actual outcome is now decided at trigger time, not generation
+  // time -- "bite" (instant damage), "poison" (no initial damage, applies Poison instead),
+  // and "fall" (a trapdoor drop, per Gwen's exact spec of folding the old fully-invisible
+  // trapdoor tile into this same announced trap tile as a third, equally-likely outcome).
+  // Below area level 6, poison can't roll at all (see POISON_TRAP_MIN_AREA_LEVEL); on area
+  // level 1 specifically, fall can't roll either (see TRAPDOOR_MIN_AREA_LEVEL -- falling
+  // from level 1 to level 1 is a pointless non-event). Whatever outcomes ARE unlocked at
+  // the current area level are equally likely -- e.g. levels 2-5 are a 50/50 bite/fall,
+  // level 1 is always bite, and level 6+ is a true 1-in-3 across all three.
+  rollTrapOutcome(areaLevel){
+    const lvl=areaLevel||1;
+    const options=["bite"];
+    if(lvl>=this.POISON_TRAP_MIN_AREA_LEVEL) options.push("poison");
+    if(lvl>=this.TRAPDOOR_MIN_AREA_LEVEL) options.push("fall");
+    return options[Math.floor(Math.random()*options.length)];
+  },
   // v0.17 (#11): monster block chance -- 5% at area level 1, +0.5 percentage points per
   // additional area level, uncapped (mirrors the player's own getBlockChance() shape but
   // driven by area level instead of Dexterity, since monsters have no attributes).
@@ -2453,19 +2482,22 @@ const PS = {
   // poison_resist entry) -- no class innately has any.
   getPoisonResistance(){return clampf(this.gearBonus("poison_resist"),0,100);},
   // v0.17.1 (#12): Magic Find -- gear affix total (see AFFIX_POOL's magic_find entry) plus
-  // the temporary Magic Find shrine buff (see applyMagicFindShrineBuff()/getActiveTempBuff),
-  // combined additively. Feeds Balance.rollRarity()'s mfPct param via IF.generate().
+  // the Magic Find shrine buff, combined additively. Feeds Balance.rollRarity()'s mfPct
+  // param via IF.generate().
   // v0.17.3 (#16): Kill Streak's ONLY effect is folded in here too -- +1% per kill in the
   // current streak (Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL), reset the moment the
   // streak resets (see PS.resetKillStreak(), called on returning to town/dying). See that
   // constant's comment for why the streak no longer touches monster stats or gold/XP/loot
   // quantity the way it used to.
-  getMagicFind(){return clampf(this.gearBonus("magic_find")+this.getActiveTempBuff("magic_find")+(this.kill_streak||0)*Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL,0,500);},
-  // v0.17.1 (#12): Magic Find shrine -- reuses the existing wall-clock temp-buff system
-  // (see applyTempBuff/getActiveTempBuff, the same mechanism the Alchemist's stat potions
-  // use), since Magic Find affects loot rolls (chests, kills) rather than anything
-  // combat-round-scoped.
-  applyMagicFindShrineBuff(){ this.applyTempBuff("magic_find", Balance.SHRINE_MAGIC_FIND_PCT, Balance.SHRINE_MAGIC_FIND_DURATION_MS); },
+  // v0.20 (#7): the Magic Find shrine buff moved off the generic wall-clock temp_buffs
+  // system onto a dedicated round-based counter (magic_find_rounds_left), same pattern as
+  // Invulnerability/Quad Damage below -- see applyMagicFindShrineBuff()/tickCombatRoundBuffs().
+  getMagicFind(){return clampf(this.gearBonus("magic_find")+(this.magic_find_rounds_left>0?Balance.SHRINE_MAGIC_FIND_PCT:0)+(this.kill_streak||0)*Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL,0,500);},
+  // v0.20 (#7): Magic Find shrine now ticks down in battle rounds (25), not wall-clock
+  // minutes -- matches Invulnerability/Quad Damage's round-based pattern below, and stacks
+  // additively if re-triggered while already active, same precedent as those two.
+  applyMagicFindShrineBuff(){ this.magic_find_rounds_left=(this.magic_find_rounds_left||0)+Balance.SHRINE_MAGIC_FIND_ROUNDS; },
+  hasMagicFindShrineBuff(){ return (this.magic_find_rounds_left||0)>0; },
   // v0.17.1 (#12): Invulnerability ("Touch of Unicorn") and Quad Damage shrines are both
   // scoped to COMBAT ROUNDS, not wall-clock time, per Gwen's exact spec -- see
   // tickCombatRoundBuffs(), called once per round in screenCombat()'s playerTurn(). Stacks
@@ -2476,11 +2508,12 @@ const PS = {
   applyQuadDamageShrineBuff(){ this.quad_dmg_rounds_left=(this.quad_dmg_rounds_left||0)+Balance.SHRINE_QUAD_DAMAGE_ROUNDS; },
   hasQuadDamage(){ return (this.quad_dmg_rounds_left||0)>0; },
   getQuadDamageMult(){ return this.hasQuadDamage()?4:1; },
-  // Ticks both round-based shrine buffs down by one combat round. Deliberately does NOT
+  // Ticks all three round-based shrine buffs down by one combat round. Deliberately does NOT
   // touch anything if a buff isn't active (no negative counters).
   tickCombatRoundBuffs(){
     if(this.invuln_rounds_left>0) this.invuln_rounds_left--;
     if(this.quad_dmg_rounds_left>0) this.quad_dmg_rounds_left--;
+    if(this.magic_find_rounds_left>0) this.magic_find_rounds_left--;
   },
   getRegen(){const c=this.getClassData(); return (c.regen||0.0)+this.gearBonus("regen");},
   getMaxStamina(){return Balance.STAMINA_MAX_BASE+this.gearBonus("stamina_max")+this.bonus_stamina_from_attributes;},
@@ -3204,7 +3237,9 @@ const PS = {
     this.poison_expires_at=0; this.poison_pct_per_sec=0;
     // v0.17.1 (#12): same reused-singleton leak class -- a fresh character must not
     // inherit the previous character's active shrine buffs.
-    this.invuln_rounds_left=0; this.quad_dmg_rounds_left=0;
+    // v0.20 (#7): magic_find_rounds_left joins this reset now that Magic Find is a
+    // dedicated round-based counter instead of a generic temp_buffs entry.
+    this.invuln_rounds_left=0; this.quad_dmg_rounds_left=0; this.magic_find_rounds_left=0;
     // Bug fix (v0.12): this MUST run before getMaxHp()/getMaxStamina() below. PS is a
     // reused singleton across character creations in the same session, so bonus_hp_from_
     // attributes/bonus_stamina_from_attributes/attributes still held whatever the last-
@@ -3276,7 +3311,9 @@ const PS = {
       poison_pct_per_sec:this.poison_pct_per_sec||0,
       // v0.17.1 (#12): round-based shrine buffs (Invulnerability/Quad Damage) survive a
       // save/reload mid-fight, same as everything else here.
+      // v0.20 (#7): magic_find_rounds_left joins them now that Magic Find is round-based too.
       invuln_rounds_left:this.invuln_rounds_left||0, quad_dmg_rounds_left:this.quad_dmg_rounds_left||0,
+      magic_find_rounds_left:this.magic_find_rounds_left||0,
       // v0.15.1: see _nextSaveSeq() above -- lets the server (and Net.saveCharacter's own
       // client-side coalescing) tell an old save from a new one regardless of arrival order.
       _save_seq:this._nextSaveSeq()};
@@ -3346,7 +3383,9 @@ const PS = {
     // falls back to the T1 rate in that case, which is fine (harmless if not even poisoned).
     this.poison_pct_per_sec=parsed.poison_pct_per_sec||0;
     // v0.17.1 (#12): round-based shrine buffs (see saveGame()).
+    // v0.20 (#7): a save from before this shipped just won't have magic_find_rounds_left yet.
     this.invuln_rounds_left=parsed.invuln_rounds_left||0; this.quad_dmg_rounds_left=parsed.quad_dmg_rounds_left||0;
+    this.magic_find_rounds_left=parsed.magic_find_rounds_left||0;
     // v0.15.1: guard against a skewed local clock producing a lower _nextSaveSeq() than
     // what's already stored server-side for this character (see saveGame()/_nextSaveSeq())
     // -- if that ever happened, every future save from this device would be silently
@@ -4196,11 +4235,9 @@ const POTION_BUFF_DEFS=[
   {type:"intelligence",emoji:"🧠",label:"Potion of Intellect",suffix:" Intelligence"},
   {type:"block_chance",emoji:"🛡️",label:"Potion of Wardveil",suffix:"% Block Chance"},
   {type:"regen",emoji:"♻️",label:"Potion of Renewal",suffix:" HP/sec and Stamina/sec regen"},
-  // v0.19.1 (#8) BUG FIX: the Magic Find shrine (applyMagicFindShrineBuff()) has always used
-  // this exact same generic temp-buff system (type "magic_find") -- it just never had an
-  // entry here, so it was the one shrine with zero visible on-screen indicator once cast.
-  // Reuses the same icon/tooltip infra as the 5 potion buffs above, no new plumbing needed.
-  {type:"magic_find",emoji:"🔍",label:"Magic Find Shrine",suffix:"% Magic Find"},
+  // v0.20 (#7): the Magic Find shrine used to live here too (as a generic wall-clock
+  // temp-buff, type "magic_find"), but it's now round-based like Invulnerability/Quad
+  // Damage -- see its own dedicated 🔍 icon in statHeader() below instead.
 ];
 function activePotionBuffIcons(){
   const icons=[];
@@ -4243,7 +4280,10 @@ function statHeader(opts={}){
         buffIcons.length?h("div",{style:{marginTop:"2px"}},buffIcons):null,
       ]),
       h("div",{class:"row gap",style:{alignItems:"center"}},[
-        h("div",{style:{fontWeight:"bold"}},["Character Sheet"]),
+        // v0.20 (#15): the "Character Sheet" label itself is now also clickable (not just the
+        // icon next to it) -- same active/inactive rules as characterSheetEntryIcon() so it
+        // doesn't re-navigate into itself while already on the Character Sheet.
+        h("div",{class:"linklike",style:{fontWeight:"bold",cursor:GF.screen==="inventory"?"default":"pointer"},onClick:GF.screen==="inventory"?null:()=>GF.goto("inventory",{inventory_return_to:GF.screen})},["Character Sheet"]),
         // v0.19.1 (#21): a profile-silhouette icon button instead of an "Open ->" text
         // link -- see characterSheetEntryIcon()'s own comment for the active/inactive
         // states (it already replicates this ternary's old "don't re-navigate into
@@ -4299,6 +4339,10 @@ function statHeader(opts={}){
         // pool now also blocks a maze trap's damage/poison (see onStepMaze()'s "trap" cell
         // handling), so a round can be spent outside of combat too.
         PS.isInvulnerable()?h("span",{class:"tooltip","data-tip":`Touch of Unicorn: immune to damage/poison for ${PS.invuln_rounds_left} more round(s) (combat or traps).`,style:{marginLeft:"4px"}},["🦄"]):null,
+        // v0.20 (#7): Magic Find shrine moved to this same dedicated-icon, round-based
+        // pattern (was previously folded into activePotionBuffIcons()'s generic wall-clock
+        // list, which showed a real-time countdown that no longer applies).
+        PS.hasMagicFindShrineBuff()?h("span",{class:"tooltip","data-tip":`Magic Find Shrine: +${Balance.SHRINE_MAGIC_FIND_PCT}% Magic Find for ${PS.magic_find_rounds_left} more round${PS.magic_find_rounds_left===1?"":"s"}.`,style:{marginLeft:"4px"}},["🔍"]):null,
         // v0.19.1 (#9): Quad Damage's indicator moved out of this HP row -- it now lives in
         // damageLine() up above (right under level/class), next to the damage total it's
         // actually boosting, instead of sitting at the HP bar where it read as if it
@@ -4766,8 +4810,13 @@ const LEADERBOARD_PAGE_SIZE=10;
 // Progression and Skill Progression tabs' rows. Read-only -- see the GET
 // /api/leaderboard/inspect/:accountId/:characterName route's comment for the full security
 // reasoning (GET-only, whitelisted response fields, no mutation surface reachable from here).
-function inspectPlayerButton(accountId,characterName){
-  if(accountId==null || !characterName) return null;
+function inspectPlayerButton(accountId,characterName,isDead){
+  // v0.20 (#22): a dead Hardcore character's row in `characters` is gone entirely (see the
+  // DELETE /api/characters/:slot route's hardcore_death branch) -- only its leaderboard_bests
+  // record survives, marked is_dead. Inspecting it always 404s server-side ("That character no
+  // longer exists."), so the icon is now simply omitted for these rows instead of offering a
+  // button that can never work.
+  if(accountId==null || !characterName || isDead) return null;
   return h("button",{title:"Inspect player (read-only)",style:{padding:"2px 7px",marginLeft:"6px",flex:"none"},onClick:(ev)=>{
     ev.stopPropagation();
     Net.inspectPlayerCache=null;
@@ -4898,7 +4947,7 @@ function leaderboardLadderTab(){
         // v0.15 -- Gwen's ask was for the leaderboard tags to match that existing color.
         e.hardcore?h("span",{style:{color:"#e07a7a",fontWeight:"bold"}},[" [Hardcore]"]):null,
         isDead?h("span",{style:{color:"#e07a7a",fontWeight:"bold"}},[" [Dead]"]):null,
-        inspectPlayerButton(e.account_id,e.character_name),
+        inspectPlayerButton(e.account_id,e.character_name,isDead),
       ]),
       // v0.18.1 (#34): grouped into one right-hand column (instead of 2 separate flex
       // children of the outer space-between row) so this text always hugs the right edge
@@ -4986,7 +5035,7 @@ function skillRankingCard(title,rows){
           ]),
           h("div",{class:"row",style:{alignItems:"center",flex:"none"}},[
             h("span",{class:"muted"},[`Lv${r.level} (${r.into}/${r.forNext})`]),
-            inspectPlayerButton(r.account_id,r.character_name),
+            inspectPlayerButton(r.account_id,r.character_name,r.is_dead),
           ]),
         ]))),
   ]);
@@ -5060,7 +5109,7 @@ function leaderboardKillstreakTab(){
       ]),
       h("div",{class:"row",style:{alignItems:"center",flex:"none",gap:"6px"}},[
         h("span",{},[`${e.max_kill_streak} kills`]),
-        inspectPlayerButton(e.account_id,e.character_name),
+        inspectPlayerButton(e.account_id,e.character_name,e.is_dead),
       ]),
     ]));
   });
@@ -5435,9 +5484,9 @@ function generateMaze(depth){
   // "no valid anchor found in 80 tries" fallback already handled everywhere else).
   const stronghold=Math.random()<Balance.STRONGHOLD_SPAWN_CHANCE ? placeStronghold({size,sizeH,cells,depth}, dist, exitIdx) : null;
 
-  // Content only ever lands on reachable, plain (grass/dirt) tiles. Trapdoors and traps
-  // stay visually indistinguishable from ordinary terrain (see TILE_GLYPH/TILE_COLOR),
-  // so their placement doesn't need to avoid "obvious" spots the way it once did.
+  // Content only ever lands on reachable, plain (grass/dirt) tiles. Placement doesn't need
+  // to avoid "obvious" spots -- even the trap tile (which can resolve into a trapdoor fall,
+  // see rollTrapOutcome()) is announced up front via its own glyph/color, not hidden.
   // Each candidate tile gets one independent roll per content type, in order (a tile
   // that hits an earlier roll is taken and skips the rest), this replaces the old
   // fixed-count-per-maze model with true per-tile probabilities, so a big 25%-boulder
@@ -5451,13 +5500,15 @@ function generateMaze(depth){
     // v0.18.2 (#6): non-moving critter encounters, rolled right alongside the other
     // per-tile content types above -- see MAZE_CRITTER_CHANCE_PER_TILE's declaration.
     if(roll<Balance.MAZE_CHEST_CHANCE_PER_TILE+Balance.MAZE_SHRINE_CHANCE_PER_TILE+Balance.MAZE_HERB_CHANCE_PER_TILE+Balance.MAZE_CRITTER_CHANCE_PER_TILE){ c.type="critter"; continue; }
-    if(roll<Balance.MAZE_CHEST_CHANCE_PER_TILE+Balance.MAZE_SHRINE_CHANCE_PER_TILE+Balance.MAZE_HERB_CHANCE_PER_TILE+Balance.MAZE_CRITTER_CHANCE_PER_TILE+Balance.MAZE_TRAPDOOR_CHANCE_PER_TILE){ c.type="trapdoor"; c.wasHidden=true; continue; }
-    // v0.17 (#7): the damage/poison ankle-bite trap is no longer hidden once discovered --
-    // it deliberately does NOT set wasHidden here (unlike trapdoor just above), so it shows
-    // its own distinct icon/color once inside fog-of-war range (see HIDDEN_TILE_TYPES/
-    // TILE_GLYPH.trap/TILE_COLOR.trap below), letting players actively route around it.
-    // Trapdoors stay exactly as invisible/surprise as before, per Gwen's explicit spec.
-    if(roll<Balance.MAZE_CHEST_CHANCE_PER_TILE+Balance.MAZE_SHRINE_CHANCE_PER_TILE+Balance.MAZE_HERB_CHANCE_PER_TILE+Balance.MAZE_CRITTER_CHANCE_PER_TILE+Balance.MAZE_TRAPDOOR_CHANCE_PER_TILE+Balance.TRAP_CHANCE_PER_TILE){ c.type="trap"; }
+    // v0.20 (#6): the trapdoor used to be a separate roll here, landing on its own fully-
+    // hidden "trapdoor" cell type (c.wasHidden=true, rendered as baseTerrain forever). Per
+    // Gwen's explicit correction, a trapdoor fall is no longer a hidden surprise tile --
+    // it's just one of 3 equally-likely outcomes (bite/poison/fall) of stepping on this same
+    // announced "trap" tile, resolved at trigger time by Balance.rollTrapOutcome() in
+    // onStepMaze(). The trap tile itself is never hidden -- it shows its own distinct
+    // icon/color once inside fog-of-war range (see TILE_GLYPH.trap/TILE_COLOR.trap below),
+    // letting players actively route around it, same as before this change.
+    if(roll<Balance.MAZE_CHEST_CHANCE_PER_TILE+Balance.MAZE_SHRINE_CHANCE_PER_TILE+Balance.MAZE_HERB_CHANCE_PER_TILE+Balance.MAZE_CRITTER_CHANCE_PER_TILE+Balance.TRAP_CHANCE_PER_TILE){ c.type="trap"; }
   }
 
   // v0.18 (#2): roaming mobs spawn AFTER the per-tile content rolls above, on whatever
@@ -5650,11 +5701,11 @@ function resetMazePositionToStart(){
   if(GF.overworld_snapshot) GF.overworld_snapshot.playerIdx=0;
 }
 
-// Trapdoor tiles are deliberately absent here, they render using the cell's baseTerrain
-// instead (see screenMaze), so they're indistinguishable from ordinary ground -- that's the
-// whole point, a trapdoor has to stay a surprise. The damage/poison "trap" tile is the
-// opposite as of v0.17 (#7): it gets its own glyph/color below so it's visible (once inside
-// fog-of-war range) and a player can choose to walk around it.
+// The "trap" tile gets its own glyph/color below so it's visible (once inside fog-of-war
+// range) and a player can choose to walk around it -- as of v0.17 (#7) for its damage/
+// poison outcomes, and as of v0.20 (#6) for its trapdoor-fall outcome too (folded into this
+// same tile instead of staying its own separate, fully-hidden type -- see
+// Balance.rollTrapOutcome()).
 const TILE_GLYPH={start:"🏕",exit:"⬇",chest:"🎁",shrine:"✨",herb:"🌿",boulder:"🪨",grass:"",dirt:"",trap:"⚠️",
   stronghold_chest:"🔒",stronghold_guardian:"💀",stronghold_fence:"🪵",
   // v0.18.2 (#6): visible once discovered, same as chest/herb/shrine/trap -- not hidden like
@@ -5663,7 +5714,12 @@ const TILE_GLYPH={start:"🏕",exit:"⬇",chest:"🎁",shrine:"✨",herb:"🌿",
 const TILE_COLOR={start:"#2a4a2a",exit:"#3a3a6a",chest:"#5a4a1a",shrine:"#3a5a5a",herb:"#2a4a2a",boulder:"#3a3a34",grass:"#274a1e",dirt:"#4a3a26",trap:"#5a2a1a",
   stronghold_chest:"#5a4a1a",stronghold_guardian:"#6a1e1e",stronghold_fence:"#4a3a26",
   critter:"#3a4a2a"};
-const HIDDEN_TILE_TYPES=["trapdoor"];
+// v0.20 (#6): the trapdoor was the only tile type ever masked as its baseTerrain -- now
+// that a trapdoor fall is just one possible outcome of stepping on the always-visible
+// "trap" tile (see rollTrapOutcome()), there is no hidden tile type left at all. Kept as an
+// (empty) array/mechanism rather than deleted outright, in case a future tile type needs
+// the same "shown as its baseTerrain until triggered" treatment.
+const HIDDEN_TILE_TYPES=[];
 // v0.18 (#2): roaming mobs aren't a cell type (their tile changes every step -- see
 // tickRoamingMobs()), so they're not part of TILE_GLYPH/TILE_COLOR above -- screenMaze()'s
 // render loop overlays this glyph/color on top of whatever plain grass/dirt tile a live
@@ -5728,12 +5784,11 @@ function screenMaze(){
   // otherwise had to remember (or go check the Itemization Guide for) which numeric band maps
   // to which Roman-numeral tier that gear/salvage/etc. text refers to elsewhere.
   root.appendChild(h("h2",{},[`The Woods, Area Level ${depth} (Tier ${tierRomanNumeral(Balance.mobTierForAreaLevel(depth))})`]));
-  root.appendChild(h("div",{class:"lore"},["Overgrown paths wind between the trees. Move with the arrow keys or by clicking an adjacent tile."]));
+  // v0.20 (#4): shortened to fit on a single line -- the old two-line version, combined with
+  // the Adventure Log used to sitting right here (see below), pushed the grid's last row just
+  // out of view at 100% zoom on a typical screen.
+  root.appendChild(h("div",{class:"lore"},["Overgrown paths wind through the trees -- arrows or click to move."]));
   root.appendChild(statHeader());
-  // v0.18 (#12): maze-event messages (exhaustion/trap/shrine) render into this fixed-height
-  // log instead of the page-shifting toast banner (the old toastBox call) that used to sit
-  // here -- see mazeLog()/mazeLogBox().
-  root.appendChild(mazeLogBox());
 
   // Grid pixel size (tiles + 1px gaps + 2px border on each side), the dramatic
   // Advanced!/Trapdoor! overlay is sized to exactly cover this box, not the full
@@ -5824,7 +5879,15 @@ function screenMaze(){
   root.appendChild(h("div",{class:"maze-wrap"},[gridArea,
     h("div",{class:"side-panel"},[
       h("div",{class:"col",style:{gap:"2px"}},[
-        h("div",{class:"muted",style:{lineHeight:"1.5em"}},["Use the arrow keys to explore the wilderness. Wild creatures lure at you from the tall grass, reach the exit (⬇) before your stamina runs out. Every area hides a Stronghold too: a locked chest (🔒) guarded on 4 sides by tough guardians (💀), beat one to reach the chest, but you'll need a Stronghold Key to actually open it. Watch for Roaming mobs (👹) too, they wander the whole area on their own (even while you stand still) and hit harder than a Stronghold guardian -- their marker color gives away their behavior: purple wanders at random, red actively hunts you down, and green rarely strays far from its own patch."]),
+        // v0.20 (#5): drastically shortened -- the old paragraph's length pushed the Try a
+        // Different Route/Retreat to Town buttons below taller than the grid itself, so the
+        // side panel and grid no longer bottomed out at the same height. Full detail (Stronghold
+        // guardians/keys, each Roaming mob behavior color, etc) now lives one click away in the
+        // Gameplay Guide instead of being repeated in full on every single visit to this screen.
+        h("div",{class:"muted",style:{lineHeight:"1.5em"}},[
+          "Arrow keys to move. Fights lurk in tall grass -- find the exit (⬇) before your stamina runs out. Strongholds hide a locked chest (🔒) behind tough guardians (💀); Roaming mobs (👹) hunt on their own turf. ",
+          h("span",{class:"linklike",onClick:()=>{ GF._preGameplayScreen="maze"; GF.goto("gameplayGuide"); }},["More information"]),
+        ]),
       ]),
       // v0.16 (#332): on-screen D-pad, CSS-hidden on desktop-width screens (see the
       // .maze-mobile-arrows rule) -- brought back specifically so touch/mobile players
@@ -5859,6 +5922,10 @@ function screenMaze(){
       h("button",{disabled:!!GF.mazeOverlay,onClick:()=>{ resetMazePositionToStart(); GF.goto("town"); }},["← Retreat to Town"]),
     ]),
   ]));
+  // v0.20 (#3): the Adventure Log (mazeLogBox()) used to sit between the player info and the
+  // grid, squeezing the grid's visible height. Moved below the grid+side-panel row instead --
+  // see mazeLog()/mazeLogBox() for how it's populated.
+  root.appendChild(mazeLogBox());
   return root;
 }
 
@@ -6037,32 +6104,38 @@ function onStepMaze(maze,targetIdx){
     render();
     return;
   }
-  if(cell.type==="trapdoor" && !cell.cleared){
-    cell.cleared=true; cell.type=cell.baseTerrain; // reverts to ordinary grass/dirt from here on, mechanically too
-    const dmg=randRange(Balance.TRAP_DAMAGE_MIN,Balance.TRAP_DAMAGE_MAX);
-    PS.current_hp=Math.max(1,PS.current_hp-dmg);
-    PS.spendStamina(Balance.TRAP_STAMINA_LOSS);
-    // v0.19.1 (#7): "enforce a TRUE trapdoor drop" -- a repeated trapdoor fall (no real exit
-    // reached since the last one) stacks the penalty -1/-2/-3 rather than always the same
-    // flat -1, and the resulting depth is locked against the Town selector's manual "+"
-    // chevron (GF.ventureLockDepth) until a real exit is reached again. See both fields'
-    // comments on the GF object for the full reasoning.
-    GF.trapdoorStreak=Math.min(Balance.TRAPDOOR_DEPTH_PENALTY_MAX_STACK,(GF.trapdoorStreak||0)+1);
-    const penalty=Balance.TRAPDOOR_DEPTH_PENALTY*GF.trapdoorStreak;
-    const fallDepth=Math.max(1,maze.depth-penalty);
-    // v0.18.2 (#3): same "keep the Town selector honest" fix as the exit branch above --
-    // a trapdoor fall is also a real, involuntary change to the depth the player is
-    // currently standing in, so the selector needs to follow it back down too.
-    GF.ventureDepth=fallDepth;
-    GF.ventureLockDepth=fallDepth;
-    autosave();
-    GF.mazeOverlay={text:"Trapdoor!", andThen:()=>{ GF.overworld_snapshot=null; GF.goto("maze",{maze_depth:fallDepth}); }};
-    render();
-    return;
-  }
   if(cell.type==="trap" && !cell.cleared){
     cell.cleared=true; cell.type=cell.baseTerrain;
     PS.spendStamina(Balance.TRAP_STAMINA_LOSS);
+    // v0.20 (#6): the trap's outcome -- bite (instant damage), poison (no initial damage,
+    // applies Poison), or fall (a trapdoor drop) -- is now rolled at trigger time, per
+    // Gwen's exact spec of folding the old fully-invisible trapdoor tile into this same
+    // announced trap tile as a third, equally-likely outcome. See Balance.rollTrapOutcome()
+    // for the area-level gating (no poison below level 6, no fall on level 1).
+    const outcome=Balance.rollTrapOutcome(maze.depth);
+    if(outcome==="fall"){
+      // v0.19.1 (#7): "enforce a TRUE trapdoor drop" -- a repeated trapdoor fall (no real
+      // exit reached since the last one) stacks the penalty -1/-2/-3 rather than always the
+      // same flat -1, and the resulting depth is locked against the Town selector's manual
+      // "+" chevron (GF.ventureLockDepth) until a real exit is reached again. See both
+      // fields' comments on the GF object for the full reasoning. A fall was never covered
+      // by Touch of Unicorn even back when it was its own separate tile type, and this
+      // merge doesn't change that -- it's checked below, only for the bite/poison outcomes.
+      const dmg=randRange(Balance.TRAP_DAMAGE_MIN,Balance.TRAP_DAMAGE_MAX);
+      PS.current_hp=Math.max(1,PS.current_hp-dmg);
+      GF.trapdoorStreak=Math.min(Balance.TRAPDOOR_DEPTH_PENALTY_MAX_STACK,(GF.trapdoorStreak||0)+1);
+      const penalty=Balance.TRAPDOOR_DEPTH_PENALTY*GF.trapdoorStreak;
+      const fallDepth=Math.max(1,maze.depth-penalty);
+      // v0.18.2 (#3): same "keep the Town selector honest" fix as the exit branch above --
+      // a trapdoor fall is also a real, involuntary change to the depth the player is
+      // currently standing in, so the selector needs to follow it back down too.
+      GF.ventureDepth=fallDepth;
+      GF.ventureLockDepth=fallDepth;
+      autosave();
+      GF.mazeOverlay={text:"Trapdoor!", andThen:()=>{ GF.overworld_snapshot=null; GF.goto("maze",{maze_depth:fallDepth}); }};
+      render();
+      return;
+    }
     // v0.18.1 (#26): Touch of Unicorn (the Invulnerability shrine buff) used to only guard
     // against combat damage -- an ankle-bite trap's instant damage or poison bite would still
     // land in full even while "immune to damage" was visibly showing on the HP bar, which
@@ -6076,13 +6149,11 @@ function onStepMaze(maze,targetIdx){
       autosave(); render(); animateMazeMovers(prevPlayerIdx,prevRoamerPositions); return;
     }
     // v0.17.1 (#11) BUG FIX: a trap used to ALWAYS deal its instant damage AND, on top of
-    // that, roll a chance (see Balance.trapShouldPoison()) to ALSO inflict Poison from the
-    // very same trigger -- player reports called this an unfair double-punish. A trap is now
-    // EITHER an instant-damage strike OR a (no-initial-damage) poison bite, never both.
-    // trapShouldPoison() still gates whether poison is even possible at this area level
-    // (impossible below area level 6) and rolls the chance; the roll now decides the trap's
-    // whole TYPE rather than an extra effect layered onto a damage trap.
-    if(Balance.trapShouldPoison(maze.depth)){
+    // that, roll a chance to ALSO inflict Poison from the very same trigger -- player reports
+    // called this an unfair double-punish. A trap is now EITHER an instant-damage strike OR
+    // a (no-initial-damage) poison bite, never both -- rollTrapOutcome() above already
+    // decided which one this trigger is.
+    if(outcome==="poison"){
       PS.applyPoison(maze.depth);
       mazeLog(`Something bites at your ankle! No wound, but you feel a poison take hold.`);
       autosave(); render(); animateMazeMovers(prevPlayerIdx,prevRoamerPositions); return;
@@ -6113,7 +6184,7 @@ function onStepMaze(maze,targetIdx){
     else if(roll===1){ PS.applyXpShrineBuff(); mazeLog("A quiet shrine blesses you, bonus experience for a while!"); }
     else if(roll===2){ PS.applyInvulnShrineBuff(); mazeLog(`A radiant shrine grants you the Touch of Unicorn -- you are immune to damage/poison from combat or traps for ${Balance.SHRINE_INVULN_ROUNDS} rounds!`); }
     else if(roll===3){ PS.applyQuadDamageShrineBuff(); mazeLog(`A furious shrine quadruples your damage output for ${Balance.SHRINE_QUAD_DAMAGE_ROUNDS} combat rounds!`); }
-    else { PS.applyMagicFindShrineBuff(); mazeLog(`A glimmering shrine sharpens your eye for treasure -- +${Balance.SHRINE_MAGIC_FIND_PCT}% Magic Find for a while!`); }
+    else { PS.applyMagicFindShrineBuff(); mazeLog(`A glimmering shrine sharpens your eye for treasure -- +${Balance.SHRINE_MAGIC_FIND_PCT}% Magic Find for ${Balance.SHRINE_MAGIC_FIND_ROUNDS} rounds!`); }
     autosave(); render(); animateMazeMovers(prevPlayerIdx,prevRoamerPositions); return;
   }
   if(cell.type==="herb" && !cell.cleared){
@@ -6326,6 +6397,7 @@ async function startCombatSession(monsterId, guardianCellIdx, roamerId){
     const result=await Net.startCombat(PS.current_slot, monsterId, GF.maze_depth, guardianCellIdx!=null, roamerId!=null);
     PS._saveSeqFloor=Math.max(PS._saveSeqFloor||0, result._save_seq);
     PS.current_hp=result.player.current_hp;
+    syncCombatRoundBuffs(result.player);
     const base=DL.getMonster(monsterId);
     GF.combat={
       session_id:result.session_id, monster_id:monsterId, guardianCellIdx, roamerId,
@@ -6491,6 +6563,26 @@ function handleTrapDeath(){
   applyDeathAndRedirect("Slain by a Trap", "The trap proves fatal");
 }
 
+// v0.20 BUG FIX (credit: dcfroggert): a player reported that Touch of Unicorn
+// (Invulnerability) never wore off in combat as long as they avoided maze traps -- turned
+// out the server WAS correctly ticking invuln_rounds_left down every combat round (see
+// combatTickCombatRoundBuffs() in server.js), but nothing on this end ever adopted that
+// decremented value. PS.invuln_rounds_left just sat frozen at whatever it was when the
+// shrine was triggered, and the very next autosave() (called after every single combat
+// action below) pushed that stale, un-decremented number straight back up to the server,
+// silently undoing the tick that had just happened. The exact same blind spot affected Quad
+// Damage and Magic Find too -- neither had any OTHER decrement path at all, so once
+// triggered they were permanent, full stop, not just "immune while avoiding traps."
+// Every combat endpoint's response now echoes back the current, authoritative values (see
+// server.js's combatRoundBuffsPayload()) -- call this on every one of them so PS's local
+// copy is always a faithful mirror of the server's, the same way PS.current_hp already is.
+function syncCombatRoundBuffs(playerPayload){
+  if(!playerPayload) return;
+  if(playerPayload.invuln_rounds_left!=null) PS.invuln_rounds_left=playerPayload.invuln_rounds_left;
+  if(playerPayload.quad_dmg_rounds_left!=null) PS.quad_dmg_rounds_left=playerPayload.quad_dmg_rounds_left;
+  if(playerPayload.magic_find_rounds_left!=null) PS.magic_find_rounds_left=playerPayload.magic_find_rounds_left;
+}
+
 function screenCombat(){
   const cb=ensureCombat();
   const root=h("div",{});
@@ -6603,6 +6695,7 @@ function screenCombat(){
     }
     cb.hp=result.monster.hp;
     PS.current_hp=result.player.current_hp;
+    syncCombatRoundBuffs(result.player);
 
     if(result.kill){
       const k=result.kill;
@@ -6717,6 +6810,7 @@ function screenCombat(){
       PS._saveSeqFloor=Math.max(PS._saveSeqFloor||0, result._save_seq);
       GF.combatResolving=false;
       PS.current_hp=result.player.current_hp;
+      syncCombatRoundBuffs(result.player);
       if(result.failed){
         combatLog(cb,"You fail to flee!");
         const mt=result.monster_turn;
@@ -6774,6 +6868,7 @@ function screenCombat(){
       }
       PS.current_hp=result.player.current_hp;
       PS.current_stamina=result.player.current_stamina;
+      syncCombatRoundBuffs(result.player);
       // The item itself was already deducted server-side -- mirror that one deterministic
       // decrement locally so the backpack/quick-use buttons reflect it immediately.
       PS._removeConsumableOne(itemId);
@@ -7296,10 +7391,10 @@ function shrineBonusPanel(){
   if(PS.hasQuadDamage()){
     lines.push(`Quad Damage: 4x damage output for ${PS.quad_dmg_rounds_left} more combat round${PS.quad_dmg_rounds_left===1?"":"s"}.`);
   }
-  const mfAmt=PS.getActiveTempBuff("magic_find");
-  if(mfAmt>0){
-    const secsLeft=Math.max(1,Math.ceil(PS.getTempBuffMsLeft("magic_find")/1000));
-    lines.push(`Magic Find Shrine: +${mfAmt}% Magic Find for ${secsLeft} more second${secsLeft===1?"":"s"}.`);
+  // v0.20 (#7): Magic Find shrine is now round-based like the two shrines above it, not a
+  // wall-clock countdown.
+  if(PS.hasMagicFindShrineBuff()){
+    lines.push(`Magic Find Shrine: +${Balance.SHRINE_MAGIC_FIND_PCT}% Magic Find for ${PS.magic_find_rounds_left} more round${PS.magic_find_rounds_left===1?"":"s"}.`);
   }
   return h("div",{class:"panel",style:{marginTop:"12px",marginBottom:"12px"}},[
     h("div",{style:{fontWeight:"bold",marginBottom:"8px"}},["Shrine Bonuses"]),
@@ -7364,6 +7459,12 @@ function equipSlotTile(slot){
 // .rarity-Common/.rarity-Uncommon/etc rules), just applied as a border instead so a
 // glance at the grid tells you an item's rarity the way Vault's plain grid never could.
 const RARITY_BORDER_COLORS={Common:"#9a9686",Uncommon:"#e8e4d8",Rare:"#5a9ae0",Epic:"#e0c94a",Legendary:"#d9902f"};
+
+// v0.20 (#8): a faint red background tint on any Backpack/Vault gear tile the current
+// character can't equip (below level requirement or wrong class) -- previously the only
+// way to discover this was clicking the tile and reading the toast, so unequippable items
+// were visually indistinguishable from usable ones sitting right next to them.
+const UNEQUIPPABLE_TINT="rgba(200,40,40,0.28)";
 
 // v0.15: the Character Sheet's backpack, redesigned into the same numbered-slot grid
 // style as the Storage Vault (see screenVault()) instead of a scrolling row-per-item
@@ -7432,8 +7533,8 @@ function backpackGearGrid(){
     const borderColor=isReorderSrc?"#4ac6ff":(RARITY_BORDER_COLORS[inst.rarity]||"var(--border)");
     const tile=h("div",{
       class:"tile tooltip",
-      style:{width:"38px",height:"38px",padding:"0",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",border:`2px solid ${borderColor}`},
-      "data-tip":`${IF.tooltipText(inst)}\n${IF.categoryLabel(inst)}`,
+      style:{width:"38px",height:"38px",padding:"0",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",border:`2px solid ${borderColor}`,background:canEquip?undefined:UNEQUIPPABLE_TINT},
+      "data-tip":`${IF.tooltipText(inst)}\n${IF.categoryLabel(inst)}`+(canEquip?"":`\n${PS.gearInvalidReason(inst)}`),
       onClick:GF._bagReorderMode?()=>{
         // v0.17.1 (#13): in reorder mode, clicking gear picks it up (or cancels if it's
         // already selected) instead of equipping it -- equip-on-click only applies outside
@@ -8086,7 +8187,7 @@ function screenVault(){
       // see what an item actually rolled. Consumables/herbs keep their simple name+qty tip,
       // matching what the backpack itself shows for those (no per-stat breakdown exists for
       // non-gear items anywhere in the game yet).
-      if(entry.kind==="gear"){ label=IF.displayName(entry.inst)+` (${tierRomanNumeral(entry.inst.tier)})`; icon=gearIcon(entry.inst,24); tip=`${IF.tooltipText(entry.inst)}\n${IF.categoryLabel(entry.inst)}`; }
+      if(entry.kind==="gear"){ label=IF.displayName(entry.inst)+` (${tierRomanNumeral(entry.inst.tier)})`; icon=gearIcon(entry.inst,24); tip=`${IF.tooltipText(entry.inst)}\n${IF.categoryLabel(entry.inst)}`+(PS.canEquipGear(entry.inst)?"":`\n${PS.gearInvalidReason(entry.inst)}`); }
       else if(entry.kind==="consumable"){ label=`${DL.getItem(entry.item_id).name} x${entry.qty}`; icon=itemIcon(entry.item_id,24); tip=`${label}\n${DL.itemCategoryLabel(entry.item_id)}`; }
       else if(entry.kind==="herb"){ label=`${DL.getHerb(entry.herb_id).name} x${entry.qty}`; icon=herbIcon(entry.herb_id,24); tip=label; }
     }
@@ -8122,10 +8223,13 @@ function screenVault(){
     // v0.17.3 (#6): mute (don't hide) any slot that doesn't match the active filter, so
     // the ones that DO match stand out by contrast -- see gearFilterOpacity()'s comment.
     const filterOpacity=gearFilterOpacity(entry&&entry.kind==="gear"?entry.inst:null, GF._vaultFilter);
+    // v0.20 (#8): same red tint as the backpack grid for a stored gear item the current
+    // character can't equip -- see UNEQUIPPABLE_TINT's comment.
+    const vaultUnequippable=entry&&entry.kind==="gear"&&!PS.canEquipGear(entry.inst);
     const vaultTile=h("div",{
       class:"tile"+(entry?" tooltip":"")+(entry&&entry.kind==="gear"?" rarity-"+entry.inst.rarity:""),
       style:{width:"32px",height:"32px",padding:"0",display:"flex",alignItems:"center",justifyContent:"center",cursor:(entry||GF._vaultReorderMode)?"pointer":"default",
-        border:isReorderSrc?"2px solid #4ac6ff":undefined, boxSizing:"border-box", opacity:String(filterOpacity)},
+        border:isReorderSrc?"2px solid #4ac6ff":undefined, boxSizing:"border-box", opacity:String(filterOpacity), background:vaultUnequippable?UNEQUIPPABLE_TINT:undefined},
       "data-tip":tip||undefined,
       onClick:onClickFn,
     },[icon]);
@@ -9698,8 +9802,7 @@ function mazeTileReferenceTable(){
     [mazeTileSwatch(TILE_COLOR.shrine,TILE_GLYPH.shrine),"Shrine","Grants a temporary buff on touch -- bonus XP, bonus Stamina, Invulnerability, Quad Damage, or Magic Find."],
     [mazeTileSwatch(TILE_COLOR.herb,TILE_GLYPH.herb),"Herb node","An interactive gathering encounter (not a fight) that yields herbs used in Alchemy."],
     [mazeTileSwatch(TILE_COLOR.critter,TILE_GLYPH.critter),"Critter","A harmless creature you can squash or spare -- shifts your current class tier's Forest Reputation (see above), which grants a permanent XP bonus while positive."],
-    [mazeTileSwatch(TILE_COLOR.trap,TILE_GLYPH.trap),"Trap","Hidden until triggered. Deals instant damage OR applies Poison (never both), scaling with the area's level."],
-    [mazeTileSwatch(TILE_COLOR.dirt,"",true),"Trapdoor","Completely invisible, even after being triggered -- looks exactly like the grass/dirt tile underneath. Stepping on one instantly drops your area level by 1."],
+    [mazeTileSwatch(TILE_COLOR.trap,TILE_GLYPH.trap),"Trap","Announced by its own icon, but its exact effect is a surprise -- an equal chance of an ankle bite (instant damage), a poison bite (area level 6+ only), or a trapdoor fall that drops your area level (never on area level 1). Only one of the three ever happens per trigger."],
     [mazeTileSwatch(TILE_COLOR.stronghold_guardian,TILE_GLYPH.stronghold_guardian),"Stronghold Guardian","A tough, fixed-position monster guarding one side of a Stronghold's locked chest -- hits harder than an ordinary monster at the same area level."],
     [mazeTileSwatch(TILE_COLOR.stronghold_chest,TILE_GLYPH.stronghold_chest),"Stronghold Chest","Locked -- needs a Stronghold Key of the matching tier, dropped by that Stronghold's guardians, to open."],
     [mazeTileSwatch(TILE_COLOR.stronghold_fence,TILE_GLYPH.stronghold_fence),"Stronghold Fence","Purely decorative corner marker of a Stronghold's 3x3 layout. Walkable, no effect."],
