@@ -1058,7 +1058,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.20.1-web",
+  GAME_VERSION:"v0.20.2-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   // v0.20 (#10): each town tier previously shared the exact same "A quiet camp on the edge
@@ -2218,11 +2218,12 @@ const Net = {
     return json;
   },
   // v0.20.1 (#17): "Reforge" -- same server-authoritative pattern as rerollGear() just
-  // above, hitting the new POST /api/blacksmith/reforge instead (see that endpoint for
-  // the full server-side logic: it picks which ONE affix gets replaced and what stat/value
-  // it becomes, so a modified client can only ask for a reforge, never dictate its result).
-  async reforgeGear(slot, instanceId){
-    const res=await fetch(this.apiBase()+"/api/blacksmith/reforge",{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({slot,instance_id:instanceId})});
+  // above, hitting the new POST /api/blacksmith/reforge instead. v0.20.1 CORRECTION: the
+  // player now chooses WHICH existing affix gets replaced (affixIndex, an index into the
+  // item's own affixes array) -- the server still decides what NEW stat/value it becomes,
+  // so a modified client can pick the target but can never dictate the reforge's outcome.
+  async reforgeGear(slot, instanceId, affixIndex){
+    const res=await fetch(this.apiBase()+"/api/blacksmith/reforge",{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({slot,instance_id:instanceId,affix_index:affixIndex})});
     const json=await res.json().catch(()=>({}));
     if(!res.ok) throw new Error(json.error||"That item could not be reforged.");
     return json;
@@ -8361,14 +8362,15 @@ async function rerollBlacksmithItem(instanceId){
 }
 // v0.20.1 (#17): "Reforge" -- mirrors rerollBlacksmithItem()'s exact async flow (double-
 // submit guard, _save_seq reconciliation, gold sync), calling the new Net.reforgeGear()
-// instead. See POST /api/blacksmith/reforge in server.js for what actually changes: one
-// randomly-chosen existing affix gets swapped for a brand-new stat (and freshly rolled
-// value), while every other affix on the item is left exactly as it was.
-async function reforgeBlacksmithItem(instanceId){
+// instead. See POST /api/blacksmith/reforge in server.js for what actually changes: the
+// affix at affixIndex (chosen by the player -- see openReforgeStatPicker() below, v0.20.1
+// CORRECTION) gets swapped for a brand-new stat (and freshly rolled value), while every
+// other affix on the item is left exactly as it was.
+async function reforgeBlacksmithItem(instanceId, affixIndex){
   if(GF.rerolling||GF.reforging) return;
   GF.reforging=instanceId; render();
   try{
-    const result=await Net.reforgeGear(PS.current_slot, instanceId);
+    const result=await Net.reforgeGear(PS.current_slot, instanceId, affixIndex);
     PS._saveSeqFloor=Math.max(PS._saveSeqFloor||0, result._save_seq);
     const idx=PS.findGearIndex(instanceId);
     if(idx!==-1) PS.gear_instances[idx]=result.item;
@@ -8380,6 +8382,83 @@ async function reforgeBlacksmithItem(instanceId){
     setToast("Could not reforge: "+e.message);
   }
   GF.reforging=null; render();
+}
+// v0.20.1 CORRECTION: Reforge originally had the server pick which existing affix to
+// replace at random -- Gwen's actual intent was for the PLAYER to choose which stat line
+// gets replaced, with the replacement stat/value still rolled by the server exactly as
+// before. This popup lists every eligible affix (everything except the rare fixed-value
+// "eyesight" bonus, which can't be reforged -- see server.js's identical exclusion) as a
+// clickable row; clicking one selects it (re-rendering the popup to show the highlight),
+// and the Reforge button stays disabled until a stat is actually picked. Rendered into
+// modalRoot the same way askConfirm() is (see that function's comment for why), but as its
+// own hand-rolled popup instead of reusing askConfirm() since it needs per-row click
+// handlers and a re-render-on-select loop that askConfirm()'s single-message shape can't
+// express.
+function openReforgeStatPicker(inst){
+  let selectedIdx=null;
+  function renderPicker(){
+    modalRoot.innerHTML="";
+    const rows=inst.affixes.map((a,i)=>{
+      if(a.stat==="eyesight") return null;
+      const label=`${IF.affixLabel(a.stat)} ${a.value}${IF.affixIsPercent(a.stat)?"%":""}`;
+      const selected=selectedIdx===i;
+      return h("div",{
+        style:{
+          cursor:"pointer", padding:"8px 10px", borderRadius:"6px", marginBottom:"4px",
+          background:selected?"rgba(180,108,255,0.18)":"rgba(255,255,255,0.05)",
+          border:selected?"1px solid #b46cff":"1px solid transparent",
+          fontWeight:selected?"bold":"normal",
+        },
+        onClick:()=>{ selectedIdx=i; renderPicker(); },
+      },[`${selected?"● ":"○ "}${label}`]);
+    }).filter((r)=>r!==null);
+    modalRoot.appendChild(h("div",{class:"modal-backdrop",onClick:(e)=>{ if(e.target===e.currentTarget) closeConfirmModal(); }},[
+      h("div",{class:"modal-box"},[
+        h("div",{style:{lineHeight:"1.5",marginBottom:"10px"}},[
+          h("div",{style:{fontWeight:"bold",marginBottom:"4px"}},[`Reforge ${IF.displayName(inst)}`]),
+          "Pick ONE stat below to replace with a fresh, different stat (its value will be rolled from scratch). Every other stat on this item stays exactly as it is.",
+        ]),
+        ...rows,
+        h("div",{class:"row"},[
+          h("button",{onClick:closeConfirmModal},["Cancel"]),
+          h("button",{disabled:selectedIdx===null,onClick:()=>{ const picked=selectedIdx; closeConfirmModal(); return reforgeBlacksmithItem(inst.instance_id, picked); }},["Reforge Selected Stat"]),
+        ]),
+      ]),
+    ]));
+  }
+  renderPicker();
+}
+
+// v0.20.1 CORRECTION: bulk "salvage every backpack item of one rarity" buttons -- the same
+// per-item math PS.salvageGear() already applies one at a time, just looped over every
+// gear_instances entry matching the given INTERNAL rarity name (Common/Uncommon/Rare --
+// note these are the internal names, not the display ones: Balance.RARITY_DISPLAY_NAMES
+// maps Common->"Crude", Uncommon->"Common", Rare->"Magical", which is what the buttons show
+// and what Gwen's request names them by). Confirmed via askConfirm() first since salvaging
+// is irreversible and this can affect many items in one click -- same "cannot be undone"
+// caution the single-item Salvage button's tooltip already carries.
+function salvageAllGearOfRarity(rarityName, busy){
+  if(busy) return;
+  const displayName=Balance.rarityDisplayName(rarityName);
+  const matches=PS.gear_instances.filter((inst)=>inst.rarity===rarityName);
+  if(matches.length===0){ setToast(`No ${displayName} items in your backpack to salvage.`); render(); return; }
+  askConfirm(
+    `Salvage all ${matches.length} ${displayName} item${matches.length===1?"":"s"} in your backpack? This cannot be undone.`,
+    ()=>{
+      const ids=matches.map((inst)=>inst.instance_id);
+      let totalMat=0;
+      for(const id of ids){
+        const idx=PS.findGearIndex(id); if(idx===-1) continue;
+        const inst=PS.gear_instances[idx];
+        totalMat+=Balance.salvageValue(inst.tier, IF.slotCount(inst));
+        PS.salvageGear(id);
+      }
+      autosave();
+      setToast(`Salvaged ${ids.length} ${displayName} item${ids.length===1?"":"s"} for +${totalMat} materials.`);
+      render();
+    },
+    {confirmLabel:"Salvage All",danger:true}
+  );
 }
 
 function screenBlacksmith(){
@@ -8395,6 +8474,17 @@ function screenBlacksmith(){
   ]));
   const t=toastBox(); if(t) root.appendChild(t);
   root.appendChild(statHeader());
+
+  // v0.20.1 CORRECTION: bulk salvage-by-rarity, placed right below the player info per
+  // Gwen's request -- salvages every matching-rarity backpack item in one click instead of
+  // clicking Salvage on each one individually. Reuses the same busy-gate the Reroll/Reforge/
+  // Salvage buttons below already use, so it can't fire mid-craft/reroll/reforge either.
+  const topBusy=!!GF.crafting||!!GF.rerolling||!!GF.reforging;
+  root.appendChild(h("div",{class:"row gap",style:{marginBottom:"12px",flexWrap:"wrap"}},[
+    h("button",{disabled:topBusy,title:`Salvages every ${Balance.rarityDisplayName("Common")} item in your backpack in one click.`,onClick:()=>salvageAllGearOfRarity("Common",topBusy)},[`Salvage all ${Balance.rarityDisplayName("Common")} items`]),
+    h("button",{disabled:topBusy,title:`Salvages every ${Balance.rarityDisplayName("Uncommon")} item in your backpack in one click.`,onClick:()=>salvageAllGearOfRarity("Uncommon",topBusy)},[`Salvage all ${Balance.rarityDisplayName("Uncommon")} items`]),
+    h("button",{disabled:topBusy,title:`Salvages every ${Balance.rarityDisplayName("Rare")} item in your backpack in one click.`,onClick:()=>salvageAllGearOfRarity("Rare",topBusy)},[`Salvage all ${Balance.rarityDisplayName("Rare")} items`]),
+  ]));
 
   root.appendChild(h("div",{class:"row gap",style:{alignItems:"center"}},[
     h("h3",{style:{margin:"0"}},["Reroll Gear (uses materials)"]),
@@ -8433,7 +8523,7 @@ function screenBlacksmith(){
     // Blacksmith Guide page (v0.20.1 #19) for the same wording at greater length.
     root.appendChild(gearRow(inst,[
       h("button",{disabled:PS.materials<cost||PS.gold<goldCost||busy,title:"Rerolls every existing affix's VALUE only -- keeps the exact same stats, just re-rolls their numbers.",onClick:()=>rerollBlacksmithItem(inst.instance_id)},[GF.rerolling===inst.instance_id?"Rerolling...":`Reroll (${cost} mat, ${goldCost}g)`]),
-      h("button",{disabled:PS.materials<reforgeMatCost||PS.gold<reforgeGoldCost||busy,title:"Replaces ONE existing affix's STAT with a fresh one (never a duplicate already on the item), rolling its value from scratch. Every other affix stays untouched.",onClick:()=>reforgeBlacksmithItem(inst.instance_id)},[GF.reforging===inst.instance_id?"Reforging...":`Reforge (${reforgeMatCost} mat, ${reforgeGoldCost}g)`]),
+      h("button",{disabled:PS.materials<reforgeMatCost||PS.gold<reforgeGoldCost||busy,title:"Lets you pick ONE existing affix to replace with a fresh, different stat (never a duplicate already on the item), rolling its value from scratch. Every other affix stays untouched.",onClick:()=>openReforgeStatPicker(inst)},[GF.reforging===inst.instance_id?"Reforging...":`Reforge (${reforgeMatCost} mat, ${reforgeGoldCost}g)`]),
       h("button",{disabled:busy,title:"Breaks the item down for materials outright. Cannot be undone.",onClick:()=>{PS.salvageGear(inst.instance_id);autosave();render();}},[`Salvage (+${Balance.salvageValue(inst.tier,slots)} mat)`]),
     ]));
   }
@@ -9994,6 +10084,10 @@ function legacyGearSection(){
 // Kept brief on purpose -- players don't need the internal blow-by-blow, just the
 // highlights per version, most recent first.
 const CHANGELOG=[
+  { version:"v0.20.2", notes:[
+    "Blacksmith Reforge correction: you now pick exactly which stat on an item gets replaced (from a popup listing its stats), instead of the game picking one at random. The new stat and its value are still rolled by the game, same as before.",
+    "Blacksmith: added three \"Salvage all\" buttons (Crude / Common / Magical) that salvage every backpack item of that rarity in one click.",
+  ]},
   { version:"v0.20.1", notes:[
     "Equipped gear doll simplified: item names removed from the doll itself (its tooltip now lives on the icon), and the Character Sheet's Equipped and Backpack tabs merged into one combined \"Inventory\" tab, which also absorbed the separate Consumables tab alongside Herbs.",
     "Character Sheet Overview tab: added spacing above the Shrine Bonuses panel, and gave the Attributes/Skill Bonuses/Gear Bonuses section titles consistent spacing, a divider, and uppercase styling. The guide-link buttons moved out of the header entirely, and Back moved to the top-right.",
@@ -10740,7 +10834,7 @@ function screenBlacksmithGuide(){
   root.appendChild(h("h3",{},["The Three Services"]));
   root.appendChild(h("div",{class:"muted",style:{marginBottom:"6px"}},[h("b",{},["Salvage"]),": breaks the item down for materials outright. It's gone afterward -- use this on gear you don't want to keep improving."]));
   root.appendChild(h("div",{class:"muted",style:{marginBottom:"6px"}},[h("b",{},["Reroll"]),": keeps every existing affix STAT exactly as-is, and only re-rolls each one's numeric VALUE. Good when you like what the item rolled (e.g. damage + crit on a weapon) but want a shot at higher numbers."]));
-  root.appendChild(h("div",{class:"muted",style:{marginBottom:"10px"}},[h("b",{},["Reforge"]),": picks exactly ONE of the item's existing affixes at random and replaces its STAT entirely with a fresh one (never a duplicate of a stat already on the item), rolling that new stat's value from scratch. Every other affix on the item is untouched. Good when an item's rarity/tier is great but one of its rolled stats doesn't fit your build."]));
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"10px"}},[h("b",{},["Reforge"]),": lets YOU pick exactly ONE of the item's existing affixes to replace, and swaps its STAT entirely for a fresh one (never a duplicate of a stat already on the item), rolling that new stat's value from scratch. Every other affix on the item is untouched. Good when an item's rarity/tier is great but one of its rolled stats doesn't fit your build -- you choose which stat goes, the game decides what replaces it."]));
 
   root.appendChild(h("h3",{},["Cost Formulas"]));
   root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},[

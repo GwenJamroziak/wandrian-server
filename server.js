@@ -1113,20 +1113,27 @@ app.post("/api/blacksmith/reroll", requireAuth, (req, res) => {
 
 // v0.20.1 (#17): "Reforge" -- unlike Reroll (keeps every existing affix's STAT, only
 // rerolls their numeric values), Reforge changes exactly ONE existing normal affix's STAT
-// to a fresh, different, randomly-chosen stat (with a freshly rolled value), leaving every
-// other affix on the item completely untouched. Costs considerably more than Reroll (6x
-// Reroll's material cost, 12x the item's sell value in gold) since it can fix a bad-stat
-// roll entirely, not just a bad-VALUE roll. Same server-authoritative pattern as Reroll --
-// the server picks both which affix gets replaced and what it becomes; a modified client
-// can only ask for a reforge, never dictate its outcome.
+// to a fresh, different stat (with a freshly rolled value), leaving every other affix on
+// the item completely untouched. Costs considerably more than Reroll (6x Reroll's material
+// cost, 12x the item's sell value in gold) since it can fix a bad-stat roll entirely, not
+// just a bad-VALUE roll.
+// v0.20.1 CORRECTION: the WHICH-affix decision used to be random too -- Gwen's actual spec
+// is that the PLAYER picks which existing affix gets replaced (via the new affix_index
+// param, an index into the item's own affixes array), while the server still owns what the
+// new stat/value becomes. A modified client can name a target slot but can never dictate
+// or predict the reforge's actual outcome.
 app.post("/api/blacksmith/reforge", requireAuth, (req, res) => {
   const slot = Number(req.body?.slot);
   const instanceId = req.body?.instance_id;
+  const affixIndex = Number(req.body?.affix_index);
   if (!Number.isInteger(slot) || slot < 0 || slot >= MAX_CHARACTER_SLOTS) {
     return res.status(400).json({ error: "Invalid slot." });
   }
   if (typeof instanceId !== "string" || !instanceId) {
     return res.status(400).json({ error: "Invalid instance_id." });
+  }
+  if (!Number.isInteger(affixIndex) || affixIndex < 0) {
+    return res.status(400).json({ error: "Invalid affix_index." });
   }
 
   const row = db.prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?").get(req.account.id, slot);
@@ -1155,11 +1162,18 @@ app.post("/api/blacksmith/reforge", requireAuth, (req, res) => {
     return res.status(400).json({ error: `Not enough gold -- this reforge costs ${goldCost}g.` });
   }
 
-  // Pick exactly one NORMAL affix (never the rare fixed-value "eyesight" bonus roll --
-  // there's nothing to "reforge" about a flat +2 that never varies) to replace. An item
-  // always has at least 1 normal affix (even Common-rarity's 1 slot), so this is safe.
-  const normalIdx = inst.affixes.map((a, i) => (a.stat !== "eyesight" ? i : -1)).filter((i) => i !== -1);
-  const targetPos = normalIdx[Math.floor(Math.random() * normalIdx.length)];
+  // v0.20.1 CORRECTION: the target affix is now the PLAYER's choice (affixIndex), not a
+  // random pick -- but it's still validated server-side exactly like every other
+  // player-supplied index in this codebase: must be a real position on THIS item, and must
+  // not be the rare fixed-value "eyesight" bonus roll (there's nothing to "reforge" about a
+  // flat +2 that never varies, same exclusion the old random-pick logic already enforced).
+  if (affixIndex >= inst.affixes.length) {
+    return res.status(400).json({ error: "That stat slot doesn't exist on this item." });
+  }
+  if (inst.affixes[affixIndex].stat === "eyesight") {
+    return res.status(400).json({ error: "That bonus can't be reforged." });
+  }
+  const targetPos = affixIndex;
 
   // The new stat must be one the item doesn't already carry (matches IF.generate()'s own
   // no-duplicate-stat rule -- a legitimate item never has the same stat twice) -- pick
