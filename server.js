@@ -307,11 +307,12 @@ function nowIso() {
   return new Date().toISOString();
 }
 // v0.16: Auction House listing fee -- Gwen's spec is "1g for items priced 1-99g, 2g for
-// 100-199, 3g for 200-299, and continue like that", i.e. +1g of fee per 100g bracket the
-// asking price falls into. Charged server-side (not just checked/deducted on the client)
-// so a modified client can't post free listings -- see its use in POST /api/auction below.
+// v0.21.1 (#3): simplified to a flat 1% commission on the asking price (was a tiered "+1g
+// per 100g bracket" fee), floored at 1g so a listing is never effectively free. Charged
+// server-side (not just checked/deducted on the client) so a modified client can't post
+// free listings -- see its use in POST /api/auction below.
 function auctionListingFee(price) {
-  return Math.floor(price / 100) + 1;
+  return Math.max(1, Math.ceil(price * 0.01));
 }
 
 function createAccount(username, passcode, email) {
@@ -936,7 +937,7 @@ const ITEM_TIER_MAX = 5;
 const ITEM_AFFIX_POOL = [
   "damage", "hp", "crit", "armor", "regen", "gold_find", "xp_find", "stamina_max",
   "strength", "dexterity", "vitality", "intelligence", "poison_resist", "magic_find",
-  "block_chance", "flee_chance", "crit_multiplier",
+  "block_chance", "flee_chance", "crit_multiplier", "attack_speed",
 ];
 // v0.19.1 (#15): xp_find raised from a T1 max of 1 back up to 5 (5/10/15/20/25% across
 // T1-T5) -- mirrors index.html's Balance.AFFIX_TIER1_MAX. Still well within
@@ -958,6 +959,11 @@ const ITEM_AFFIX_TIER1_MAX = {
   // consumed (see combatGetCritMultiplierBonus() below) to land on Gwen's exact spec of
   // +0.10/0.20/0.30/0.40/0.50. Must stay in sync with index.html's Balance.AFFIX_TIER1_MAX.
   crit_multiplier: 10,
+  // v0.21.1 (#11): new "attack_speed" gear affix -- a % increase to how many attacks/sec the
+  // player can land (see combatGetAttackSpeed() below), stored as a plain integer 5-25 across
+  // T1-T5 (5/10/15/20/25%) through the same machinery as every other affix. Must stay in
+  // sync with index.html's Balance.AFFIX_TIER1_MAX.
+  attack_speed: 5,
 };
 // index.html's RARITY_TABLE's `slots` field, keyed by the RARITY_TABLE `name` (internal
 // name, not the player-facing RARITY_DISPLAY_NAMES wording -- items store the internal
@@ -1382,6 +1388,26 @@ db.exec(`
   );
 `);
 
+// v0.21.1 (#9/#10/#12): attack-speed system -- each combat session freezes the player's and
+// monster's own attacks/sec at the moment the fight starts (player_attack_speed from gear,
+// monster_attack_speed from area level), and last_monster_hit_at (epoch ms) is the server
+// clock combatCatchUpMonsterHits() advances every request so the monster keeps landing hits
+// over real elapsed time, not just once per player action. DEFAULT 0 on last_monster_hit_at
+// is harmless -- every session that reaches this column already has a real value written at
+// creation time (POST /api/combat/start), and no code reads this column for a session created
+// before this migration (those sessions are long since resolved/abandoned, since a
+// combat_sessions row only ever lives for one active fight). Kept here, right after this
+// table's own CREATE TABLE, rather than in the big migration loop up top -- that loop runs
+// before combat_sessions exists yet on a fresh database, which would make every ALTER TABLE
+// here silently fail against a nonexistent table.
+for (const stmt of [
+  "ALTER TABLE combat_sessions ADD COLUMN player_attack_speed REAL NOT NULL DEFAULT 1.0",
+  "ALTER TABLE combat_sessions ADD COLUMN monster_attack_speed REAL NOT NULL DEFAULT 1.0",
+  "ALTER TABLE combat_sessions ADD COLUMN last_monster_hit_at INTEGER NOT NULL DEFAULT 0",
+]) {
+  try { db.exec(stmt); } catch (e) { /* column already exists, fine */ }
+}
+
 // Full combat-relevant subset of index.html's CLASSES table (adds chain/damage/crit/armor/
 // regen on top of what TRIAL_CLASSES above already carries -- kept as its own object rather
 // than extending TRIAL_CLASSES so the already-shipped, already-tested Trial endpoint can
@@ -1556,6 +1582,20 @@ const CB = {
   EYESIGHT_AFFIX_CHANCE: 0.03,
   STAMINA_MAX_BASE: 100.0,
   AREA_LEVEL_MAX: 100,
+  // v0.21.1 (#9/#10/#11/#12): attack-speed system. Both player and monster default to
+  // exactly 1 attack/sec; the player's own rate only rises via the new "attack_speed" gear
+  // affix (see combatGetAttackSpeed()), while a monster's rate climbs in breakpoints every 5
+  // area levels (see combatMonsterAttackSpeed()) -- same "every 5 levels" cadence Gwen's
+  // existing crit-multiplier scaling already uses, kept consistent on purpose. Must stay in
+  // sync with index.html's Balance.PLAYER_BASE_ATTACK_SPEED/MONSTER_BASE_ATTACK_SPEED/
+  // MONSTER_ATTACK_SPEED_PCT_PER_5_LEVELS.
+  PLAYER_BASE_ATTACK_SPEED: 1.0, MONSTER_BASE_ATTACK_SPEED: 0.5,
+  MONSTER_ATTACK_SPEED_PCT_PER_5_LEVELS: 5,
+  // Safety cap on how many "owed" monster hits a single request will ever resolve at once
+  // (e.g. a browser tab left open/suspended for hours) -- protects against a pathologically
+  // long catch-up loop; any hits beyond this cap are simply resolved on a LATER request
+  // instead of all at once.
+  MONSTER_CATCH_UP_MAX_HITS: 20,
 };
 
 function cbClampf(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
@@ -1787,6 +1827,19 @@ function combatGetMonsterCritChance(areaLevel) { return cbClampf(0.10 + (Math.ma
 // index.html's PS.getCritMultiplierBonus()/getCritMultiplierMax() exactly.
 function combatGetCritMultiplierBonus(data) { return combatGearBonus(data, "crit_multiplier") / 100.0; }
 function combatGetCritMultiplierMax(data) { return CB.CRIT_MULTIPLIER + combatGetCritMultiplierBonus(data); }
+// v0.21.1 (#11): the player's own attacks/sec -- base 1.0, increased by the "attack_speed"
+// gear affix (a plain % sum, same shape every other percentage-based gear stat uses). Drives
+// the client's mousedown hold-to-fire auto-repeat interval (see startCombatSession()'s
+// response, which echoes this back) -- mirrors index.html's PS.getAttackSpeed() exactly.
+function combatGetAttackSpeed(data) { return CB.PLAYER_BASE_ATTACK_SPEED * (1 + combatGearBonus(data, "attack_speed") / 100.0); }
+// v0.21.1 (#12): monster attack speed now scales in breakpoints every 5 area levels (same
+// cadence as the existing crit-multiplier scaling) -- a level 25 monster (5 full brackets)
+// attacks 25% faster than the level-1 default of 1/sec. Mirrors index.html's
+// Balance.monsterAttackSpeed() exactly.
+function combatMonsterAttackSpeed(areaLevel) {
+  const brackets = Math.floor(Math.max(1, areaLevel || 1) / 5);
+  return CB.MONSTER_BASE_ATTACK_SPEED * (1 + brackets * (CB.MONSTER_ATTACK_SPEED_PCT_PER_5_LEVELS / 100));
+}
 // v0.21 (#9): monsters also scale their crit MULTIPLIER ceiling in breakpoints every 5
 // levels: +0.00/0.5/1.0/1.5/2.0/2.5, starting from Lv1 -- mirrors index.html's
 // Balance.monsterCritMultiplierBonus()/monsterCritMultiplierMax() exactly (see that
@@ -2054,6 +2107,14 @@ function saveCharacterRow(accountId, slot, data) {
 function getCombatSession(accountId, id) {
   return db.prepare("SELECT * FROM combat_sessions WHERE id = ? AND account_id = ?").get(id, accountId);
 }
+// v0.21.2: looks up an account's own active fight WITHOUT knowing its session id -- used by the
+// server-driven combat-tick pusher (see "chat over WebSocket" below), which only knows which
+// ACCOUNTS have a live socket, not which fight (if any) each one is currently in. An account can
+// only ever have one active session at a time (POST /api/combat/start deletes any pre-existing
+// active row for that account+slot before inserting a new one), so this is unambiguous.
+function getActiveCombatSessionForAccount(accountId) {
+  return db.prepare("SELECT * FROM combat_sessions WHERE account_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1").get(accountId);
+}
 function updateCombatSession(id, fields) {
   const keys = Object.keys(fields);
   if (keys.length === 0) return;
@@ -2087,6 +2148,40 @@ function combatResolveMonsterTurn(data, session, invulnActiveThisRound) {
   let fatal = false;
   if (data.current_hp < 1) { data.current_hp = 0; fatal = true; }
   return { invulnerable: false, blocked: false, damage: Math.round(mdmg), crit, crit_mult: critMult, fatal };
+}
+
+// v0.21.1 (#9): continuous mob attacks. Resolves however many monster hits are "owed" since
+// session.last_monster_hit_at, based on REAL elapsed wall-clock time and this session's own
+// monster_attack_speed -- this is what makes the monster keep hitting the player once combat
+// is initiated even if the player never clicks Attack again (an idle stretch, or simply the
+// time between requests), on top of the existing guaranteed once-per-attack counter-hit
+// combatResolveMonsterTurn() already provides. Deliberately does NOT touch
+// combatTickCombatRoundBuffs()'s round-based shrine-buff countdown (invuln/quad damage/magic
+// find) -- those still tick exactly once per player-initiated action (attack/flee/use-item),
+// not once per elapsed-time catch-up hit, so a shield doesn't drain faster just because the
+// player paused. In practice this resolves 0 hits on every fast, actively-played round (and
+// in every automated test, which calls endpoints back-to-back with near-zero real elapsed
+// time) -- it only ever adds hits once genuine wall-clock seconds have passed since the last
+// server round-trip, exactly the "continuous" behavior Gwen asked for without disturbing the
+// existing once-per-attack guarantee everything else (and every existing test) already
+// depends on.
+function combatCatchUpMonsterHits(session, data, invulnActiveThisRound) {
+  const now = Date.now();
+  const lastAt = session.last_monster_hit_at || now;
+  const speed = session.monster_attack_speed || CB.MONSTER_BASE_ATTACK_SPEED;
+  const intervalMs = 1000 / Math.max(0.01, speed);
+  const elapsedMs = Math.max(0, now - lastAt);
+  const dueHits = Math.min(Math.floor(elapsedMs / intervalMs), CB.MONSTER_CATCH_UP_MAX_HITS);
+  const ticks = [];
+  let fatal = false;
+  for (let i = 0; i < dueHits; i++) {
+    if ((data.current_hp || 0) <= 0) { fatal = true; break; }
+    const t = combatResolveMonsterTurn(data, session, invulnActiveThisRound);
+    ticks.push(t);
+    if (t.fatal) { fatal = true; break; }
+  }
+  const newLastHitAt = dueHits > 0 ? lastAt + dueHits * intervalMs : lastAt;
+  return { ticks, newLastHitAt, fatal };
 }
 
 app.post("/api/combat/start", requireAuth, (req, res) => {
@@ -2141,16 +2236,26 @@ app.post("/api/combat/start", requireAuth, (req, res) => {
 
   const id = crypto.randomBytes(16).toString("hex");
   const now = nowIso();
+  // v0.21.1 (#9/#10): this session's own attack-speed pair, rolled once at fight-start and
+  // held fixed for the fight's duration (re-gearing mid-fight doesn't retroactively speed up
+  // an in-progress encounter) -- combatGetAttackSpeed() folds in the player's "attack_speed"
+  // gear affix, combatMonsterAttackSpeed() the area-level breakpoint scaling. last_monster_hit_at
+  // seeds the elapsed-time catch-up clock (see combatCatchUpMonsterHits()) at "now" so the very
+  // first /attack or /tick call owes nothing yet -- the monster's first real hit is still either
+  // the firstStrike roll above or the guaranteed counter-attack on the player's first action.
+  const playerAttackSpeed = combatGetAttackSpeed(data);
+  const monsterAttackSpeed = combatMonsterAttackSpeed(areaLevel);
+  const lastMonsterHitAt = Date.now();
   db.prepare(
-    `INSERT INTO combat_sessions (id, account_id, slot, monster_id, name, area_level, max_hp, hp, dmg_min, dmg_max, xp, gold_min, gold_max, loot_table, is_guardian, is_roamer, status, created_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?, ?)`
-  ).run(id, req.account.id, slot, monster.id, name, areaLevel, maxHp, maxHp, dmgMin, dmgMax, xp, monster.gold_min, monster.gold_max, monster.loot_table, isGuardian ? 1 : 0, isRoamer ? 1 : 0, now, now);
+    `INSERT INTO combat_sessions (id, account_id, slot, monster_id, name, area_level, max_hp, hp, dmg_min, dmg_max, xp, gold_min, gold_max, loot_table, is_guardian, is_roamer, status, created_at, updated_at, player_attack_speed, monster_attack_speed, last_monster_hit_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?, ?, ?, ?, ?)`
+  ).run(id, req.account.id, slot, monster.id, name, areaLevel, maxHp, maxHp, dmgMin, dmgMax, xp, monster.gold_min, monster.gold_max, monster.loot_table, isGuardian ? 1 : 0, isRoamer ? 1 : 0, now, now, playerAttackSpeed, monsterAttackSpeed, lastMonsterHitAt);
 
   const saveSeq = saveCharacterRow(req.account.id, slot, data);
   res.json({
     ok: true, session_id: id,
-    monster: { name, hp: maxHp, max_hp: maxHp },
-    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
+    monster: { name, hp: maxHp, max_hp: maxHp, attack_speed: monsterAttackSpeed },
+    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data), attack_speed: playerAttackSpeed, ...combatRoundBuffsPayload(data) },
     first_strike: firstStrike, log, _save_seq: saveSeq,
   });
 });
@@ -2165,6 +2270,26 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
   combatSettleAllHeals(data);
   const quadActiveThisRound = combatHasQuadDamage(data);
   const invulnActiveThisRound = combatIsInvulnerable(data);
+
+  // v0.21.1 (#9): resolve any monster hits owed from real elapsed wall-clock time BEFORE this
+  // round's own action -- see combatCatchUpMonsterHits(). On a fast, actively-played round (and
+  // in every existing automated test, which calls endpoints back-to-back with near-zero real
+  // elapsed time) this resolves 0 ticks and changes nothing below. If catch-up alone is fatal,
+  // the fight ends here -- the player's own swing and the guaranteed counter-attack below never
+  // happen, matching how a real continuously-attacking monster would have already won.
+  const catchUp = combatCatchUpMonsterHits(session, data, invulnActiveThisRound);
+  if (catchUp.fatal) {
+    updateCombatSession(session.id, { status: "lost", last_monster_hit_at: catchUp.newLastHitAt });
+    const saveSeq = saveCharacterRow(req.account.id, session.slot, data);
+    return res.json({
+      ok: true, mob_blocked: false, player_hit: null, weapon_skill: null,
+      monster: { hp: session.hp, max_hp: session.max_hp, defeated: false },
+      kill: null, monster_turn: null, monster_ticks: catchUp.ticks,
+      player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), ...combatRoundBuffsPayload(data) },
+      fatal: true, _save_seq: saveSeq,
+    });
+  }
+
   combatTickCombatRoundBuffs(data);
 
   const mobBlocked = Math.random() < combatMobBlockChance(session.area_level);
@@ -2276,13 +2401,13 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
       total_kills: data.total_kills,
       is_guardian: !!session.is_guardian, is_roamer: !!session.is_roamer,
     };
-    updateCombatSession(session.id, { hp: 0, status: "won" });
+    updateCombatSession(session.id, { hp: 0, status: "won", last_monster_hit_at: catchUp.newLastHitAt });
   } else {
     if (!(!mobBlocked && monsterDefeated)) {
       monsterTurn = combatResolveMonsterTurn(data, session, invulnActiveThisRound);
       fatal = monsterTurn.fatal;
     }
-    updateCombatSession(session.id, { hp: newMonsterHp });
+    updateCombatSession(session.id, { hp: newMonsterHp, last_monster_hit_at: catchUp.newLastHitAt });
   }
 
   if (fatal) updateCombatSession(session.id, { status: "lost" });
@@ -2290,7 +2415,7 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
   res.json({
     ok: true, mob_blocked: mobBlocked, player_hit: playerHit, weapon_skill: weaponSkill,
     monster: { hp: Math.max(0, newMonsterHp), max_hp: session.max_hp, defeated: monsterDefeated },
-    kill, monster_turn: monsterTurn,
+    kill, monster_turn: monsterTurn, monster_ticks: catchUp.ticks,
     player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), ...combatRoundBuffsPayload(data) },
     fatal, _save_seq: saveSeq,
   });
@@ -2304,6 +2429,21 @@ app.post("/api/combat/:sessionId/flee", requireAuth, (req, res) => {
   if (!data) return res.status(404).json({ error: "No character in that slot." });
 
   combatSettleAllHeals(data);
+  // v0.21.1 (#9): elapsed-time catch-up applies to fleeing too -- deciding whether to run
+  // still costs real wall-clock time the monster keeps swinging through. Captured before the
+  // fail-roll so a fatal catch-up ends the fight before the flee attempt itself resolves.
+  const invulnActiveThisRound = combatIsInvulnerable(data);
+  const catchUp = combatCatchUpMonsterHits(session, data, invulnActiveThisRound);
+  if (catchUp.fatal) {
+    updateCombatSession(session.id, { status: "lost", last_monster_hit_at: catchUp.newLastHitAt });
+    const saveSeq = saveCharacterRow(req.account.id, session.slot, data);
+    return res.json({
+      ok: true, failed: null, monster_turn: null, monster_ticks: catchUp.ticks, fatal: true,
+      player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), ...combatRoundBuffsPayload(data) },
+      _save_seq: saveSeq,
+    });
+  }
+
   // v0.21 (#6): "flee_chance" gear affix reduces the fail chance (can drive it to 0 or below,
   // which Math.max clamps to 0 -- an always-succeed flee -- per Gwen's exact spec).
   const failed = Math.random() < Math.max(0, CB.FLEE_FAIL_CHANCE - combatGetFleeChanceBonus(data));
@@ -2312,19 +2452,19 @@ app.post("/api/combat/:sessionId/flee", requireAuth, (req, res) => {
     // v0.20 BUG FIX: a failed flee attempt still gives the monster a turn (see
     // combatResolveMonsterTurn() below) -- that's exactly the kind of round Touch of
     // Unicorn/Quad Damage/Magic Find are meant to count against, so it needs to tick the
-    // same as a real attack does. Captured BEFORE the tick so a shield that's about to
-    // expire still blocks THIS round's hit, matching /attack's exact ordering.
-    const invulnActiveThisRound = combatIsInvulnerable(data);
+    // same as a real attack does. invulnActiveThisRound was captured BEFORE the tick (above,
+    // ahead of the catch-up call now too) so a shield that's about to expire still blocks
+    // THIS round's hit, matching /attack's exact ordering.
     combatTickCombatRoundBuffs(data);
     monsterTurn = combatResolveMonsterTurn(data, session, invulnActiveThisRound);
     fatal = monsterTurn.fatal;
-    if (fatal) updateCombatSession(session.id, { status: "lost" });
+    updateCombatSession(session.id, fatal ? { status: "lost", last_monster_hit_at: catchUp.newLastHitAt } : { last_monster_hit_at: catchUp.newLastHitAt });
   } else {
-    updateCombatSession(session.id, { status: "fled" });
+    updateCombatSession(session.id, { status: "fled", last_monster_hit_at: catchUp.newLastHitAt });
   }
   const saveSeq = saveCharacterRow(req.account.id, session.slot, data);
   res.json({
-    ok: true, failed, monster_turn: monsterTurn, fatal,
+    ok: true, failed, monster_turn: monsterTurn, monster_ticks: catchUp.ticks, fatal,
     player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), ...combatRoundBuffsPayload(data) },
     _save_seq: saveSeq,
   });
@@ -2343,6 +2483,22 @@ app.post("/api/combat/:sessionId/use-item", requireAuth, (req, res) => {
   if (!((data.consumables && data.consumables[itemId]) > 0)) return res.status(400).json({ error: "You don't have that item." });
 
   combatSettleAllHeals(data);
+
+  // v0.21.1 (#9): elapsed-time catch-up applies here too -- opening the item menu and picking
+  // a potion still costs real wall-clock time the monster keeps swinging through.
+  const invulnActiveThisRound = combatIsInvulnerable(data);
+  const catchUp = combatCatchUpMonsterHits(session, data, invulnActiveThisRound);
+  if (catchUp.fatal) {
+    updateCombatSession(session.id, { status: "lost", last_monster_hit_at: catchUp.newLastHitAt });
+    const saveSeq = saveCharacterRow(req.account.id, session.slot, data);
+    return res.json({
+      ok: true, monster_ticks: catchUp.ticks, fatal: true,
+      player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
+      _save_seq: saveSeq,
+    });
+  }
+  updateCombatSession(session.id, { last_monster_hit_at: catchUp.newLastHitAt });
+
   let used = false;
   const totalTicks = CB.POTION_HEAL_DURATION_MS; // durationMs directly, rate = amount/durationMs
   if ((item.heal_amount || 0) > 0) {
@@ -2366,14 +2522,44 @@ app.post("/api/combat/:sessionId/use-item", requireAuth, (req, res) => {
     data.poison_pct_per_sec = 0;
     used = true;
   }
-  if (!used) return res.status(400).json({ error: "That wouldn't do anything right now." });
+  if (!used) {
+    // Catch-up may still have damaged the player even though the item itself was a no-op
+    // (e.g. already at full HP) -- persist that regardless of the 400 below.
+    saveCharacterRow(req.account.id, session.slot, data);
+    return res.status(400).json({ error: "That wouldn't do anything right now." });
+  }
 
   const rem = (data.consumables[itemId] || 0) - 1;
   if (rem > 0) data.consumables[itemId] = rem; else delete data.consumables[itemId];
 
   const saveSeq = saveCharacterRow(req.account.id, session.slot, data);
   res.json({
-    ok: true,
+    ok: true, monster_ticks: catchUp.ticks,
+    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
+    _save_seq: saveSeq,
+  });
+});
+
+// v0.21.1 (#9): idle-polling endpoint -- the client calls this periodically while a fight is
+// active but the player isn't taking an action (e.g. reading the combat log, deciding what to
+// do), purely so the elapsed-time catch-up (see combatCatchUpMonsterHits()) can land damage in
+// real time instead of only being discovered on the player's next click.
+app.post("/api/combat/:sessionId/tick", requireAuth, (req, res) => {
+  const session = getCombatSession(req.account.id, req.params.sessionId);
+  if (!session) return res.status(404).json({ error: "That fight no longer exists." });
+  if (session.status !== "active") return res.status(409).json({ error: "That fight has already ended." });
+  const data = loadCharacterRow(req.account.id, session.slot);
+  if (!data) return res.status(404).json({ error: "No character in that slot." });
+
+  combatSettleAllHeals(data);
+  const invulnActiveThisRound = combatIsInvulnerable(data);
+  const catchUp = combatCatchUpMonsterHits(session, data, invulnActiveThisRound);
+  updateCombatSession(session.id, catchUp.fatal ? { status: "lost", last_monster_hit_at: catchUp.newLastHitAt } : { last_monster_hit_at: catchUp.newLastHitAt });
+
+  const saveSeq = saveCharacterRow(req.account.id, session.slot, data);
+  res.json({
+    ok: true, monster_ticks: catchUp.ticks, fatal: catchUp.fatal,
+    monster: { hp: session.hp, max_hp: session.max_hp },
     player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
     _save_seq: saveSeq,
   });
@@ -3035,89 +3221,129 @@ app.get("/api/admin/legacy-gear", requireAuth, requireAdmin, (req, res) => {
 // stat boost. Re-fetches the item fresh from its current storage right before mutating it
 // (not the copy the admin's list view was built from), so a player who moved/sold/re-rolled
 // the item in the meantime can't have it clobbered out from under them.
-app.post("/api/admin/legacy-gear/rescale", requireAuth, requireAdmin, (req, res) => {
-  const location = req.body && req.body.location;
+// v0.21.1 (#1): shared by both the single-item rescale endpoint and the new bulk "Update All"
+// endpoint below -- does the actual find/validate/rescale/persist work for exactly one
+// location, but deliberately does NOT log or broadcast a chat message itself, so the bulk
+// path can rescale many items and still only ever post ONE chat announcement at the end.
+// Throws an Error with a `.httpStatus` property (and the same message the old inline
+// per-kind checks used) on any failure, so callers can respond/skip consistently.
+function rescaleLegacyGearAtLocation(location) {
   if (!location || typeof location !== "object" || typeof location.instance_id !== "string" || !location.instance_id) {
-    return res.status(400).json({ error: "Invalid location." });
+    throw Object.assign(new Error("Invalid location."), { httpStatus: 400 });
   }
   const { kind, instance_id } = location;
   const accountId = Number(location.account_id);
-  if (!Number.isInteger(accountId)) return res.status(400).json({ error: "Invalid account." });
+  if (!Number.isInteger(accountId)) throw Object.assign(new Error("Invalid account."), { httpStatus: 400 });
 
   if (kind === "equipped" || kind === "backpack") {
     const slot = Number(location.slot);
-    if (!Number.isInteger(slot) || slot < 0 || slot >= MAX_CHARACTER_SLOTS) return res.status(400).json({ error: "Invalid slot." });
+    if (!Number.isInteger(slot) || slot < 0 || slot >= MAX_CHARACTER_SLOTS) throw Object.assign(new Error("Invalid slot."), { httpStatus: 400 });
     const row = db.prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?").get(accountId, slot);
-    if (!row) return res.status(404).json({ error: "Character not found." });
+    if (!row) throw Object.assign(new Error("Character not found."), { httpStatus: 404 });
     let data;
-    try { data = JSON.parse(row.data); } catch (e) { return res.status(500).json({ error: "Corrupt character data." }); }
+    try { data = JSON.parse(row.data); } catch (e) { throw Object.assign(new Error("Corrupt character data."), { httpStatus: 500 }); }
 
     let target, applyBack;
     if (kind === "equipped") {
       const equipSlot = location.equip_slot;
       const inst = data.equipped && data.equipped[equipSlot];
-      if (!inst || inst.instance_id !== instance_id) return res.status(404).json({ error: "That item is no longer there (equipped slot changed)." });
+      if (!inst || inst.instance_id !== instance_id) throw Object.assign(new Error("That item is no longer there (equipped slot changed)."), { httpStatus: 404 });
       target = inst;
       applyBack = (rescaled) => { data.equipped[equipSlot] = rescaled; };
     } else {
       const list = Array.isArray(data.gear_instances) ? data.gear_instances : [];
       const idx = list.findIndex((i) => i && i.instance_id === instance_id);
-      if (idx === -1) return res.status(404).json({ error: "That item is no longer in the backpack." });
+      if (idx === -1) throw Object.assign(new Error("That item is no longer in the backpack."), { httpStatus: 404 });
       target = list[idx];
       applyBack = (rescaled) => { list[idx] = rescaled; data.gear_instances = list; };
     }
 
     const bad = legacyGearOutOfSpecAffixes(target);
-    if (!bad.length) return res.status(409).json({ error: "This item is already within current spec -- nothing to rescale." });
+    if (!bad.length) throw Object.assign(new Error("This item is already within current spec -- nothing to rescale."), { httpStatus: 409 });
     const rescaled = legacyGearRescale(target);
     applyBack(rescaled);
     db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(
       JSON.stringify(data), nowIso(), accountId, slot
     );
-    console.log(`[admin] ${req.account.username} rescaled a legacy gear item (${kind}) for account_id=${accountId} slot=${slot}`);
-    broadcastSystemMessage("An admin recalibrated an out-of-date item to match current game balance.");
-    return res.json({ ok: true, before: target, after: rescaled });
+    console.log(`[admin] rescaled a legacy gear item (${kind}) for account_id=${accountId} slot=${slot}`);
+    return { kind, before: target, after: rescaled };
   }
 
   if (kind === "vault") {
     const row = db.prepare("SELECT data FROM vaults WHERE account_id = ?").get(accountId);
-    if (!row) return res.status(404).json({ error: "Vault not found." });
+    if (!row) throw Object.assign(new Error("Vault not found."), { httpStatus: 404 });
     let items;
-    try { items = JSON.parse(row.data); } catch (e) { return res.status(500).json({ error: "Corrupt vault data." }); }
-    if (!Array.isArray(items)) return res.status(500).json({ error: "Corrupt vault data." });
+    try { items = JSON.parse(row.data); } catch (e) { throw Object.assign(new Error("Corrupt vault data."), { httpStatus: 500 }); }
+    if (!Array.isArray(items)) throw Object.assign(new Error("Corrupt vault data."), { httpStatus: 500 });
     const idx = items.findIndex((e) => e && e.kind === "gear" && e.inst && e.inst.instance_id === instance_id);
-    if (idx === -1) return res.status(404).json({ error: "That item is no longer in the vault." });
+    if (idx === -1) throw Object.assign(new Error("That item is no longer in the vault."), { httpStatus: 404 });
     const target = items[idx].inst;
     const bad = legacyGearOutOfSpecAffixes(target);
-    if (!bad.length) return res.status(409).json({ error: "This item is already within current spec -- nothing to rescale." });
+    if (!bad.length) throw Object.assign(new Error("This item is already within current spec -- nothing to rescale."), { httpStatus: 409 });
     const rescaled = legacyGearRescale(target);
     items[idx] = Object.assign({}, items[idx], { inst: rescaled });
     db.prepare("UPDATE vaults SET data = ?, updated_at = ?, version = version + 1 WHERE account_id = ?").run(
       JSON.stringify(items), nowIso(), accountId
     );
-    console.log(`[admin] ${req.account.username} rescaled a legacy gear item (vault) for account_id=${accountId}`);
-    broadcastSystemMessage("An admin recalibrated an out-of-date item to match current game balance.");
-    return res.json({ ok: true, before: target, after: rescaled });
+    console.log(`[admin] rescaled a legacy gear item (vault) for account_id=${accountId}`);
+    return { kind, before: target, after: rescaled };
   }
 
   if (kind === "auction") {
     const listingId = Number(location.listing_id);
-    if (!Number.isInteger(listingId)) return res.status(400).json({ error: "Invalid listing." });
+    if (!Number.isInteger(listingId)) throw Object.assign(new Error("Invalid listing."), { httpStatus: 400 });
     const row = db.prepare("SELECT item_json FROM auction_listings WHERE id = ? AND type = 'gear'").get(listingId);
-    if (!row || !row.item_json) return res.status(404).json({ error: "Listing not found." });
+    if (!row || !row.item_json) throw Object.assign(new Error("Listing not found."), { httpStatus: 404 });
     let target;
-    try { target = JSON.parse(row.item_json); } catch (e) { return res.status(500).json({ error: "Corrupt listing data." }); }
-    if (target.instance_id !== instance_id) return res.status(404).json({ error: "That listing no longer holds the expected item." });
+    try { target = JSON.parse(row.item_json); } catch (e) { throw Object.assign(new Error("Corrupt listing data."), { httpStatus: 500 }); }
+    if (target.instance_id !== instance_id) throw Object.assign(new Error("That listing no longer holds the expected item."), { httpStatus: 404 });
     const bad = legacyGearOutOfSpecAffixes(target);
-    if (!bad.length) return res.status(409).json({ error: "This item is already within current spec -- nothing to rescale." });
+    if (!bad.length) throw Object.assign(new Error("This item is already within current spec -- nothing to rescale."), { httpStatus: 409 });
     const rescaled = legacyGearRescale(target);
     db.prepare("UPDATE auction_listings SET item_json = ? WHERE id = ?").run(JSON.stringify(rescaled), listingId);
-    console.log(`[admin] ${req.account.username} rescaled a legacy gear item (auction listing #${listingId})`);
-    broadcastSystemMessage("An admin recalibrated an out-of-date item to match current game balance.");
-    return res.json({ ok: true, before: target, after: rescaled });
+    console.log(`[admin] rescaled a legacy gear item (auction listing #${listingId})`);
+    return { kind, before: target, after: rescaled };
   }
 
-  return res.status(400).json({ error: "Invalid location kind." });
+  throw Object.assign(new Error("Invalid location kind."), { httpStatus: 400 });
+}
+
+app.post("/api/admin/legacy-gear/rescale", requireAuth, requireAdmin, (req, res) => {
+  const location = req.body && req.body.location;
+  try {
+    const result = rescaleLegacyGearAtLocation(location);
+    console.log(`[admin] ${req.account.username} rescaled a legacy gear item (${result.kind})`);
+    broadcastSystemMessage("An admin recalibrated an out-of-date item to match current game balance.");
+    return res.json({ ok: true, before: result.before, after: result.after });
+  } catch (e) {
+    return res.status(e.httpStatus || 500).json({ error: e.message || "Could not rescale that item." });
+  }
+});
+
+// v0.21.1 (#1): "Update All" -- rescales every currently out-of-spec legacy gear item found
+// by a fresh legacyGearScan() in one shot, and posts exactly ONE chat announcement summarizing
+// the total instead of one message per item (which would spam global chat if there were dozens
+// of stale items queued up). Re-scans fresh (never trusts a client-supplied list) so this is
+// safe to call even if the admin's on-screen list is stale. Any individual item that fails to
+// rescale (e.g. moved/sold since the scan) is silently skipped rather than aborting the whole
+// batch -- the response still reports exactly how many succeeded.
+app.post("/api/admin/legacy-gear/rescale-all", requireAuth, requireAdmin, (req, res) => {
+  const entries = legacyGearScan();
+  let succeeded = 0;
+  const failures = [];
+  for (const entry of entries) {
+    try {
+      rescaleLegacyGearAtLocation(entry.location);
+      succeeded++;
+    } catch (e) {
+      failures.push({ location: entry.location, error: e.message || "Unknown error" });
+    }
+  }
+  console.log(`[admin] ${req.account.username} bulk-rescaled ${succeeded} legacy gear item(s)`);
+  if (succeeded > 0) {
+    broadcastSystemMessage(`An admin recalibrated ${succeeded} out-of-date item${succeeded === 1 ? "" : "s"} to match current game balance.`);
+  }
+  res.json({ ok: true, rescaled_count: succeeded, failed_count: failures.length });
 });
 
 app.get("/api/health", (req, res) => res.json({ ok: true, time: nowIso() }));
@@ -3383,6 +3609,43 @@ wss.on("connection", (ws, req) => {
 
   ws.on("close", () => chatClients.delete(ws));
 });
+
+// v0.21.2: server-driven continuous combat. Previously the ONLY thing that ever resolved "owed"
+// elapsed-time monster hits (see combatCatchUpMonsterHits() above) was the CLIENT asking -- either
+// a real attack/flee/use-item, or its own 2-second idle poll to /api/combat/:id/tick. That's fine
+// while a tab is open and focused, but a plain JS setInterval in a backgrounded/minimized browser
+// tab can be throttled (or on some platforms fully suspended), so a player who steps away mid-
+// fight might not actually take any damage until they come back and the client happens to poll
+// again -- not truly "enforced". Gwen asked for the mob's own attack clock to be genuinely
+// unavoidable ("10 seconds of loss of attention could actually get you slain"), so this pushes the
+// SAME catch-up resolution over each player's own already-open chat WebSocket, on the SERVER's own
+// clock, independent of whether the client is polling at all. The existing HTTP poll/on-action
+// catch-up path is left completely in place as a fallback for any account without a live socket
+// (e.g. mid-reconnect) -- this is purely additive, and never resolves fewer hits than before.
+const COMBAT_PUSH_INTERVAL_MS = 500;
+setInterval(() => {
+  for (const client of chatClients) {
+    if (client.readyState !== client.OPEN || client.accountId == null) continue;
+    const session = getActiveCombatSessionForAccount(client.accountId);
+    if (!session) continue;
+    const data = loadCharacterRow(client.accountId, session.slot);
+    if (!data) continue;
+    combatSettleAllHeals(data);
+    const invulnActiveThisRound = combatIsInvulnerable(data);
+    const catchUp = combatCatchUpMonsterHits(session, data, invulnActiveThisRound);
+    if (catchUp.ticks.length === 0 && !catchUp.fatal) continue;
+    updateCombatSession(session.id, catchUp.fatal ? { status: "lost", last_monster_hit_at: catchUp.newLastHitAt } : { last_monster_hit_at: catchUp.newLastHitAt });
+    const saveSeq = saveCharacterRow(client.accountId, session.slot, data);
+    client.send(JSON.stringify({
+      type: "combat_tick", session_id: session.id, monster_ticks: catchUp.ticks, fatal: catchUp.fatal,
+      player: {
+        current_hp: catchUp.fatal ? 0 : data.current_hp, max_hp: combatGetMaxHp(data),
+        current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data),
+      },
+      _save_seq: saveSeq,
+    }));
+  }
+}, COMBAT_PUSH_INTERVAL_MS);
 
 server.listen(PORT, () => {
   console.log(`Wandrian server listening on port ${PORT} (db: ${DB_PATH})`);
