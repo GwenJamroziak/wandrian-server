@@ -183,6 +183,12 @@ for (const stmt of [
   // save (harmless -- nothing else reads or depends on this column, so there's no data to
   // lose or backfill here, unlike the gold/bridge-steps migrations above).
   "ALTER TABLE leaderboard_bests ADD COLUMN max_kill_streak INTEGER NOT NULL DEFAULT 0",
+  // v0.21 (#17): lifetime mob-kill counter per character, for the new "Monsters Killed"
+  // leaderboard tab. Unlike kill_streak (resets to 0 on every town return/reload -- see
+  // resetKillStreak()) this NEVER resets while the character is alive, and is MAX()'d
+  // against the existing row on every save exactly like max_kill_streak above, for the
+  // same reason (an out-of-order/retried save can never stomp a higher count back down).
+  "ALTER TABLE leaderboard_bests ADD COLUMN total_kills INTEGER NOT NULL DEFAULT 0",
 ]) {
   try { db.exec(stmt); } catch (e) { /* column already exists, fine */ }
 }
@@ -616,8 +622,8 @@ function upsertLeaderboardBests(accountId, data) {
   // out-of-order/retried save can never stomp a higher previously-recorded streak back
   // down to a smaller one.
   db.prepare(
-    `INSERT INTO leaderboard_bests (account_id, character_name, class_name, level, highest_tier_reached, gold, updated_at, hardcore, lifetime_xp, is_dead, last_bridge_steps, xp, weapon_skills, herbalism_points, max_kill_streak)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+    `INSERT INTO leaderboard_bests (account_id, character_name, class_name, level, highest_tier_reached, gold, updated_at, hardcore, lifetime_xp, is_dead, last_bridge_steps, xp, weapon_skills, herbalism_points, max_kill_streak, total_kills)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(account_id, character_name) DO UPDATE SET
        class_name=excluded.class_name,
        level=excluded.level,
@@ -631,7 +637,8 @@ function upsertLeaderboardBests(accountId, data) {
        xp=excluded.xp,
        weapon_skills=excluded.weapon_skills,
        herbalism_points=excluded.herbalism_points,
-       max_kill_streak=MAX(leaderboard_bests.max_kill_streak, excluded.max_kill_streak)`
+       max_kill_streak=MAX(leaderboard_bests.max_kill_streak, excluded.max_kill_streak),
+       total_kills=MAX(leaderboard_bests.total_kills, excluded.total_kills)`
   ).run(
     accountId,
     data.character_name,
@@ -646,7 +653,8 @@ function upsertLeaderboardBests(accountId, data) {
     data.xp || 0,
     weaponSkillsJson,
     data.herbalism_points || 0,
-    data.max_kill_streak || 0
+    data.max_kill_streak || 0,
+    data.total_kills || 0
   );
 }
 
@@ -928,7 +936,7 @@ const ITEM_TIER_MAX = 5;
 const ITEM_AFFIX_POOL = [
   "damage", "hp", "crit", "armor", "regen", "gold_find", "xp_find", "stamina_max",
   "strength", "dexterity", "vitality", "intelligence", "poison_resist", "magic_find",
-  "block_chance",
+  "block_chance", "flee_chance", "crit_multiplier",
 ];
 // v0.19.1 (#15): xp_find raised from a T1 max of 1 back up to 5 (5/10/15/20/25% across
 // T1-T5) -- mirrors index.html's Balance.AFFIX_TIER1_MAX. Still well within
@@ -944,7 +952,12 @@ const ITEM_AFFIX_POOL = [
 const ITEM_AFFIX_TIER1_MAX = {
   damage: 5, hp: 15, crit: 5, armor: 2, regen: 5, gold_find: 10, xp_find: 5,
   stamina_max: 15, strength: 5, dexterity: 5, vitality: 5, intelligence: 5, poison_resist: 5,
-  magic_find: 10, block_chance: 2,
+  magic_find: 10, block_chance: 2, flee_chance: 2,
+  // v0.21 (#8): new "crit_multiplier" gear affix -- stored/rolled as a plain integer (10-50
+  // across T1-T5) through the same machinery as every other affix, then divided by 100 when
+  // consumed (see combatGetCritMultiplierBonus() below) to land on Gwen's exact spec of
+  // +0.10/0.20/0.30/0.40/0.50. Must stay in sync with index.html's Balance.AFFIX_TIER1_MAX.
+  crit_multiplier: 10,
 };
 // index.html's RARITY_TABLE's `slots` field, keyed by the RARITY_TABLE `name` (internal
 // name, not the player-facing RARITY_DISPLAY_NAMES wording -- items store the internal
@@ -1483,7 +1496,9 @@ const CB = {
   // must stay in sync with Balance.STR_TO_ARMOR_RATIO in index.html (see that constant's
   // comment for the full calibration).
   STR_TO_ARMOR_RATIO: 0.25,
-  STRONGHOLD_GUARDIAN_HP_MULT: 3.0, STRONGHOLD_GUARDIAN_XP_MULT: 1.5, STRONGHOLD_KEY_DROP_CHANCE: 0.15,
+  STRONGHOLD_GUARDIAN_HP_MULT: 3.0, STRONGHOLD_GUARDIAN_XP_MULT: 1.5,
+  // v0.21 (#5): doubled per Gwen's exact request (was 0.15) -- mirrors Balance.STRONGHOLD_KEY_DROP_CHANCE in index.html.
+  STRONGHOLD_KEY_DROP_CHANCE: 0.30,
   ROAMING_MOB_HP_MULT: 4.0, ROAMING_MOB_DAMAGE_MULT: 1.5, ROAMING_MOB_XP_MULT: 2.0,
   // v0.20.1 (#10): every kill now gets a shot at a SECOND (and rarely third) loot drop, on
   // top of the always-resolved first drop above -- base chance is deliberately small so it
@@ -1709,6 +1724,12 @@ function combatGetTotalAttr(data, key) {
 function combatGetBlockChance(data) {
   return cbClampf(combatGetTotalAttr(data, "dex") * CB.BLOCK_CHANCE_PER_DEX + combatGetActiveTempBuff(data, "block_chance") / 100.0 + combatGearBonus(data, "block_chance") / 100.0, 0, CB.BLOCK_CHANCE_MAX);
 }
+// v0.21 (#6): sums the "flee_chance" gear affix (+2/4/6/8/10% by tier, see
+// ITEM_AFFIX_TIER1_MAX). Deliberately NOT clamped -- per Gwen's exact spec, a total above 100%
+// should always let the player flee successfully. Mirrors index.html's PS.getFleeChanceBonus().
+function combatGetFleeChanceBonus(data) {
+  return combatGearBonus(data, "flee_chance") / 100.0;
+}
 // v0.20 (#9.7): Vitality's HP/Stamina contribution is computed LIVE from attributes.vit
 // (see CB.VIT_HP_PER_POINT_RATIO's comment) instead of reading the old bonus_hp_from_
 // attributes/bonus_stamina_from_attributes accumulator fields, which are no longer written
@@ -1760,6 +1781,29 @@ function combatGetCritChance(data) { const c = COMBAT_CLASSES[data.class_id] || 
 // counter-attack (combatResolveMonsterTurn) and the pre-fight "strikes first" roll in
 // POST /api/combat/start -- both use the fight's own area_level as the monster's level.
 function combatGetMonsterCritChance(areaLevel) { return cbClampf(0.10 + (Math.max(1, areaLevel) - 1) * 0.01, 0, 0.95); }
+// v0.21 (#8): the NEW stat -- how hard a crit hits, separate from combatGetCritChance()'s
+// odds of landing one at all. Raw gear sum divided by 100 (see ITEM_AFFIX_TIER1_MAX's
+// crit_multiplier comment), added on top of the shared CB.CRIT_MULTIPLIER floor. Mirrors
+// index.html's PS.getCritMultiplierBonus()/getCritMultiplierMax() exactly.
+function combatGetCritMultiplierBonus(data) { return combatGearBonus(data, "crit_multiplier") / 100.0; }
+function combatGetCritMultiplierMax(data) { return CB.CRIT_MULTIPLIER + combatGetCritMultiplierBonus(data); }
+// v0.21 (#9): monsters also scale their crit MULTIPLIER ceiling in breakpoints every 5
+// levels: +0.00/0.5/1.0/1.5/2.0/2.5, starting from Lv1 -- mirrors index.html's
+// Balance.monsterCritMultiplierBonus()/monsterCritMultiplierMax() exactly (see that
+// function's comment for the worked Lv25 example: floor(25/5)=5 -> +2.5, so a Lv25 mob's
+// crit ceiling is CB.CRIT_MULTIPLIER(1.75)+2.5=4.25).
+const MONSTER_CRIT_MULT_BONUS_TABLE = [0, 0.5, 1.0, 1.5, 2.0, 2.5];
+function combatGetMonsterCritMultiplierBonus(areaLevel) {
+  const idx = cbClampi(Math.floor(Math.max(1, areaLevel) / 5), 0, MONSTER_CRIT_MULT_BONUS_TABLE.length - 1);
+  return MONSTER_CRIT_MULT_BONUS_TABLE[idx];
+}
+function combatGetMonsterCritMultiplierMax(areaLevel) { return CB.CRIT_MULTIPLIER + combatGetMonsterCritMultiplierBonus(areaLevel); }
+// v0.21 (#10): a landed crit doesn't always hit for the full ceiling -- it's a fresh random
+// roll each time, somewhere between the shared CB.CRIT_MULTIPLIER floor and whichever max
+// applies (player's combatGetCritMultiplierMax(data) or a monster's
+// combatGetMonsterCritMultiplierMax(areaLevel)), per Gwen's exact spec: "a player with 5.50
+// crit multiplier can crit randomly between 1.75 and 5.50, not 5.50 all the time."
+function combatRollCritMultiplier(maxMult) { return CB.CRIT_MULTIPLIER + Math.random() * Math.max(0, maxMult - CB.CRIT_MULTIPLIER); }
 // v0.20.4: Armor rework -- used to be a 0-0.75 PERCENTAGE (class-innate base + gear%),
 // multiplicatively reducing monster damage (`mdmg *= 1-armor`, see the two call sites
 // below). Now a FLAT number: gear's "armor" affix (flat 2/4/6/8/10 per tier, see
@@ -1951,6 +1995,11 @@ function combatRegisterWeaponHit(data, weaponType) {
 function combatIncrementKillStreak(data) {
   data.kill_streak = (data.kill_streak || 0) + 1;
   if (data.kill_streak > (data.max_kill_streak || 0)) data.max_kill_streak = data.kill_streak;
+  // v0.21 (#17): total_kills is a separate, NEVER-reset lifetime counter (kill_streak
+  // resets to 0 on every town return/reload) -- feeds the new "Monsters Killed" leaderboard
+  // tab. Incremented right alongside kill_streak/max_kill_streak since every code path that
+  // credits a kill already calls this one function.
+  data.total_kills = (data.total_kills || 0) + 1;
 }
 function combatGetInventoryCapacity(data) {
   let cap = 16; // Balance.BASE_INVENTORY_SLOTS
@@ -2018,20 +2067,26 @@ function updateCombatSession(id, fields) {
 // Armor. Mutates `data.current_hp` in place and returns a small result the caller folds into
 // the round response; never touches the session/monster HP (that's the caller's job).
 function combatResolveMonsterTurn(data, session, invulnActiveThisRound) {
-  if (invulnActiveThisRound) return { invulnerable: true, blocked: false, damage: null, crit: false, fatal: false };
-  if (Math.random() < combatGetBlockChance(data)) return { invulnerable: false, blocked: true, damage: null, crit: false, fatal: false };
+  if (invulnActiveThisRound) return { invulnerable: true, blocked: false, damage: null, crit: false, crit_mult: null, fatal: false };
+  if (Math.random() < combatGetBlockChance(data)) return { invulnerable: false, blocked: true, damage: null, crit: false, crit_mult: null, fatal: false };
   let mdmg = cbRandRange(session.dmg_min, session.dmg_max);
   // v0.19.1 (#10): the monster's own crit roll, applied BEFORE armor mitigation (same order
   // as the player's own crit-then-quad-damage math above) -- 10% + 1%/area-level.
   const crit = Math.random() < combatGetMonsterCritChance(session.area_level);
-  if (crit) mdmg *= CB.CRIT_MULTIPLIER;
+  // v0.21 (#9/#10): the ACTUAL multiplier for this hit is its own random roll between
+  // CB.CRIT_MULTIPLIER and this monster's own crit ceiling (see
+  // combatGetMonsterCritMultiplierMax()) -- not always the same fixed 1.75. critMult stays
+  // null on a non-crit hit (nothing to report), returned either way so the client can render
+  // it.
+  const critMult = crit ? combatRollCritMultiplier(combatGetMonsterCritMultiplierMax(session.area_level)) : null;
+  if (crit) mdmg *= critMult;
   // v0.20.4: flat subtraction instead of a percentage multiplier -- see combatGetArmor()'s
   // own comment for the full mechanic change.
   mdmg = Math.max(0, mdmg - combatGetArmor(data));
   data.current_hp = (data.current_hp || 0) - mdmg;
   let fatal = false;
   if (data.current_hp < 1) { data.current_hp = 0; fatal = true; }
-  return { invulnerable: false, blocked: false, damage: Math.round(mdmg), crit, fatal };
+  return { invulnerable: false, blocked: false, damage: Math.round(mdmg), crit, crit_mult: critMult, fatal };
 }
 
 app.post("/api/combat/start", requireAuth, (req, res) => {
@@ -2073,13 +2128,15 @@ app.post("/api/combat/start", requireAuth, (req, res) => {
   if (Math.random() < CB.MONSTER_FIRST_STRIKE_CHANCE) {
     let mdmg = cbRandRange(dmgMin, dmgMax);
     // v0.19.1 (#10): the first-strike hit can crit too, same formula/order as the regular
-    // counter-attack in combatResolveMonsterTurn.
+    // counter-attack in combatResolveMonsterTurn. v0.21 (#9/#10): critMult is this hit's own
+    // random roll between CB.CRIT_MULTIPLIER and this monster's ceiling, same as that function.
     const crit = Math.random() < combatGetMonsterCritChance(areaLevel);
-    if (crit) mdmg *= CB.CRIT_MULTIPLIER;
+    const critMult = crit ? combatRollCritMultiplier(combatGetMonsterCritMultiplierMax(areaLevel)) : null;
+    if (crit) mdmg *= critMult;
     mdmg = Math.max(0, mdmg - combatGetArmor(data));
     data.current_hp = Math.max(1, (data.current_hp || 0) - mdmg);
-    firstStrike = { damage: Math.round(mdmg), crit };
-    log.push(`The ${name} strikes first, hitting you for ${Math.round(mdmg)} damage${crit ? " (Critical!)" : ""} before you can react!`);
+    firstStrike = { damage: Math.round(mdmg), crit, crit_mult: critMult };
+    log.push(`The ${name} strikes first, hitting you for ${Math.round(mdmg)} damage${crit ? ` (Critical! x${critMult.toFixed(2)})` : ""} before you can react!`);
   }
 
   const id = crypto.randomBytes(16).toString("hex");
@@ -2125,10 +2182,14 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
     const [lo, hi] = combatGetDamageRange(data);
     let dmg = (lo + hi) / 2;
     const crit = Math.random() < combatGetCritChance(data);
-    if (crit) dmg *= CB.CRIT_MULTIPLIER;
+    // v0.21 (#8/#10): critMult is THIS hit's own random roll between CB.CRIT_MULTIPLIER and
+    // the player's current ceiling (combatGetCritMultiplierMax(), driven by the new
+    // "crit_multiplier" gear affix) -- not a fixed 1.75 every time. null on a non-crit hit.
+    const critMult = crit ? combatRollCritMultiplier(combatGetCritMultiplierMax(data)) : null;
+    if (crit) dmg *= critMult;
     if (quadActiveThisRound) dmg *= 4;
     newMonsterHp = session.hp - dmg;
-    playerHit = { damage: Math.round(dmg), crit, quad_damage: quadActiveThisRound };
+    playerHit = { damage: Math.round(dmg), crit, crit_mult: critMult, quad_damage: quadActiveThisRound };
     const weaponType = combatGetEquippedWeaponType(data);
     if (weaponType) weaponSkill = { weapon_type: weaponType, ...combatRegisterWeaponHit(data, weaponType) };
   }
@@ -2212,6 +2273,7 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
     kill = {
       gold, gold_credited: goldCredited, xp_gained: xpResult.xpGained, leveled,
       loot, bonus_loot: bonusLoot, key_drop: keyDrop, kill_streak: data.kill_streak, max_kill_streak: data.max_kill_streak,
+      total_kills: data.total_kills,
       is_guardian: !!session.is_guardian, is_roamer: !!session.is_roamer,
     };
     updateCombatSession(session.id, { hp: 0, status: "won" });
@@ -2242,7 +2304,9 @@ app.post("/api/combat/:sessionId/flee", requireAuth, (req, res) => {
   if (!data) return res.status(404).json({ error: "No character in that slot." });
 
   combatSettleAllHeals(data);
-  const failed = Math.random() < CB.FLEE_FAIL_CHANCE;
+  // v0.21 (#6): "flee_chance" gear affix reduces the fail chance (can drive it to 0 or below,
+  // which Math.max clamps to 0 -- an always-succeed flee -- per Gwen's exact spec).
+  const failed = Math.random() < Math.max(0, CB.FLEE_FAIL_CHANCE - combatGetFleeChanceBonus(data));
   let monsterTurn = null, fatal = false;
   if (failed) {
     // v0.20 BUG FIX: a failed flee attempt still gives the monster a turn (see
@@ -2589,6 +2653,31 @@ app.get("/api/leaderboard/killstreak", (req, res) => {
       character_name: r.character_name,
       class_name: r.class_name,
       max_kill_streak: r.max_kill_streak || 0,
+      is_dead: !!r.is_dead,
+    };
+  });
+  res.json({ entries: withNames });
+});
+
+// v0.21 (#17): "Monsters Killed" leaderboard tab -- same shape/reasoning as "Max Killstreak"
+// directly above (per-CHARACTER, not per-account; total_kills is a MAX()'d lifetime record
+// so a plain ORDER BY + LIMIT is enough), just ranking by the never-resetting lifetime kill
+// counter instead of the best streak achieved.
+app.get("/api/leaderboard/monsterskilled", (req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT account_id, character_name, class_name, total_kills, is_dead
+       FROM leaderboard_bests ORDER BY total_kills DESC LIMIT 50`
+    )
+    .all();
+  const withNames = rows.map((r) => {
+    const acc = db.prepare("SELECT username FROM accounts WHERE id = ?").get(r.account_id);
+    return {
+      account_id: r.account_id,
+      player: acc ? acc.username : "?",
+      character_name: r.character_name,
+      class_name: r.class_name,
+      total_kills: r.total_kills || 0,
       is_dead: !!r.is_dead,
     };
   });

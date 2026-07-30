@@ -549,6 +549,14 @@ const ITEMS = {
   // as dry_branch/the stat-buff potions -- but it still rides the ordinary stackable-item
   // plumbing, so it's freely tradable on the Auction House like anything else.
   antidote:{name:"Antidote",type:"consumable",cures_poison:true,sell_value:12},
+  // v0.21 (#2): brewed-only (never sold by the Merchant, no buy_price -- see
+  // Balance.MERCHANT_EXCLUDED_ITEMS), and only usable from inside the maze view itself (see
+  // PS.canUseConsumable/useConsumable's reveals_maze branch and screenMaze()'s quick-use
+  // button) -- instantly marks every cell of the CURRENT maze as discovered, animated as a
+  // slow outward ripple from the player's position rather than popping in all at once (see
+  // revealEntireMazeWithClarity()/animateMazeMovers()'s _clarityReveal handling). Lasts for
+  // that one maze only -- reaching a new area level (a brand new maze) needs a fresh dose.
+  elixir_of_clarity:{name:"Elixir of Clarity",type:"consumable",reveals_maze:true,sell_value:140},
   traveler_pouch:{name:"Traveler's Pouch",type:"bag",capacity:8,sell_value:10},
   woven_bag:{name:"Woven Bramble Bag",type:"bag",capacity:16,sell_value:20},
   bramble_sack:{name:"Bramble Sack",type:"bag",capacity:24,sell_value:32},
@@ -606,6 +614,11 @@ const RECIPES = [
   // since Cleanwort is a common (non-rare) herb, so poison never becomes a run-ending
   // problem for anyone who's bothered to stock up.
   {id:"brew_antidote",result_item:"antidote",herbs:{cleanwort:2},gold_cost:20},
+  // v0.21 (#2): 6 herb types, 20 herbs total (4+4+4+3+3+2) -- Gwen's exact spec ("6 herb
+  // types, counting up to a total value of 20 herb items"). Deliberately expensive/no
+  // gold_cost of its own -- the 3 Starveil Petals alone (a rare, low-odds herb) already make
+  // this the priciest single recipe in the game to assemble.
+  {id:"brew_elixir_of_clarity",result_item:"elixir_of_clarity",herbs:{sunpetal:4,moonleaf:4,emberroot:4,frostvine:3,starveil:3,cleanwort:2}},
 ];
 
 // v0.12.1: potion drops now scale with the same monster tier the loot table is named
@@ -885,6 +898,12 @@ const Balance = {
   // visibility and its resolution into 3 possible outcomes are new.
   ENCOUNTER_CHANCE_PER_STEP:0.15, TRAP_CHANCE_PER_TILE:0.055,
   OBSTACLE_DENSITY:0.25, GRASS_PATCH_COUNT:26,
+  // v0.21 (#1): exit-tile placement variety, rolled once per generated maze (see
+  // generateMaze()). Default (the remainder of the roll, ~77%) keeps the old "farthest tile
+  // from start" behavior. BOTTOMLEFT diverts the exit to the bottom-left region instead (still
+  // a full walk). PREMATURE_EXIT is rare and lands roughly halfway across the maze -- a real
+  // surprise shortcut, not a fixed rule players can plan around.
+  MAZE_BOTTOMLEFT_EXIT_CHANCE:0.20, MAZE_PREMATURE_EXIT_CHANCE:0.03,
   // Independent per-tile roll chances (a 20x10 maze = 200 tiles), replacing the old
   // fixed-count-per-maze model: chest 0.05% (~1 chest per 10 mazes), herb 0.20%
   // (~1 per 2.5 mazes), shrine 0.10% (~1 per 5 mazes).
@@ -1006,7 +1025,9 @@ const Balance = {
   // find back in v0.17.2 (100% -> 40% spawn chance per maze, see STRONGHOLD_SPAWN_CHANCE
   // above), so even with this same 5% per-guardian-kill roll, keys had effectively become
   // much scarcer overall. Bumping the roll itself compensates directly.
-  STRONGHOLD_GUARDIAN_HP_MULT:3.0, STRONGHOLD_GUARDIAN_XP_MULT:1.5, STRONGHOLD_KEY_DROP_CHANCE:0.15,
+  STRONGHOLD_GUARDIAN_HP_MULT:3.0, STRONGHOLD_GUARDIAN_XP_MULT:1.5,
+  // v0.21 (#5): doubled per Gwen's exact request (was 0.15).
+  STRONGHOLD_KEY_DROP_CHANCE:0.30,
   // v0.18 (#2): roaming mobs -- unlike a Stronghold guardian (fixed tile, only engages if
   // you walk up to it) or an ordinary grass encounter (random roll, no visible identity on
   // the map at all), a roaming mob is a persistent, visible monster that actively wanders
@@ -1034,7 +1055,7 @@ const Balance = {
   // the Stronghold Key, which is meant to be an achievement drop (kill a guardian, get
   // lucky) rather than something gold can shortcut. Still fully tradable on the Auction
   // House between players, that path is untouched.
-  MERCHANT_EXCLUDED_ITEMS:["stronghold_key","stronghold_key_t2","stronghold_key_t3","stronghold_key_t4","stronghold_key_t5","dry_branch","potion_of_might","potion_of_swiftness","potion_of_intellect","potion_of_wardveil","potion_of_renewal","antidote"],
+  MERCHANT_EXCLUDED_ITEMS:["stronghold_key","stronghold_key_t2","stronghold_key_t3","stronghold_key_t4","stronghold_key_t5","dry_branch","potion_of_might","potion_of_swiftness","potion_of_intellect","potion_of_wardveil","potion_of_renewal","antidote","elixir_of_clarity"],
   // v0.18 (#5): Stronghold Key tiering -- "guardians in area level 1 to 4 are Tier 1,
   // 5 to 9 drop Tier 2, 10-14 = Tier 3, and so on until Tier 5" (Gwen's exact spec). The
   // first bracket is only 4 levels wide (1-4) and every bracket after that is 5 levels
@@ -1086,7 +1107,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.20.4-web",
+  GAME_VERSION:"v0.21-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   // v0.20 (#10): each town tier previously shared the exact same "A quiet camp on the edge
@@ -1156,6 +1177,23 @@ const Balance = {
     damage:5, hp:15, crit:5, armor:2, regen:5, gold_find:10, xp_find:5,
     stamina_max:15, strength:5, dexterity:5, vitality:5, intelligence:5, poison_resist:5,
     magic_find:10, block_chance:2,
+    // v0.21 (#6): new "flee_chance" gear affix -- a flat percentage-point bonus to combat
+    // flee success chance (see PS.getFleeChanceBonus()/combatGetFleeChanceBonus() in
+    // server.js). T1 max of 2 through the same max(tier)=tier*max(T1) formula as
+    // block_chance lands on Gwen's exact spec of +2/4/6/8/10% across T1-T5. Deliberately
+    // uncapped at the top end (stacking enough of this stat CAN push total flee chance
+    // above 100%, which always succeeds) per Gwen's explicit instruction.
+    flee_chance:2,
+    // v0.21 (#8): new "crit_multiplier" gear affix -- splits the old single "Critical
+    // Strike" stat (renamed "Critical Strike Chance", still just "crit" internally) into
+    // two: chance-to-crit stays as-is, and this is the NEW stat controlling how hard a
+    // crit hits. Stored/rolled as a plain integer through the exact same max(tier)=
+    // tier*max(T1) machinery every other affix uses (so it lands on 10/20/30/40/50 across
+    // T1-T5), then divided by 100 wherever it's actually consumed (see PS.getCritMultiplier
+    // Bonus() below) to land on Gwen's exact spec of +0.10/0.20/0.30/0.40/0.50. Deliberately
+    // NOT in affixIsPercent's list -- it's formatted as a bare decimal (see formatAffix()),
+    // not a percentage, since it's an additive contribution to a MULTIPLIER, not a chance.
+    crit_multiplier:10,
   },
   // v0.20.4: every point of TOTAL Strength (base + gear + temp buffs, same getTotalAttr("str")
   // everything else reads) grants this much flat Armor, for EVERY class chain -- not just
@@ -1195,7 +1233,7 @@ const Balance = {
   // something better (see Balance.rollRarity()'s mfPct param). Its T1 max of 10 run through
   // the SAME max(tier)=tier*max(T1) formula as poison_resist above lands exactly on Gwen's
   // spec of 10/20/30/40/50% across T1-T5, no special-casing needed.
-  AFFIX_POOL:["damage","hp","crit","armor","regen","gold_find","xp_find","stamina_max","strength","dexterity","vitality","intelligence","poison_resist","magic_find","block_chance"],
+  AFFIX_POOL:["damage","hp","crit","armor","regen","gold_find","xp_find","stamina_max","strength","dexterity","vitality","intelligence","poison_resist","magic_find","block_chance","flee_chance","crit_multiplier"],
   // v0.16: the ankle-bite trap now applies a Poison effect instead of just a one-time
   // hit -- see PS.applyPoison()/PS.getActiveBonfireBonus()-style getters below. Poison
   // drains for POISON_DURATION_MS, floors at 1 HP on its own (never lethal by itself), and
@@ -1404,6 +1442,21 @@ const Balance = {
   // exactly; kept here (not just server-side) so combat_fakeserver_helper.js's test double
   // can reuse the same public formula instead of re-deriving it.
   monsterCritChance(areaLevel){return clampf(0.10+(Math.max(1,areaLevel)-1)*0.01,0,0.95);},
+  // v0.21 (#9): monsters now also scale their crit MULTIPLIER (how hard a crit hits, on top
+  // of whether one lands at all -- see monsterCritChance() above for that separate roll),
+  // in breakpoints every 5 levels: +0.00/0.5/1.0/1.5/2.0/2.5, starting from Lv1. Verified
+  // against Gwen's own worked example -- a Lv25 mob: Math.floor(25/5)=5 -> +2.5, so its crit
+  // ceiling is Balance.CRIT_MULTIPLIER(1.75)+2.5=4.25, matching her exact "1.75+2.5=4.25"
+  // spec. Capped at the table's last entry (+2.5) for area level 30+ so it doesn't keep
+  // climbing forever. Mirrors server.js's combatGetMonsterCritMultiplierMax() exactly; kept
+  // here (not just server-side) so the client can compute crit_frac for the floating combat
+  // text's font-size scaling (see critFloatFontSizeEm()) and the Monster Guide's table.
+  MONSTER_CRIT_MULT_BONUS_TABLE:[0,0.5,1.0,1.5,2.0,2.5],
+  monsterCritMultiplierBonus(areaLevel){
+    const idx=clampi(Math.floor(Math.max(1,areaLevel)/5),0,this.MONSTER_CRIT_MULT_BONUS_TABLE.length-1);
+    return this.MONSTER_CRIT_MULT_BONUS_TABLE[idx];
+  },
+  monsterCritMultiplierMax(areaLevel){ return this.CRIT_MULTIPLIER+this.monsterCritMultiplierBonus(areaLevel); },
   // v0.13: the ankle-bite "trap" tile (NOT the trapdoor, which stays a flat fall-damage
   // hit) now scales with the area's level -- Gwen's report: a flat 4-12 damage trap was
   // trivial at area level 13 with 357 HP, multiplying by area level (so ~52-156 at 13)
@@ -1623,7 +1676,7 @@ const DL = {
     // function feeds into) as the confusing "Antidote (Antidote)" -- it's fundamentally a
     // potion type like any other consumable here, so it now falls through to the same
     // "Potion" label the heal/stamina/buff potions already get, just below.
-    if(item.heal_amount!=null || item.stamina_amount!=null || item.eyesight_steps!=null || item.buff_type || item.cures_poison) return "Potion";
+    if(item.heal_amount!=null || item.stamina_amount!=null || item.eyesight_steps!=null || item.buff_type || item.cures_poison || item.reveals_maze) return "Potion";
     return "Item";
   },
   // v0.14 tooltip overhaul: an exact-numbers, plain-English "what does this actually do"
@@ -1646,6 +1699,8 @@ const DL = {
       return `Temporarily grants +${item.buff_amount}${suffixByType[item.buff_type]||""} for ${minutes} minutes.`;
     }
     if(item.cures_poison) return "Instantly cures the Poison effect, if you're currently poisoned.";
+    // v0.21 (#2): only usable from inside the maze view itself -- see PS.canUseConsumable().
+    if(item.reveals_maze) return "Reveals the entire current maze's fog of war. Usable only while inside a maze -- lasts for that one maze run.";
     if(item.level_bonus!=null) return `Your next venture starts ${item.level_bonus} area level${item.level_bonus===1?"":"s"} higher than your current one.`;
     if(item.type==="bag") return `+${item.capacity} inventory capacity while equipped.`;
     return "";
@@ -1802,7 +1857,20 @@ const IF = {
   // slotLabel() (used to label an EMPTY equip-doll slot, where "Ring 1" vs "Ring 2"
   // matters), an actual Ring item's category subtext should just read "Ring".
   GEAR_CATEGORY_LABELS:{weapon:"Weapon",head:"Head",shoulders:"Shoulders",armor:"Armor",pants:"Pants",gloves:"Gloves",boots:"Boots",ring1:"Ring",ring2:"Ring",amulet:"Amulet",belt:"Belt"},
-  categoryLabel(inst){ return (inst&&inst.slot) ? (this.GEAR_CATEGORY_LABELS[inst.slot]||this.slotLabel(inst.slot)) : ""; },
+  // v0.21 (#16): weapons additionally append their specific weapon type ("Weapon, Dagger")
+  // since weapon type increasingly drives class restrictions and skill proficiency bonuses --
+  // this is the single choke point every gear subtext line in the game reads through (Character
+  // Sheet, Blacksmith, Auction House, tooltips, chest reveals, etc.), so fixing it here alone
+  // is enough to apply the change everywhere at once.
+  categoryLabel(inst){
+    if(!inst||!inst.slot) return "";
+    const base=this.GEAR_CATEGORY_LABELS[inst.slot]||this.slotLabel(inst.slot);
+    if(inst.slot==="weapon"){
+      const wt=this.weaponTypeForInstance(inst);
+      if(wt) return `${base}, ${this.WEAPON_TYPE_LABELS[wt]}`;
+    }
+    return base;
+  },
 
   // forcedRarityName (v0.12, used by the Stronghold chest): when given, skips the normal
   // rarity roll and guarantees that exact rarity, e.g. so Stronghold loot can promise
@@ -1902,10 +1970,14 @@ const IF = {
     return a.value>=effectiveMax;
   },
   // v0.20.4: "armor" removed -- it's a flat number now (+N Armor), not a percentage.
-  affixIsPercent(stat){return ["crit","gold_find","xp_find","poison_resist","magic_find","block_chance"].includes(stat);},
+  affixIsPercent(stat){return ["crit","gold_find","xp_find","poison_resist","magic_find","block_chance","flee_chance"].includes(stat);},
   affixLabel(stat){
     switch(stat){
-      case "damage": return "Damage"; case "hp": return "Hit Points"; case "crit": return "Critical Strike";
+      case "damage": return "Damage"; case "hp": return "Hit Points";
+      // v0.21 (#8): renamed from plain "Critical Strike" now that there are two separate
+      // crit stats -- this one is purely the ODDS of landing a crit; see "crit_multiplier"
+      // below for the new stat controlling how hard that crit hits.
+      case "crit": return "Critical Strike Chance";
       case "armor": return "Armor"; case "regen": return "Regeneration"; case "gold_find": return "Gold Found";
       case "xp_find": return "Experience Gained"; case "stamina_max": return "Stamina"; case "eyesight": return "Eyesight";
       case "strength": return "Strength"; case "dexterity": return "Dexterity"; case "vitality": return "Vitality"; case "intelligence": return "Intelligence";
@@ -1913,6 +1985,10 @@ const IF = {
       case "magic_find": return "Magic Find";
       // v0.20 (#11): new gear affix -- see Balance.AFFIX_TIER1_MAX's comment.
       case "block_chance": return "Block Chance";
+      // v0.21 (#6): new gear affix -- see Balance.AFFIX_TIER1_MAX's comment.
+      case "flee_chance": return "Flee Chance";
+      // v0.21 (#8): new gear affix -- see Balance.AFFIX_TIER1_MAX's comment.
+      case "crit_multiplier": return "Critical Strike Multiplier";
       default: return stat;
     }
   },
@@ -1927,6 +2003,11 @@ const IF = {
     const diamond=this.isAffixMaxRoll(a,inst)?" \u{1F48E}":"";
     if(this.affixIsPercent(a.stat)) return `+${Math.round(a.value)}% ${label}${diamond}`;
     if(a.stat==="regen") return `+${a.value.toFixed(1)} ${label}${diamond}`;
+    // v0.21 (#8): "crit_multiplier" is stored/rolled as a plain integer (10-50 across T1-T5,
+    // see AFFIX_TIER1_MAX's comment) but represents a decimal contribution to the crit
+    // multiplier -- divide by 100 for display, same conversion PS.getCritMultiplierBonus()
+    // applies when actually consuming it in combat math.
+    if(a.stat==="crit_multiplier") return `+${(a.value/100).toFixed(2)} ${label}${diamond}`;
     return `+${Math.round(a.value)} ${label}${diamond}`;
   },
   tooltipText(inst){
@@ -2012,6 +2093,8 @@ const Net = {
   leaderboardSkillsCache:null, leaderboardGoldCache:null, inspectPlayerCache:null,
   // v0.18.2 (#8): "Max Killstreak" leaderboard tab -- same caching pattern as the two above.
   leaderboardKillstreakCache:null,
+  // v0.21 (#17): "Monsters Killed" leaderboard tab -- same caching pattern again.
+  leaderboardMonstersKilledCache:null,
   // v0.18 (#14): "Currently playing" list under Global Chat -- see fetchActivePlayers().
   activePlayersCache:null,
   auctionCache:null,
@@ -2080,6 +2163,7 @@ const Net = {
     this.graveyardCache=null; this.leaderboardCache=null; this.leaderboardCacheHardcore=null;
     this.leaderboardSkillsCache=null; this.leaderboardGoldCache=null; this.inspectPlayerCache=null;
     this.leaderboardKillstreakCache=null;
+    this.leaderboardMonstersKilledCache=null;
     this.activePlayersCache=null;
     this.auctionCache=null; this.vaultCache=null; this.vaultVersion=0; this.chatMessages=[]; this.privateMessages=[];
     this._saveInFlight={};
@@ -2194,6 +2278,13 @@ const Net = {
     const res=await fetch(this.apiBase()+"/api/leaderboard/killstreak");
     const json=await res.json().catch(()=>({entries:[]}));
     this.leaderboardKillstreakCache=json.entries||[];
+  },
+  // v0.21 (#17): "Monsters Killed" leaderboard tab -- same per-CHARACTER shape as Max
+  // Killstreak above, ranked by total_kills (a MAX()'d lifetime record) instead.
+  async fetchLeaderboardMonstersKilled(){
+    const res=await fetch(this.apiBase()+"/api/leaderboard/monsterskilled");
+    const json=await res.json().catch(()=>({entries:[]}));
+    this.leaderboardMonstersKilledCache=json.entries||[];
   },
   // v0.18 (#14/#17): character name + last-active timestamp for every account whose most
   // recently-updated character saved within the last 5 minutes (server-computed off the
@@ -2555,6 +2646,11 @@ const PS = {
   // and rides along on the same character-save upsert as everything else so the new
   // "Max Killstreak" leaderboard tab can rank characters by it server-side.
   max_kill_streak:0,
+  // v0.21 (#17): a second, separate lifetime record alongside max_kill_streak above -- total
+  // mob kills, EVER, never reset (unlike kill_streak, and unlike max_kill_streak this one
+  // doesn't reset back down either -- it's a pure running total, not a "best"). Feeds the new
+  // "Monsters Killed" leaderboard tab. Same save/reload/upsert treatment as max_kill_streak.
+  total_kills:0,
   // v0.18.2 (#6): Forest Reputation, kept SEPARATELY per class tier (Gwen's spec: "saved
   // specifically to each forest tier" -- the class tier you're currently in determines which
   // forest/town you're exploring, see getTownName()/Balance.TOWN_NAMES). Keyed by tier number
@@ -2698,6 +2794,16 @@ const PS = {
     // routes through gearBonus(), on top of both the Dexterity-derived and temp-buff amounts.
     return clampf(this.getTotalAttr("dex")*Balance.BLOCK_CHANCE_PER_DEX+this.getActiveTempBuff("block_chance")/100.0+this.gearBonus("block_chance")/100.0,0,Balance.BLOCK_CHANCE_MAX);
   },
+  // v0.21 (#6): new "flee_chance" gear affix -- purely a gear bonus, no base-attribute
+  // component (unlike Block Chance's Dexterity scaling). Deliberately NOT clamped at the top
+  // end -- the real flee-success roll lives server-side (combatGetFleeChanceBonus() in
+  // server.js, see POST /api/combat/:id/flee), and per Gwen's explicit spec stacking enough
+  // of this stat should be able to push total flee chance past 100%, which always succeeds.
+  // This client-side getter exists purely for display (Gear Bonuses line, tooltips) --
+  // never used to locally decide a flee's outcome.
+  getFleeChanceBonus(){
+    return this.gearBonus("flee_chance")/100.0;
+  },
   // v0.17.3 (#2/#3): `startingPoints` lets callers grant more than the default -- a failed
   // Broken Bridge Trial attempt bumps this above Balance.STARTING_STAT_POINTS (see
   // resolveMasterTrial()). Defaults to the base amount for brand new characters and any
@@ -2770,6 +2876,13 @@ const PS = {
     return [d.totalMin, d.totalMax];
   },
   getCritChance(){const c=this.getClassData(); return clampf((c.base_crit||0.05)+this.gearBonus("crit")/100.0,0,0.95);},
+  // v0.21 (#8): the NEW stat -- how hard a crit hits, separate from getCritChance()'s odds
+  // of landing one at all. Raw gear sum divided by 100 (see AFFIX_TIER1_MAX.crit_multiplier's
+  // comment for why it's stored as a plain integer), added on top of the shared
+  // Balance.CRIT_MULTIPLIER floor. Deliberately uncapped -- there's no meaningful ceiling to
+  // clamp against, unlike the percentage-based chance stats.
+  getCritMultiplierBonus(){ return this.gearBonus("crit_multiplier")/100.0; },
+  getCritMultiplierMax(){ return Balance.CRIT_MULTIPLIER+this.getCritMultiplierBonus(); },
   // v0.20.4: Armor rework -- used to be a 0-0.75 PERCENTAGE (class-innate base + gear,
   // multiplicatively reducing monster damage: `mdmg *= 1-armor`), and this getter was in
   // fact dead code on the client (only server.js's combatGetArmor() actually applied it, to
@@ -2837,7 +2950,7 @@ const PS = {
     const parts=[];
     const dmg=this.gearBonus("damage"); if(dmg) parts.push(`+${Math.round(dmg)} Damage`);
     const hp=this.gearBonus("hp"); if(hp) parts.push(`+${Math.round(hp)} Hit Points`);
-    const crit=this.gearBonus("crit"); if(crit) parts.push(`+${Math.round(crit)}% Critical Strike`);
+    const crit=this.gearBonus("crit"); if(crit) parts.push(`+${Math.round(crit)}% Critical Strike Chance`);
     const armor=this.gearBonus("armor"); if(armor) parts.push(`+${Math.round(armor)} Armor`);
     const regen=this.gearBonus("regen"); if(regen) parts.push(`+${regen.toFixed(1)} Regeneration`);
     const gf=this.gearBonus("gold_find"); if(gf) parts.push(`+${Math.round(gf)}% Gold Found`);
@@ -2857,6 +2970,11 @@ const PS = {
     const eye=this.gearBonus("eyesight"); if(eye) parts.push(`+${Math.round(eye)} Eyesight (wider maze reveal radius)`);
     // v0.20 (#11): new Block Chance gear affix -- see Balance.AFFIX_TIER1_MAX's comment.
     const bc=this.gearBonus("block_chance"); if(bc) parts.push(`+${Math.round(bc)}% Block Chance`);
+    // v0.21 (#6): new Flee Chance gear affix -- see Balance.AFFIX_TIER1_MAX's comment.
+    const fc=this.gearBonus("flee_chance"); if(fc) parts.push(`+${Math.round(fc)}% Flee Chance`);
+    // v0.21 (#8): new Critical Strike Multiplier gear affix -- see AFFIX_TIER1_MAX's comment
+    // for the /100 conversion (stored as a plain integer 10-50, shown as a decimal 0.10-0.50).
+    const cm=this.gearBonus("crit_multiplier"); if(cm) parts.push(`+${(cm/100).toFixed(2)} Critical Strike Multiplier`);
     return parts;
   },
 
@@ -3233,6 +3351,17 @@ const PS = {
     if(item.buff_type){ this.applyTempBuff(item.buff_type,item.buff_amount,item.buff_duration_ms||Balance.POTION_BUFF_DURATION_MS); used=true; }
     // v0.16: the Antidote (see ITEMS.antidote/canUseConsumable() above).
     if(item.cures_poison && this.isPoisoned()){ this.curePoison(); used=true; }
+    // v0.21 (#2): Elixir of Clarity -- only usable from inside the maze view itself (see
+    // canUseConsumable()'s matching gate), marks every cell of the CURRENT maze as
+    // discovered. The actual staggered-ripple animation is triggered by the maze quick-use
+    // button's own onClick (see screenMaze()), which calls revealEntireMazeWithClarity()
+    // itself and then animateMazeMovers() right after render() -- kept OUT of this shared
+    // useConsumable() since it's a DOM/render-side concern, not player-state mutation.
+    if(item.reveals_maze && GF.screen==="maze" && GF.overworld_snapshot){
+      const maze=GF.overworld_snapshot;
+      for(const c of maze.cells) c.discovered=true;
+      used=true;
+    }
     if(used) this._removeConsumableOne(itemId);
     return used;
   },
@@ -3247,6 +3376,13 @@ const PS = {
     // same "don't let it fire as a no-op" pattern as health/stamina potions being gated
     // on not-already-full.
     if(item.cures_poison && this.isPoisoned()) return true;
+    // v0.21 (#2): Elixir of Clarity is ONLY usable while actually standing in the maze view,
+    // with an active maze that still has undiscovered cells left to reveal (no point letting
+    // it fire as a no-op on an already-fully-explored maze).
+    if(item.reveals_maze){
+      if(GF.screen!=="maze" || !GF.overworld_snapshot) return false;
+      return GF.overworld_snapshot.cells.some(c=>!c.discovered);
+    }
     return false;
   },
   // v0.17.3 (#8): drains PS.active_heals, one dedicated sub-tick (Balance.POTION_HEAL_
@@ -3530,7 +3666,7 @@ const PS = {
     for(const s of IF.EQUIPPED_SLOT_KEYS) this.equipped[s]=null;
     this.equipped_bags=[]; this.pending_scroll_bonus=0; this.xp_buff_multiplier=1.0;
     this.xp_buff_encounters_left=0; this.stamina_shrine_buff=0.0; this.highest_tier_reached=1;
-    this.season_won=false; this.kill_streak=0; this.max_kill_streak=0; this.forest_reputation={}; this.xp_to_next=Balance.xpRequiredForLevel(this.level);
+    this.season_won=false; this.kill_streak=0; this.max_kill_streak=0; this.total_kills=0; this.forest_reputation={}; this.xp_to_next=Balance.xpRequiredForLevel(this.level);
     this.lifetime_xp=0; this.isRestingAtCampfire=false; this.eyesight_potion_steps_left=0;
     this.max_maze_depth_reached=1;
     // v0.17 (#1): same reused-singleton leak class as weapon_skills/trial_progress below --
@@ -3642,6 +3778,11 @@ const PS = {
       // just-incremented kill_streak back to undefined/0, so the counter could never climb
       // past 1 in normal play. Kept alongside max_kill_streak, same reasoning.
       kill_streak:this.kill_streak||0,
+      // v0.21 (#17): total_kills is the OTHER lifetime record alongside max_kill_streak --
+      // never resets, feeds the new "Monsters Killed" leaderboard tab. Same reasoning as
+      // both fields above: must ride along on every autosave, or the server's already-higher
+      // count would get silently overwritten back down on the very next save.
+      total_kills:this.total_kills||0,
       // v0.18.2 (#6): per-tier Forest Reputation, must survive a save/reload -- see its
       // declaration/_applyLoadedData() above.
       forest_reputation:this.forest_reputation||{},
@@ -3677,6 +3818,9 @@ const PS = {
     // v0.18.2 (#8): unlike kill_streak (deliberately reset to 0 on every load, right above),
     // max_kill_streak is the lifetime record and must survive a save/reload intact.
     this.max_kill_streak=parsed.max_kill_streak||0;
+    // v0.21 (#17): total_kills is the OTHER lifetime record -- like max_kill_streak (and
+    // UNLIKE kill_streak just above), it must survive a save/reload intact.
+    this.total_kills=parsed.total_kills||0;
     // v0.18.2 (#6): Forest Reputation is per-tier persisted state, same "must survive a
     // save/reload" reasoning as max_kill_streak just above.
     this.forest_reputation=parsed.forest_reputation||{};
@@ -3995,9 +4139,30 @@ let _floatSeq=0;
 // spawn time below) so floatLayer()'s pruning/animation-delay math can treat mixed-duration
 // entries correctly instead of assuming one fixed animation length for everything.
 const FLOAT_COMBAT_DURATION_MS=2000, FLOAT_LOOT_DURATION_MS=4000;
-function spawnFloat(anchor,text,cls){
+// v0.21 (#11): optional 5th param -- a font-size (in em) override for this one entry, used by
+// the crit floating text below to scale with how hard the crit rolled. Left undefined for
+// every other call site, which keeps the CSS class's own default size (see floatLayer()).
+function spawnFloat(anchor,text,cls,fontSizeEm){
   const durationMs=(cls==="float-text-xp"||cls==="float-text-gold")?FLOAT_LOOT_DURATION_MS:FLOAT_COMBAT_DURATION_MS;
-  GF.floatingTexts.push({id:++_floatSeq,anchor,kind:"text",text,cls,t:Date.now(),durationMs});
+  GF.floatingTexts.push({id:++_floatSeq,anchor,kind:"text",text,cls,t:Date.now(),durationMs,fontSizeEm});
+}
+// v0.21 (#11): "how big should this crit's floating number look" -- 0..1 `frac` is how close
+// the ACTUAL rolled multiplier landed to this specific actor's own ceiling (their personal
+// [Balance.CRIT_MULTIPLIER, max] range, NOT some fixed absolute scale), per Gwen's explicit
+// spec that a mob near ITS OWN max should read as a big roll too, even if that mob's max is
+// far below a heavily-geared player's. The color itself (orange-yellow, .float-text-crit)
+// deliberately does not change -- Gwen confirmed that's already right, only size scales.
+// Breakpoints and exact em values are this patch's own judgment call (not dictated by Gwen's
+// spec beyond "1.75 = regular, 2.9 = noticeably larger, 3.5 = even bigger, further out =
+// big"), chosen so a roll near the very bottom of an actor's range reads as the same size as
+// a non-crit hit, and only escalates once a roll is genuinely closer to that actor's ceiling.
+function critFloatFontSizeEm(rolledMult, maxMult){
+  const floor=Balance.CRIT_MULTIPLIER;
+  const frac=maxMult>floor ? clampf((rolledMult-floor)/(maxMult-floor),0,1) : 0;
+  if(frac<0.15) return 1.2;
+  if(frac<0.45) return 1.5;
+  if(frac<0.75) return 1.9;
+  return 2.4;
 }
 // v0.20 (#1): called from PS's `gold` setter (see its own comment for the full "why here,
 // not at each call site" story) any time the account's shared gold pool actually changes
@@ -4038,6 +4203,10 @@ function floatLayer(anchor){
   return h("div",{class:"float-text-layer"},mine.map((e,i)=>{
     const durationMs=e.durationMs||FLOAT_COMBAT_DURATION_MS;
     const style={animationDelay:(-(now-e.t))+"ms",animationDuration:durationMs+"ms",top:(-(i*20))+"px"};
+    // v0.21 (#11): per-entry font-size override for crit rolls -- see spawnFloat()'s own
+    // comment and critFloatFontSizeEm(). Overrides just the one longhand from the CSS class's
+    // font-size, same pattern animationDuration above already uses.
+    if(e.fontSizeEm) style.fontSize=e.fontSizeEm+"em";
     if(e.kind==="item"){
       return h("div",{class:"float-text-item",style},[gearIcon(e.inst,18),h("span",{class:"rarity-"+e.inst.rarity},[IF.displayName(e.inst)])]);
     }
@@ -4777,7 +4946,14 @@ function statHeader(opts={}){
       ]),
     ]),
     h("div",{class:"row",style:{marginTop:"8px",alignItems:"flex-start",gap:"14px"}},[
-      h("div",{class:"col",style:{gap:compact?"3px":"8px",flex:"0 0 33%",maxWidth:"33%",minWidth:"0"}},[
+      h("div",{class:"col",style:{gap:compact?"3px":"6px",flex:"0 0 33%",maxWidth:"33%",minWidth:"0"}},[
+        // v0.21 (#12): each label+bar pair is now its own tight-gap sub-column (1px) instead
+        // of being flat children of the outer col sharing its wider gap -- per Gwen's exact
+        // request, "XP x/x" sits close atop the XP bar, "HP x/x" sits close atop the health
+        // bar, and "Stamina x/x" sits almost right on top of its bar, while the outer col's
+        // gap (reduced 8px->6px above) still keeps the 3 distinct groups visually separated
+        // from each other. Net effect: the whole player-tile panel gets noticeably shorter.
+        h("div",{class:"col",style:{gap:"1px"}},[
         // v0.18.1 (#18): shrine buff icons now use the game's normal styled .tooltip
         // component (data-tip, shown via CSS ::after, tap-to-open on mobile thanks to the
         // shared closestWithClass() click handler) instead of the plain browser `title`
@@ -4793,6 +4969,8 @@ function statHeader(opts={}){
         // the HP bar it used to visually originate from -- see spawnFloat()'s "xpbar" anchor
         // call site in applyAttackResult().
         h("div",{style:{position:"relative"}},[bar(PS.xp/PS.xp_to_next*100,"bar-xp bar-fill-xp-grow",compact,"stat-xp-bar-fill"), floatLayer("xpbar")]),
+        ]),
+        h("div",{class:"col",style:{gap:"1px"}},[
         // v0.17 (#3): the HP text + bar render in a distinct poison-green (not the usual
         // HP-red) for the duration of the Poison effect, reverting the instant it ends --
         // see the .hp-text-poisoned/.bar-hp-poisoned CSS rules. v0.17 (#8): the status icon
@@ -4822,11 +5000,14 @@ function statHeader(opts={}){
         // pattern as the poison/regen indicators above.
         h("span",{id:"stat-healing-text",class:"muted",style:{marginLeft:"4px",display:PS.getHealPerSecond()>0?"inline":"none"}},[`(healing +${PS.getHealPerSecond().toFixed(1)}/sec)`])]),
         hpBar(compact),
+        ]),
+        h("div",{class:"col",style:{gap:"1px"}},[
         h("div",{},[h("span",{id:"stat-stamina-text",class:"stamina-text"},[`Stamina ${Math.round(PS.current_stamina)}/${Math.round(PS.getMaxStamina())}`]), PS.stamina_shrine_buff>0?h("span",{class:"tooltip","data-tip":`Stamina shrine active: ${Math.round(PS.stamina_shrine_buff)} bonus stamina in reserve.`,style:{marginLeft:"4px"}},["✨"]):null,
         // v0.18.1 (#20): stamina potions now heal gradually too -- same "(recovering +X.X/sec)"
         // indicator as the HP row above, kept in sync by refreshStatHeaderInPlace().
         h("span",{id:"stat-stamina-healing-text",class:"muted",style:{marginLeft:"4px",display:PS.getStaminaHealPerSecond()>0?"inline":"none"}},[`(recovering +${PS.getStaminaHealPerSecond().toFixed(1)}/sec)`])]),
         staminaBar(compact),
+        ]),
       ]),
       inventoryPreview(),
     ]),
@@ -5337,18 +5518,20 @@ function screenLeaderboard(){
 
   // v0.17.3 (#13/#14): sub-tabs. Ladder Progression is the original single view (now with
   // gold removed, see #410); Skill Progression and Gold followed. v0.18.2 (#8) adds a 4th,
-  // Max Killstreak.
+  // Max Killstreak. v0.21 (#17) adds a 5th, Monsters Killed.
   if(GF.leaderboardTab==null) GF.leaderboardTab="ladder";
   root.appendChild(h("div",{class:"row gap",style:{marginBottom:"12px"}},[
     leaderboardTabButton("ladder","Ladder Progression"),
     leaderboardTabButton("skills","Skill Progression"),
     leaderboardTabButton("gold","Gold"),
     leaderboardTabButton("killstreak","Max Killstreak"),
+    leaderboardTabButton("monsterskilled","Monsters Killed"),
   ]));
 
   if(GF.leaderboardTab==="skills"){ root.appendChild(leaderboardSkillsTab()); return root; }
   if(GF.leaderboardTab==="gold"){ root.appendChild(leaderboardGoldTab()); return root; }
   if(GF.leaderboardTab==="killstreak"){ root.appendChild(leaderboardKillstreakTab()); return root; }
+  if(GF.leaderboardTab==="monsterskilled"){ root.appendChild(leaderboardMonstersKilledTab()); return root; }
   root.appendChild(leaderboardLadderTab());
   return root;
 }
@@ -5612,6 +5795,41 @@ function leaderboardKillstreakTab(){
   return root;
 }
 
+// v0.21 (#17): "Monsters Killed" leaderboard tab -- ranks every character by total_kills, a
+// lifetime running total that NEVER resets (unlike kill_streak, and unlike max_kill_streak
+// this one never gets "beaten" by a fresh streak either -- it's a pure cumulative count).
+// Otherwise an exact structural mirror of the Max Killstreak tab right above: per-character
+// (not per-account), server-sorted+capped at 50, same Inspect Player button.
+function leaderboardMonstersKilledTab(){
+  const root=h("div",{});
+  if(Net.leaderboardMonstersKilledCache===null||Net.leaderboardMonstersKilledCache===undefined){
+    root.appendChild(h("div",{class:"muted"},["Loading..."]));
+    Net.fetchLeaderboardMonstersKilled().then(render).catch(()=>{ setToast("Could not load the Monsters Killed leaderboard."); render(); });
+    return root;
+  }
+  // same "don't clutter the ranking with characters who haven't done anything yet" filter
+  // as the Max Killstreak tab uses (see #537/v0.19.2 #12).
+  const entries=(Net.leaderboardMonstersKilledCache||[]).filter(e=>(e.total_kills||0)>0);
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"10px"}},["Top characters by total monsters slain, ever -- a lifetime running total that never resets. Different characters on the same account are ranked separately."]));
+  if(entries.length===0){ root.appendChild(h("div",{class:"muted"},["No kills recorded yet."])); return root; }
+  entries.forEach((e,i)=>{
+    root.appendChild(h("div",{class:"tile row",style:{marginBottom:"6px",justifyContent:"space-between",alignItems:"center"}},[
+      h("div",{style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},[
+        h("span",{class:"muted"},[`#${i+1} `]),
+        h("span",{style:{fontWeight:"bold"}},[e.character_name]),
+        " ",
+        h("span",{class:"muted"},[`(${e.player}) `]),
+        e.is_dead?h("span",{style:{color:"#e07a7a"},title:"Fallen"},["🪦 "]):null,
+      ]),
+      h("div",{class:"row",style:{alignItems:"center",flex:"none",gap:"6px"}},[
+        h("span",{},[`${e.total_kills} kills`]),
+        inspectPlayerButton(e.account_id,e.character_name,e.is_dead),
+      ]),
+    ]));
+  });
+  return root;
+}
+
 // v0.17.3 (#15): "Inspect Player" -- a strictly READ-ONLY view of another player's equipped
 // gear, attributes, and skill progression, reached via the magnifying-glass button on the
 // Ladder/Skill Progression tabs. This renders from a plain fetched data object
@@ -5624,9 +5842,13 @@ function leaderboardKillstreakTab(){
 // matching server-side security notes (GET-only, whitelisted fields, no mutation surface).
 function inspectEquipSlotTile(slot,snapshot){
   const inst=snapshot.equipped[slot];
+  // v0.21 (#15): upgraded from the old flat plain-text .tooltip/data-tip pair to the same
+  // styled, structured hover box (gearHoverBox(), built on the shared gearHoveredItemContent())
+  // every other item name in the game now uses -- see that function's own comment for why this
+  // is the generic component future screens should reach for too.
   return h("div",{class:"tile"},[
     h("div",{class:"muted"},[IF.slotLabel(slot)]),
-    inst?h("div",{class:"row gap",style:{alignItems:"center"}},[gearIcon(inst,26), h("div",{class:"tooltip rarity-"+inst.rarity,"data-tip":IF.tooltipText(inst)},[IF.displayName(inst)+` (${tierRomanNumeral(inst.tier)})`])]):h("div",{class:"muted"},["(empty)"]),
+    inst?h("div",{class:"row gap",style:{alignItems:"center"}},[gearIcon(inst,26), gearHoverBox(h("div",{class:"rarity-"+inst.rarity,style:{fontWeight:"bold"}},[IF.displayName(inst)+` (${tierRomanNumeral(inst.tier)})`]), inst)]):h("div",{class:"muted"},["(empty)"]),
   ]);
 }
 
@@ -5975,6 +6197,29 @@ function generateMaze(depth){
   cells[0].type="start"; cells[0].baseTerrain="start";
   let exitIdx=0, best=-1;
   for(let i=0;i<cells.length;i++) if(dist[i]>best){ best=dist[i]; exitIdx=i; }
+  // v0.21 (#1): the exit used to ALWAYS land on the single farthest-reachable tile from the
+  // start (0,0), which -- combined with the start always being in the top-left corner --
+  // meant it was almost always somewhere in the far-right region. Players learned this and
+  // just beelined right every single run. Now there are 3 possible outcomes, rolled once per
+  // maze: majority of the time it's still the farthest tile (unchanged, still a full-length
+  // walk); sometimes it's instead the farthest tile specifically within the BOTTOM-LEFT
+  // region (still a full walk, just breaks the "always go right" muscle memory); and very
+  // rarely it's a "premature" exit roughly halfway across the maze, a surprise shortcut. Both
+  // alternates fall back to the plain farthest-tile behavior if their region has no qualifying
+  // candidate (e.g. a maze whose bottom-left is mostly boulders).
+  const exitRoll=Math.random();
+  if(exitRoll<Balance.MAZE_PREMATURE_EXIT_CHANCE){
+    const halfCandidates=[];
+    for(let i=1;i<cells.length;i++) if(dist[i]>=best*0.35 && dist[i]<=best*0.55) halfCandidates.push(i);
+    if(halfCandidates.length>0) exitIdx=pick(halfCandidates);
+  } else if(exitRoll<Balance.MAZE_PREMATURE_EXIT_CHANCE+Balance.MAZE_BOTTOMLEFT_EXIT_CHANCE){
+    let blBest=-1, blIdx=-1;
+    for(let i=1;i<cells.length;i++){
+      const cx=i%size, cy=Math.floor(i/size);
+      if(dist[i]>=0 && cx<size*0.4 && cy>=sizeH*0.6 && dist[i]>blBest){ blBest=dist[i]; blIdx=i; }
+    }
+    if(blIdx>=0) exitIdx=blIdx;
+  }
   cells[exitIdx].type="exit";
 
   // Stronghold: a 3x3 structure (see placeStronghold), placed before the ordinary per-tile
@@ -6433,6 +6678,25 @@ function screenMaze(){
         // drains "even outside of combat" (see the poison-drain setInterval), so a player
         // needs to be able to cure it from the maze view itself, not just in town.
         h("button",{disabled:!!GF.mazeOverlay||!PS.canUseConsumable("antidote"),onClick:()=>{ PS.useConsumable("antidote"); autosave(); render(); }},["Use Antidote"]),
+        // v0.21 (#2): Elixir of Clarity -- the ONLY consumable that's only usable from this
+        // exact view (see canUseConsumable()'s reveals_maze gate). Captures each currently-
+        // undiscovered cell's Manhattan distance from the player BEFORE calling
+        // useConsumable() (which flips every cell's `discovered` flag to true), so
+        // animateMazeMovers() can stagger the fade-in as an outward ripple instead of
+        // popping the whole grid into view at once.
+        h("button",{disabled:!!GF.mazeOverlay||!PS.canUseConsumable("elixir_of_clarity"),onClick:()=>{
+          const px=maze.playerIdx%maze.size, py=Math.floor(maze.playerIdx/maze.size);
+          const ripple=[];
+          for(let i=0;i<maze.cells.length;i++){
+            if(!maze.cells[i].discovered){
+              const cx=i%maze.size, cy=Math.floor(i/maze.size);
+              ripple.push({idx:i, dist:Math.abs(cx-px)+Math.abs(cy-py)});
+            }
+          }
+          PS.useConsumable("elixir_of_clarity");
+          maze._clarityReveal=ripple;
+          autosave(); render(); animateMazeMovers(null,null);
+        }},["Use Elixir of Clarity"]),
       ]),
       // v0.18.2 (#1) (lore phrasing credit: Marudok): regenerates a brand new layout at the
       // SAME area level -- fog of war, roamer positions, the Stronghold, everything about
@@ -6539,6 +6803,27 @@ function animateMazeMovers(prevPlayerIdx, prevRoamerPositions){
       },20);
     }
     maze._justRevealed=[];
+  }
+  // v0.21 (#2): Elixir of Clarity's "slowly, animatedly reveals the entire maze grid" --
+  // unlike the ordinary fog-of-war fade above (every newly-revealed tile fades in at once),
+  // this staggers each tile's fade-in delay by its Manhattan distance from the player's
+  // current position, so the reveal visibly ripples outward from where you're standing
+  // instead of popping the whole grid in together. Populated by the maze screen's "Use
+  // Elixir of Clarity" button (see screenMaze()) right after calling PS.useConsumable(),
+  // with each entry's `dist` captured before useConsumable() flips every cell's `discovered`
+  // flag to true.
+  if(maze._clarityReveal && maze._clarityReveal.length){
+    for(const {idx,dist} of maze._clarityReveal){
+      const el=document.getElementById("maze-tile-"+idx);
+      if(!el || !el.parentNode) continue;
+      el.style.transition="none";
+      el.style.opacity="0";
+      setTimeout(()=>{
+        el.style.transition="";
+        el.style.opacity="1";
+      },30+dist*35);
+    }
+    maze._clarityReveal=[];
   }
 }
 
@@ -7036,6 +7321,12 @@ async function startCombatSession(monsterId, guardianCellIdx, roamerId){
       session_id:result.session_id, monster_id:monsterId, guardianCellIdx, roamerId,
       name:result.monster.name, hp:result.monster.hp, maxHp:result.monster.max_hp,
       loot_table:base.loot_table, isGuardian:guardianCellIdx!=null, isRoamer:roamerId!=null,
+      // v0.21 (#9/#11): the monster's own area level, kept around purely so the client can
+      // compute Balance.monsterCritMultiplierMax(cb.area_level) for the crit floating text's
+      // font-size scaling (see critFloatFontSizeEm()) -- the server already used this same
+      // area level to decide the monster's actual crit roll, this is just so the client can
+      // work out how "big" that roll was relative to this specific monster's own ceiling.
+      area_level:GF.maze_depth,
       log:[...(result.log||[])], defeated:false, result_text:"",
     };
     autosave();
@@ -7123,9 +7414,16 @@ function chestLootEntryNode(entry){
     ]);
   }
   if(entry.kind==="consumable"){
+    // v0.21 (#13): optional `note` (e.g. "couldn't fit, bag rack full") -- same muted
+    // sub-line pattern the "gear" branch above already uses for its leftBehind/autoEquipped
+    // note, added here purely for the Stronghold chest's bag drop; every pre-existing
+    // consumable entry (chest scrolls, herb-gather potions, etc.) simply never sets it.
     return h("div",{class:"row gap",style:{alignItems:"center"}},[
       itemIcon(entry.itemId,32),
-      h("div",{},[`${DL.getItem(entry.itemId).name}`+(entry.qty>1?` x${entry.qty}`:"")]),
+      h("div",{},[
+        h("div",{},[`${DL.getItem(entry.itemId).name}`+(entry.qty>1?` x${entry.qty}`:"")]),
+        entry.note?h("div",{class:"muted",style:{fontSize:".85em"}},[entry.note]):null,
+      ]),
     ]);
   }
   if(entry.kind==="herb"){
@@ -7246,7 +7544,20 @@ function screenCombat(){
   // instead of doing nothing -- the tile was already the clickable "attack" surface (see the
   // v0.18.1 (#23) comment below), so re-using that exact same spot for the next action needed
   // (Continue Wandering) means the click target never jumps around after a kill.
-  const continueWandering=()=>{ GF.combat=null; GF.goto("maze",{maze_depth:GF.maze_depth}); };
+  // v0.21 (#4): if this kill queued a Stronghold Key ceremonial reveal (see the guardian
+  // branch of the kill-handling code above), Continue Wandering opens THAT first instead of
+  // going straight back to the maze -- reveal's own Continue button is what finally lands on
+  // the maze, exactly the same two-step flow a chest/herb-gather already uses.
+  const continueWandering=()=>{
+    const maze_depth=GF.maze_depth;
+    if(cb.pendingKeyReveal){
+      GF.chestReveal={...cb.pendingKeyReveal, returnDepth:maze_depth};
+      GF.combat=null;
+      GF.goto("chestReveal");
+      return;
+    }
+    GF.combat=null; GF.goto("maze",{maze_depth});
+  };
   // v0.18.1 (#23): the entire monster tile is clickable to attack, not just the small
   // "Attack" button below it. Disabled while a request is already in flight (see
   // GF.combatResolving) so an impatient extra click can't fire a second attack before the
@@ -7322,9 +7633,14 @@ function screenCombat(){
       combatLog(cb,`The ${cb.name} blocks your attack!`);
       spawnFloat("monster","Blocked","float-text-block");
     } else if(result.player_hit){
-      const {damage,crit,quad_damage}=result.player_hit;
-      combatLog(cb,`You hit the ${cb.name} for ${damage} damage${crit?" (Critical!)":""}${quad_damage?" (Quad Damage!)":""}.`);
-      spawnFloat("monster",`-${damage} HP${crit?" CRIT!":""}`,crit?"float-text-crit":"float-text-dmg");
+      const {damage,crit,quad_damage,crit_mult}=result.player_hit;
+      // v0.21 (#10/#11): crit_mult is the ACTUAL multiplier the server rolled for this hit
+      // (randomly between Balance.CRIT_MULTIPLIER and the player's own current ceiling, see
+      // PS.getCritMultiplierMax()) -- shown in the log so a crit's exact size is visible, and
+      // used to scale the floating text's font-size via critFloatFontSizeEm().
+      combatLog(cb,`You hit the ${cb.name} for ${damage} damage${crit?` (Critical! x${crit_mult.toFixed(2)})`:""}${quad_damage?" (Quad Damage!)":""}.`);
+      const fontSizeEm=crit?critFloatFontSizeEm(crit_mult,PS.getCritMultiplierMax()):undefined;
+      spawnFloat("monster",`-${damage} HP${crit?" CRIT!":""}`,crit?"float-text-crit":"float-text-dmg",fontSizeEm);
       // The server already recorded this hit against the stored character's weapon_skills
       // (see combatRegisterWeaponHit() in server.js) -- mirror that exact +1 locally
       // (deterministic, no RNG) so the Character Sheet's Skill Bonuses card and this
@@ -7361,7 +7677,7 @@ function screenCombat(){
       // already credited the account directly; mirror that exact delta locally so the
       // header's gold figure updates without waiting on a full character reload.
       Net.accountGold=(Net.accountGold||0)+k.gold_credited;
-      PS.kill_streak=k.kill_streak; PS.max_kill_streak=k.max_kill_streak;
+      PS.kill_streak=k.kill_streak; PS.max_kill_streak=k.max_kill_streak; PS.total_kills=k.total_kills;
       const lootMsg=applyCombatLoot(k.loot);
       // v0.20.1 (#10): a kill can now also carry bonus_loot -- an array of zero or more
       // extra drops beyond the guaranteed one above (see combatRollExtraLootCount() in
@@ -7386,6 +7702,15 @@ function screenCombat(){
         if(k.key_drop && k.key_drop.item_id){
           PS.addConsumable(k.key_drop.item_id,1);
           cb.result_text+=` It drops a Stronghold Key (Tier ${tierRomanNumeral(k.key_drop.tier)})!`;
+          // v0.21 (#4): a dropped key now gets the exact same ceremonial loot-reveal screen
+          // a chest (or herb gather) opens into, instead of just this one appended sentence
+          // -- queued here rather than shown immediately so the ordinary combat result text/
+          // "Continue Wandering" flow is untouched; continueWandering() below is what
+          // actually detects this and routes into chestReveal before returning to the maze.
+          cb.pendingKeyReveal={
+            title:"The guardian's Stronghold Key falls to the ground!",
+            entries:[{kind:"consumable", itemId:k.key_drop.item_id, qty:1}],
+          };
         } else if(k.key_drop && k.key_drop.eligible){
           cb.result_text+=" The path to the Stronghold's chest is open, if you can find a key.";
         } else {
@@ -7421,9 +7746,12 @@ function screenCombat(){
       } else if(mt.damage!=null){
         // v0.19.1 (#10): monsters can now crit too (see combatGetMonsterCritChance() in
         // server.js) -- mirrors the player's own "(Critical!)" log wording/float-text-crit
-        // class exactly.
-        combatLog(cb,`The ${cb.name} hits you for ${mt.damage} damage${mt.crit?" (Critical!)":""}.`);
-        spawnFloat("player",`-${mt.damage} HP${mt.crit?" CRIT!":""}`,mt.crit?"float-text-crit":"float-text-dmg");
+        // class exactly. v0.21 (#9/#10/#11): mt.crit_mult is the monster's own actual rolled
+        // multiplier (between Balance.CRIT_MULTIPLIER and Balance.monsterCritMultiplierMax
+        // (cb.area_level)) -- same log/font-size treatment as the player's own crit above.
+        combatLog(cb,`The ${cb.name} hits you for ${mt.damage} damage${mt.crit?` (Critical! x${mt.crit_mult.toFixed(2)})`:""}.`);
+        const fontSizeEm=mt.crit?critFloatFontSizeEm(mt.crit_mult,Balance.monsterCritMultiplierMax(cb.area_level)):undefined;
+        spawnFloat("player",`-${mt.damage} HP${mt.crit?" CRIT!":""}`,mt.crit?"float-text-crit":"float-text-dmg",fontSizeEm);
       }
     }
     // The server is the sole authority on "did this round kill the player" now (see
@@ -7470,8 +7798,11 @@ function screenCombat(){
             combatLog(cb,`You block the ${cb.name}'s attack entirely!`);
             spawnFloat("player","Blocked","float-text-block");
           } else if(mt.damage!=null){
-            combatLog(cb,`The ${cb.name} hits you for ${mt.damage} damage${mt.crit?" (Critical!)":""}.`);
-            spawnFloat("player",`-${mt.damage} HP${mt.crit?" CRIT!":""}`,mt.crit?"float-text-crit":"float-text-dmg");
+            // v0.21 (#9/#10/#11): same actual-crit-multiplier log/font-size treatment as the
+            // attack-round monster_turn handling above.
+            combatLog(cb,`The ${cb.name} hits you for ${mt.damage} damage${mt.crit?` (Critical! x${mt.crit_mult.toFixed(2)})`:""}.`);
+            const fontSizeEm=mt.crit?critFloatFontSizeEm(mt.crit_mult,Balance.monsterCritMultiplierMax(cb.area_level)):undefined;
+            spawnFloat("player",`-${mt.damage} HP${mt.crit?" CRIT!":""}`,mt.crit?"float-text-crit":"float-text-dmg",fontSizeEm);
           }
         }
         if(result.fatal){ endCombatDeath(); return; }
@@ -7657,47 +7988,67 @@ function screenStrongholdChest(){
     h("button",{class:"play",onClick:()=>{
       PS._removeConsumableOne(requiredKeyId);
       const tier=Balance.rollItemTier(GF.maze_depth);
-      const msgs=[];
+      // v0.21 (#13): builds the exact same structured `entries` array a regular chest's
+      // ceremonial reveal (screenChestReveal()/chestLootEntryNode()) already knows how to
+      // render, instead of collecting plain summary strings into a single toast -- per
+      // Gwen's exact spec, "the stronghold chest should have the same opening ceremonial
+      // view as a regular chest's loot, listing the items in view before moving on."
+      const entries=[];
 
       const gearCount=randIntRange(Balance.STRONGHOLD_CHEST_GEAR_COUNT_MIN,Balance.STRONGHOLD_CHEST_GEAR_COUNT_MAX);
-      let gearFound=0, gearLeftBehind=0;
       for(let i=0;i<gearCount;i++){
         const inst=IF.generate(tier,"",pick(["Rare","Epic"]));
-        if(PS.addGearAutoEquip(inst)) gearFound++; else gearLeftBehind++;
+        const willAutoEquip=PS.canAutoEquip(inst);
+        if(PS.addGearAutoEquip(inst)){
+          entries.push({kind:"gear", inst, autoEquipped:willAutoEquip});
+        } else {
+          entries.push({kind:"gear", inst, leftBehind:true});
+        }
       }
-      msgs.push(`${gearFound} rare/epic item${gearFound===1?"":"s"} of gear`+(gearLeftBehind>0?` (${gearLeftBehind} left behind, bags full)`:""));
 
       const goldFound=randIntRange(Balance.STRONGHOLD_CHEST_GOLD_MIN,Balance.STRONGHOLD_CHEST_GOLD_MAX);
-      PS.addGold(goldFound); msgs.push(`${goldFound} gold`);
+      PS.addGold(goldFound); entries.push({kind:"gold", amount:goldFound});
 
+      // v0.21 (#13): herbs are rolled one at a time (same as before) but tallied per herb id
+      // so the reveal shows one row per herb type with its total quantity, instead of a
+      // single "N herbs" line that didn't say which ones.
       const herbTotal=randIntRange(Balance.STRONGHOLD_CHEST_HERBS_MIN,Balance.STRONGHOLD_CHEST_HERBS_MAX);
-      for(let i=0;i<herbTotal;i++) PS.addHerb(DL.pickHerbForNode(GF.maze_depth),1);
-      msgs.push(`${herbTotal} herbs`);
+      const herbCounts={};
+      for(let i=0;i<herbTotal;i++){
+        const herbId=DL.pickHerbForNode(GF.maze_depth);
+        PS.addHerb(herbId,1);
+        herbCounts[herbId]=(herbCounts[herbId]||0)+1;
+      }
+      for(const herbId of Object.keys(herbCounts)) entries.push({kind:"herb", herbId, qty:herbCounts[herbId]});
 
       // v0.12.1: Stronghold loot hands out the top of the potion ladder (Greater/Supreme),
       // not the base tier -- this chest is supposed to be "pretty good loot", so its
       // potions shouldn't be the same ones a common Sprout can drop.
+      // v0.21 (#13): same per-item-id tally as herbs above, so the reveal can show exactly
+      // which potion tiers were found instead of just a health/stamina split.
       const potionTotal=randIntRange(Balance.STRONGHOLD_CHEST_POTIONS_MIN,Balance.STRONGHOLD_CHEST_POTIONS_MAX);
-      let healthGiven=0, staminaGiven=0;
+      const potionCounts={};
       for(let i=0;i<potionTotal;i++){
         const healthTier=pick(["greater_health_potion","supreme_health_potion"]);
         const staminaTier=pick(["greater_stamina_potion","supreme_stamina_potion"]);
-        if(Math.random()<0.5){ PS.addConsumable(healthTier,1); healthGiven++; } else { PS.addConsumable(staminaTier,1); staminaGiven++; }
+        const chosenId=Math.random()<0.5?healthTier:staminaTier;
+        PS.addConsumable(chosenId,1);
+        potionCounts[chosenId]=(potionCounts[chosenId]||0)+1;
       }
-      msgs.push(`${healthGiven} health & ${staminaGiven} stamina potions`);
+      for(const itemId of Object.keys(potionCounts)) entries.push({kind:"consumable", itemId, qty:potionCounts[itemId]});
 
       if(Math.random()<Balance.STRONGHOLD_CHEST_SCROLL_CHANCE){
         const scroll=pick(["scroll_of_challenge_1","scroll_of_challenge_2","scroll_of_challenge_3"]);
-        PS.addConsumable(scroll,1); msgs.push(DL.getItem(scroll).name);
+        PS.addConsumable(scroll,1); entries.push({kind:"consumable", itemId:scroll, qty:1});
       }
       if(Math.random()<Balance.STRONGHOLD_CHEST_EYESIGHT_CHANCE){
-        PS.addConsumable("elixir_of_eyesight",1); msgs.push("an Elixir of Eyesight");
+        PS.addConsumable("elixir_of_eyesight",1); entries.push({kind:"consumable", itemId:"elixir_of_eyesight", qty:1});
       }
       if(Math.random()<Balance.STRONGHOLD_CHEST_BAG_CHANCE){
         const bagIds=Object.keys(ITEMS).filter(id=>ITEMS[id].type==="bag");
         const bagId=pick(bagIds);
         const result=PS.equipBag(bagId);
-        msgs.push(result.success?ITEMS[bagId].name:`${ITEMS[bagId].name} (couldn't fit, bag rack full)`);
+        entries.push({kind:"consumable", itemId:bagId, qty:1, note:result.success?null:"Couldn't fit, bag rack full"});
       }
 
       if(maze){
@@ -7705,9 +8056,10 @@ function screenStrongholdChest(){
         if(cell) cell.cleared=true;
         if(maze.stronghold) maze.stronghold.opened=true;
       }
+      const returnDepth=GF.maze_depth;
       PS.saveGame();
-      setToast("The chest creaks open! You find: "+msgs.join(", ")+".");
-      GF.goto("maze",{maze_depth:GF.maze_depth});
+      GF.chestReveal={title:"The Stronghold chest creaks open!", entries, returnDepth};
+      GF.goto("chestReveal");
     }},["Unlock with Key"]),
     h("button",{onClick:()=>{ GF.goto("maze",{maze_depth:GF.maze_depth}); }},["Leave it"]),
   ]));
@@ -7900,10 +8252,19 @@ function gearComparisonContent(inst){
 // same info, just as real nodes instead of a joined string.
 function gearHoveredItemContent(inst){
   const nodes=[h("div",{class:"compare-title rarity-"+inst.rarity},[`${IF.displayName(inst)} (${tierRomanNumeral(inst.tier)})`])];
-  nodes.push(h("div",{style:{marginBottom:"2px"}},[`Requires Level ${Balance.tierLevelRequirement(inst.tier)}`]));
+  // v0.21 (#14): each requirement line is colored red (matching the invalid gear tile's own
+  // red background/border, see equipSlotTile()'s invalid styling) independently of the
+  // other, exactly matching which specific requirement(s) this character currently fails --
+  // a level-locked-but-right-class item colors only the level line, a wrong-class-but-high-
+  // enough-level item colors only the Class line, and an item failing both colors both.
+  const levelFailed=PS.level<Balance.tierLevelRequirement(inst.tier);
+  nodes.push(h("div",{style:{marginBottom:"2px",color:levelFailed?"#e07a7a":undefined}},[`Requires Level ${Balance.tierLevelRequirement(inst.tier)}`]));
   const weaponType=IF.weaponTypeForInstance(inst);
   const restrictedTo=weaponType?IF.WEAPON_TYPE_CLASS_RESTRICTIONS[weaponType]:null;
-  if(restrictedTo) nodes.push(h("div",{style:{marginBottom:"2px"}},[`Class: ${restrictedTo.map(id=>DL.getClass(id).display_name||id).join(", ")}`]));
+  if(restrictedTo){
+    const classFailed=!IF.classCanEquipItem(PS.class_id,inst);
+    nodes.push(h("div",{style:{marginBottom:"2px",color:classFailed?"#e07a7a":undefined}},[`Class: ${restrictedTo.map(id=>DL.getClass(id).display_name||id).join(", ")}`]));
+  }
   for(const a of (inst.affixes||[])) nodes.push(h("div",{},[IF.formatAffix(a,inst)]));
   return nodes;
 }
@@ -7913,6 +8274,22 @@ function gearCompareWrap(triggerEl, inst){
     triggerEl,
     h("div",{class:"hover-item-box"},gearHoveredItemContent(inst)),
     h("div",{class:"compare-box"},gearComparisonContent(inst)),
+  ]);
+}
+// v0.21 (#15): the styled structured item-info hover box (gearHoveredItemContent()) minus the
+// "Currently Equipped" compare-box gearCompareWrap() also shows -- for screens like Inspect
+// Player where there's no sensible "compare to MY equipped gear in THIS slot" framing since
+// the tile being hovered isn't even a slot the viewer's own character has equipped anything
+// comparable in. This is the generic, reusable piece Gwen asked for: any future screen that
+// needs "hover an item, see its real styled info" (not the flat old data-tip tooltip) should
+// reach for this (or gearCompareWrap() if a compare-box also makes sense there) instead of
+// rebuilding its own tooltip markup -- see gearHoveredItemContent()'s own comment for exactly
+// what it renders (title, Requires Level/Class lines colored red if the CURRENTLY LOGGED IN
+// character fails them, then every affix).
+function gearHoverBox(triggerEl, inst){
+  return h("div",{class:"gear-compare-wrap"},[
+    triggerEl,
+    h("div",{class:"hover-item-box"},gearHoveredItemContent(inst)),
   ]);
 }
 
@@ -8144,7 +8521,10 @@ function equipSlotTile(slot){
   const tipText=invalid?`${IF.tooltipText(inst)}\nInvalid: ${PS.gearInvalidReason(inst)} Its bonuses are not being applied.`:(inst?IF.tooltipText(inst):"");
   return h("div",{class:"tile",style:invalid?{background:"rgba(160,40,40,.28)",borderColor:"#a04a4a"}:{}},[
     h("div",{class:"muted"},[IF.slotLabel(slot)]),
-    inst?h("div",{class:"tooltip rarity-"+inst.rarity,style:{display:"inline-flex",alignItems:"center",justifyContent:"center"},"data-tip":tipText},[gearIcon(inst,26), invalid?h("span",{style:{color:"#e07a7a",marginLeft:"4px",fontSize:".85em"}},["(Invalid)"]):null]):h("div",{class:"muted"},["(empty)"]),
+    // v0.21 (#3): dropped the "(Invalid)" text label -- the tile's own red background/border
+    // tint (set above via `invalid`) already reads as clearly broken at a glance, and the
+    // full explanation is still one hover away in the tooltip (tipText, just above).
+    inst?h("div",{class:"tooltip rarity-"+inst.rarity,style:{display:"inline-flex",alignItems:"center",justifyContent:"center"},"data-tip":tipText},[gearIcon(inst,26)]):h("div",{class:"muted"},["(empty)"]),
     // v0.19.1 (#11): disabled outright (not just a silent no-op) when the backpack is
     // already full -- unequipSlot() itself now also refuses in that case, this just makes
     // the reason visible instead of the button appearing to do nothing when clicked.
@@ -8636,6 +9016,9 @@ function salvageAllGearOfRarity(rarityName, busy){
   const displayName=Balance.rarityDisplayName(rarityName);
   const matches=PS.gear_instances.filter((inst)=>inst.rarity===rarityName);
   if(matches.length===0){ setToast(`No ${displayName} items in your backpack to salvage.`); render(); return; }
+  // v0.21 (#7): capture the button's label BEFORE salvaging so the fade-out (below) can keep
+  // showing the correct "amount" text even after the items are gone from gear_instances.
+  const label=`Salvage all ${matches.length} ${displayName} item${matches.length===1?"":"s"}`;
   askConfirm(
     `Salvage all ${matches.length} ${displayName} item${matches.length===1?"":"s"} in your backpack? This cannot be undone.`,
     ()=>{
@@ -8649,7 +9032,18 @@ function salvageAllGearOfRarity(rarityName, busy){
       }
       autosave();
       setToast(`Salvaged ${ids.length} ${displayName} item${ids.length===1?"":"s"} for +${totalMat} materials.`);
+      // v0.21 (#7): fade this specific button out in place (opacity transition) rather than
+      // having it vanish instantly -- the other rarity buttons keep their original position
+      // since this one still occupies its slot in the row while fading. GF._salvageFadeRarity/
+      // _salvageFadeLabel are read by screenBlacksmith()'s salvageRarityButton() below; the
+      // timeout clears them once the CSS transition (.5s) has had time to finish, at which
+      // point the button naturally disappears (its rarity's count is now 0).
+      GF._salvageFadeRarity=rarityName;
+      GF._salvageFadeLabel=label;
       render();
+      setTimeout(()=>{
+        if(GF._salvageFadeRarity===rarityName){ GF._salvageFadeRarity=null; GF._salvageFadeLabel=null; render(); }
+      },550);
     },
     {confirmLabel:"Salvage All",danger:true}
   );
@@ -8674,11 +9068,26 @@ function screenBlacksmith(){
   // clicking Salvage on each one individually. Reuses the same busy-gate the Reroll/Reforge/
   // Salvage buttons below already use, so it can't fire mid-craft/reroll/reforge either.
   const topBusy=!!GF.crafting||!!GF.rerolling||!!GF.reforging||!!GF.refining;
-  root.appendChild(h("div",{class:"row gap",style:{marginBottom:"12px",flexWrap:"wrap"}},[
-    h("button",{disabled:topBusy,title:`Salvages every ${Balance.rarityDisplayName("Common")} item in your backpack in one click.`,onClick:()=>salvageAllGearOfRarity("Common",topBusy)},[`Salvage all ${Balance.rarityDisplayName("Common")} items`]),
-    h("button",{disabled:topBusy,title:`Salvages every ${Balance.rarityDisplayName("Uncommon")} item in your backpack in one click.`,onClick:()=>salvageAllGearOfRarity("Uncommon",topBusy)},[`Salvage all ${Balance.rarityDisplayName("Uncommon")} items`]),
-    h("button",{disabled:topBusy,title:`Salvages every ${Balance.rarityDisplayName("Rare")} item in your backpack in one click.`,onClick:()=>salvageAllGearOfRarity("Rare",topBusy)},[`Salvage all ${Balance.rarityDisplayName("Rare")} items`]),
-  ]));
+  // v0.21 (#7): only show a rarity's bulk-salvage button when the backpack actually has at
+  // least 1 matching item (or the button is mid fade-out after just salvaging its last one --
+  // see GF._salvageFadeRarity in salvageAllGearOfRarity() above), and the label now includes
+  // the live count, e.g. "Salvage all 3 Magical items".
+  const salvageRarityButton=(rarityName)=>{
+    const displayName=Balance.rarityDisplayName(rarityName);
+    const count=PS.gear_instances.filter((inst)=>inst.rarity===rarityName).length;
+    const fading=GF._salvageFadeRarity===rarityName;
+    if(count===0 && !fading) return null;
+    const label=fading?GF._salvageFadeLabel:`Salvage all ${count} ${displayName} item${count===1?"":"s"}`;
+    return h("button",{
+      disabled:topBusy||fading,
+      style:{transition:"opacity .5s ease",opacity:fading?"0":"1"},
+      title:`Salvages every ${displayName} item in your backpack in one click.`,
+      onClick:()=>salvageAllGearOfRarity(rarityName,topBusy),
+    },[label]);
+  };
+  root.appendChild(h("div",{class:"row gap",style:{marginBottom:"12px",flexWrap:"wrap"}},
+    ["Common","Uncommon","Rare"].map(salvageRarityButton).filter(Boolean)
+  ));
 
   root.appendChild(h("div",{class:"row gap",style:{alignItems:"center"}},[
     h("h3",{style:{margin:"0"}},["Reroll Gear (uses materials)"]),
@@ -10284,6 +10693,25 @@ function legacyGearSection(){
 // Kept brief on purpose -- players don't need the internal blow-by-blow, just the
 // highlights per version, most recent first.
 const CHANGELOG=[
+  { version:"v0.21", notes:[
+    "Maze exits are no longer always in the same spot -- they now land somewhere in the bottom-left region of the map, with a rare chance of an early exit appearing partway through instead.",
+    "New potion: Elixir of Clarity. Drink it before a venture to reveal the entire maze's fog of war for that one run.",
+    "The gear tile red-highlight for an item you can't equip no longer shows the specific reason as text -- just the red tint, keeping the tile clean.",
+    "A Stronghold guardian's key drop now gets the same ceremonial loot-reveal popup a chest gives, instead of a plain toast.",
+    "Doubled the Stronghold guardian key drop chance again.",
+    "New gear stat: increased flee chance (+2/4/6/8/10% by tier), improving your odds of successfully retreating from combat.",
+    "Blacksmith bulk-salvage buttons now only appear for rarities you actually have items of, show the live item count in their label (e.g. \"Salvage all 3 Magical items\"), and fade out smoothly once their last matching item is gone.",
+    "Critical Strike has been split into two separate stats: Critical Strike Chance (how often you crit) and the new Critical Strike Multiplier (how hard a crit hits).",
+    "Monsters now also scale up their own crit multiplier ceiling every 5 levels, matching the pace of the player's own crit multiplier growth.",
+    "A crit's actual multiplier is now randomly rolled between the 1.75x floor and your (or the monster's) current ceiling each time, instead of always hitting the ceiling.",
+    "Crit floating combat text is now orange-yellow and scales in size the closer the rolled multiplier lands to the roller's own ceiling.",
+    "Reduced the margin above the XP/HP/Stamina bars in the player tile.",
+    "Stronghold chests now get the same ceremonial loot-reveal view a regular chest gives.",
+    "Gear tiles now color only the specific failing requirement red (level or class/weapon-type), instead of coloring the whole line when only one of the two is the problem.",
+    "Extracted the item tooltip into one shared component and put it to use in the Inspect Player view, so hovering another player's equipped gear now shows the same detailed, color-coded tooltip you see on your own items.",
+    "Gear subtext now includes weapon type everywhere an item's category is shown (e.g. Auction House's \"Weapon\" now reads \"Weapon, Dagger\"), matching how weapon type already drives class restrictions and skill proficiency.",
+    "New leaderboard tab: Monsters Killed, ranking characters by their lifetime total kill count (separate from the existing Max Killstreak tab, which tracks your best unbroken streak rather than a running total).",
+  ]},
   { version:"v0.20.4", notes:[
     "Armor reworked from a percentage (up to 100% at max tier, capped at 75% damage reduction) into a flat number: each point of Armor now reduces incoming direct damage (monster hits and maze traps) by exactly that much. Tier 1-5 gear now rolls 2/4/6/8/10 Armor instead of 20/40/60/80/100%.",
     "Strength now grants Armor for every class, including Wizard and Windrider chains where it previously did nothing.",
@@ -10952,8 +11380,8 @@ function monsterGuideBaseStatsTable(){
 }
 function monsterGuidePerLevelTable(){
   const root=h("div",{class:"panel",style:{maxHeight:"360px",overflowY:"auto"}});
-  const cols=".7fr 1.1fr 1.1fr .9fr .9fr 1fr";
-  root.appendChild(gridRow(["Area Lv","HP vs Lv1","Damage vs Lv1","Crit %","Block %","Loot Quality (Item Tier)"],{cols,header:true}));
+  const cols=".7fr 1.1fr 1.1fr .9fr .9fr .9fr 1fr";
+  root.appendChild(gridRow(["Area Lv","HP vs Lv1","Damage vs Lv1","Crit %","Crit Mult","Block %","Loot Quality (Item Tier)"],{cols,header:true}));
   const sampleLevels=[1,5,10,15,20,30,40,60];
   const baseHpAtOne=Balance.monsterHp(1,1);
   const baseDmgAtOne=Balance.monsterDamage(1,1);
@@ -10961,10 +11389,15 @@ function monsterGuidePerLevelTable(){
     const hpPct=Math.round((Balance.monsterHp(1,lvl)/baseHpAtOne-1)*100);
     const dmgPct=Math.round((Balance.monsterDamage(1,lvl)/baseDmgAtOne-1)*100);
     const critPct=Math.round(Balance.monsterCritChance(lvl)*100);
+    // v0.21 (#9): the monster's crit MULTIPLIER ceiling at this area level -- a landed crit
+    // rolls somewhere between Balance.CRIT_MULTIPLIER and this number (see
+    // Balance.monsterCritMultiplierMax()'s own comment for the exact +0/0.5/1.0/1.5/2.0/2.5
+    // per-5-level breakpoint table).
+    const critMult=Balance.monsterCritMultiplierMax(lvl).toFixed(2);
     const blockPct=Math.round(Balance.mobBlockChance(lvl)*100);
     const itemTier=Balance.itemTierForAreaLevel(lvl);
     root.appendChild(gridRow([
-      `${lvl}`, `+${hpPct}%`, `+${dmgPct}%`, `${critPct}%`, `${blockPct}%`,
+      `${lvl}`, `+${hpPct}%`, `+${dmgPct}%`, `${critPct}%`, `${Balance.CRIT_MULTIPLIER}-${critMult}x`, `${blockPct}%`,
       `Tier ${tierRomanNumeral(itemTier)}`,
     ],{cols,noBorder:i===sampleLevels.length-1}));
   });
