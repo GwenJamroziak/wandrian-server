@@ -936,8 +936,13 @@ const ITEM_AFFIX_POOL = [
 // v0.20 (#11): new "block_chance" gear affix -- must stay in sync with index.html's
 // Balance.AFFIX_TIER1_MAX (see that constant's comment). T1 max of 2 (2/4/6/8/10% across
 // T1-T5) feeds into combatGetBlockChance() below via combatGearBonus(data,"block_chance").
+// v0.20.4: "armor" changed from a PERCENTAGE (20/40/60/80/100% across T1-T5) to a FLAT
+// number (2/4/6/8/10 across T1-T5) -- must stay in sync with index.html's
+// Balance.AFFIX_TIER1_MAX (see that constant's v0.20.4 comment for the full mechanic
+// change). See ITEM_AFFIX_TIER1_MAX_CEILING just below for why the OLD max (20) is
+// preserved there instead of being lowered along with this one.
 const ITEM_AFFIX_TIER1_MAX = {
-  damage: 5, hp: 15, crit: 5, armor: 20, regen: 5, gold_find: 10, xp_find: 5,
+  damage: 5, hp: 15, crit: 5, armor: 2, regen: 5, gold_find: 10, xp_find: 5,
   stamina_max: 15, strength: 5, dexterity: 5, vitality: 5, intelligence: 5, poison_resist: 5,
   magic_find: 10, block_chance: 2,
 };
@@ -972,7 +977,14 @@ const ITEM_REFINE_MATERIAL_COST_MULT = 1.4, ITEM_REFINE_GOLD_COST_MULT = 4;
 // today's max is tighter. This map is deliberately the LOOSEST ceiling any stat has ever
 // had; update it here (never the live map above) if a future balance pass tightens another
 // stat's max.
-const ITEM_AFFIX_TIER1_MAX_CEILING = Object.assign({}, ITEM_AFFIX_TIER1_MAX, { xp_find: 10 });
+// v0.20.4: armor's ceiling is pinned at 20 (its old, pre-rework T1 max) rather than
+// inheriting the new tightened live max of 2 -- same reasoning as xp_find's override just
+// above. A helmet/chestpiece/etc. rolled back when armor was still a 20/40/60/80/100%
+// affix must keep passing validateGearItem()'s bounds check (so it can still be reforged,
+// listed on the Auction House, deposited to the Vault, etc.) even though FRESH rolls now
+// cap at 2/4/6/8/10 -- see legacyGearScan() below for how these old-spec items still get
+// surfaced to an admin for optional manual rescale despite remaining valid here.
+const ITEM_AFFIX_TIER1_MAX_CEILING = Object.assign({}, ITEM_AFFIX_TIER1_MAX, { xp_find: 10, armor: 20 });
 
 function itemAffixMaxForTier(stat, tier) {
   const base = ITEM_AFFIX_TIER1_MAX[stat];
@@ -1361,22 +1373,26 @@ db.exec(`
 // regen on top of what TRIAL_CLASSES above already carries -- kept as its own object rather
 // than extending TRIAL_CLASSES so the already-shipped, already-tested Trial endpoint can
 // never be affected by anything combat-specific).
+// v0.20.4: each class used to carry its own innate "armor" field here too (a flat 0-0.25
+// PERCENTAGE damage reduction) -- retired, see CLASSES' own matching v0.20.4 comment in
+// index.html for the full rationale. combatGetArmor() below now derives ALL Armor from
+// gear (flat) plus total Strength * CB.STR_TO_ARMOR_RATIO, for every class.
 const COMBAT_CLASSES = {
-  wizard:      { tier: 1, chain: "wizard",      base_hp: 60,  hp_per_level: 8,  base_damage_min: 8,  base_damage_max: 14, damage_per_level: 1.4, base_crit: 0.05, armor: 0.0,  regen: 0.0 },
-  thornguard:  { tier: 1, chain: "thornguard",  base_hp: 100, hp_per_level: 14, base_damage_min: 6,  base_damage_max: 10, damage_per_level: 1.1, base_crit: 0.05, armor: 0.15, regen: 0.0 },
-  windrider:   { tier: 1, chain: "windrider",   base_hp: 75,  hp_per_level: 10, base_damage_min: 7,  base_damage_max: 12, damage_per_level: 1.2, base_crit: 0.20, armor: 0.0,  regen: 0.0 },
-  sorcerer:    { tier: 2, chain: "wizard",      base_hp: 80,  hp_per_level: 10, base_damage_min: 12, base_damage_max: 20, damage_per_level: 1.9, base_crit: 0.08, armor: 0.0,  regen: 0.0 },
-  stonewarden: { tier: 2, chain: "thornguard",  base_hp: 140, hp_per_level: 18, base_damage_min: 10, base_damage_max: 16, damage_per_level: 1.6, base_crit: 0.10, armor: 0.12, regen: 0.0 },
-  galestrider: { tier: 2, chain: "windrider",   base_hp: 100, hp_per_level: 13, base_damage_min: 11, base_damage_max: 18, damage_per_level: 1.7, base_crit: 0.25, armor: 0.0,  regen: 0.0 },
-  warlock:     { tier: 3, chain: "wizard",      base_hp: 105, hp_per_level: 13, base_damage_min: 16, base_damage_max: 26, damage_per_level: 2.4, base_crit: 0.10, armor: 0.0,  regen: 1.0 },
-  treesinger:  { tier: 3, chain: "thornguard",  base_hp: 160, hp_per_level: 20, base_damage_min: 14, base_damage_max: 22, damage_per_level: 2.0, base_crit: 0.15, armor: 0.18, regen: 2.5 },
-  shadowbloom: { tier: 3, chain: "windrider",   base_hp: 125, hp_per_level: 16, base_damage_min: 18, base_damage_max: 28, damage_per_level: 2.4, base_crit: 0.35, armor: 0.0,  regen: 0.0 },
-  necromancer: { tier: 4, chain: "wizard",      base_hp: 135, hp_per_level: 17, base_damage_min: 22, base_damage_max: 34, damage_per_level: 3.0, base_crit: 0.12, armor: 0.0,  regen: 1.5 },
-  rootbinder:  { tier: 4, chain: "thornguard",  base_hp: 210, hp_per_level: 26, base_damage_min: 18, base_damage_max: 28, damage_per_level: 2.6, base_crit: 0.12, armor: 0.25, regen: 3.5 },
-  druid:       { tier: 4, chain: "windrider",   base_hp: 160, hp_per_level: 20, base_damage_min: 24, base_damage_max: 36, damage_per_level: 3.1, base_crit: 0.20, armor: 0.08, regen: 2.0 },
-  emberpriest: { tier: 5, chain: "thornguard",  base_hp: 190, hp_per_level: 24, base_damage_min: 16, base_damage_max: 24, damage_per_level: 2.3, base_crit: 0.10, armor: 0.20, regen: 6.0 },
-  archmage:    { tier: 5, chain: "wizard",      base_hp: 165, hp_per_level: 21, base_damage_min: 28, base_damage_max: 42, damage_per_level: 3.6, base_crit: 0.15, armor: 0.0,  regen: 2.0 },
-  galeshaper:  { tier: 5, chain: "windrider",   base_hp: 195, hp_per_level: 25, base_damage_min: 30, base_damage_max: 44, damage_per_level: 3.8, base_crit: 0.28, armor: 0.10, regen: 2.4 },
+  wizard:      { tier: 1, chain: "wizard",      base_hp: 60,  hp_per_level: 8,  base_damage_min: 8,  base_damage_max: 14, damage_per_level: 1.4, base_crit: 0.05, regen: 0.0 },
+  thornguard:  { tier: 1, chain: "thornguard",  base_hp: 100, hp_per_level: 14, base_damage_min: 6,  base_damage_max: 10, damage_per_level: 1.1, base_crit: 0.05, regen: 0.0 },
+  windrider:   { tier: 1, chain: "windrider",   base_hp: 75,  hp_per_level: 10, base_damage_min: 7,  base_damage_max: 12, damage_per_level: 1.2, base_crit: 0.20, regen: 0.0 },
+  sorcerer:    { tier: 2, chain: "wizard",      base_hp: 80,  hp_per_level: 10, base_damage_min: 12, base_damage_max: 20, damage_per_level: 1.9, base_crit: 0.08, regen: 0.0 },
+  stonewarden: { tier: 2, chain: "thornguard",  base_hp: 140, hp_per_level: 18, base_damage_min: 10, base_damage_max: 16, damage_per_level: 1.6, base_crit: 0.10, regen: 0.0 },
+  galestrider: { tier: 2, chain: "windrider",   base_hp: 100, hp_per_level: 13, base_damage_min: 11, base_damage_max: 18, damage_per_level: 1.7, base_crit: 0.25, regen: 0.0 },
+  warlock:     { tier: 3, chain: "wizard",      base_hp: 105, hp_per_level: 13, base_damage_min: 16, base_damage_max: 26, damage_per_level: 2.4, base_crit: 0.10, regen: 1.0 },
+  treesinger:  { tier: 3, chain: "thornguard",  base_hp: 160, hp_per_level: 20, base_damage_min: 14, base_damage_max: 22, damage_per_level: 2.0, base_crit: 0.15, regen: 2.5 },
+  shadowbloom: { tier: 3, chain: "windrider",   base_hp: 125, hp_per_level: 16, base_damage_min: 18, base_damage_max: 28, damage_per_level: 2.4, base_crit: 0.35, regen: 0.0 },
+  necromancer: { tier: 4, chain: "wizard",      base_hp: 135, hp_per_level: 17, base_damage_min: 22, base_damage_max: 34, damage_per_level: 3.0, base_crit: 0.12, regen: 1.5 },
+  rootbinder:  { tier: 4, chain: "thornguard",  base_hp: 210, hp_per_level: 26, base_damage_min: 18, base_damage_max: 28, damage_per_level: 2.6, base_crit: 0.12, regen: 3.5 },
+  druid:       { tier: 4, chain: "windrider",   base_hp: 160, hp_per_level: 20, base_damage_min: 24, base_damage_max: 36, damage_per_level: 3.1, base_crit: 0.20, regen: 2.0 },
+  emberpriest: { tier: 5, chain: "thornguard",  base_hp: 190, hp_per_level: 24, base_damage_min: 16, base_damage_max: 24, damage_per_level: 2.3, base_crit: 0.10, regen: 6.0 },
+  archmage:    { tier: 5, chain: "wizard",      base_hp: 165, hp_per_level: 21, base_damage_min: 28, base_damage_max: 42, damage_per_level: 3.6, base_crit: 0.15, regen: 2.0 },
+  galeshaper:  { tier: 5, chain: "windrider",   base_hp: 195, hp_per_level: 25, base_damage_min: 30, base_damage_max: 44, damage_per_level: 3.8, base_crit: 0.28, regen: 2.4 },
 };
 
 // Verbatim mirror of index.html's MONSTERS array (id/tier/base stats/loot_table only -- name
@@ -1455,8 +1471,18 @@ const CB = {
   VIT_HP_PER_POINT_RATIO: 0.35, VIT_STAMINA_PER_POINT_RATIO: 0.15,
   MOB_BLOCK_CHANCE_BASE: 0.05, MOB_BLOCK_CHANCE_PER_LEVEL: 0.005,
   MONSTER_HP_MULT: 2.0, MONSTER_DAMAGE_MULT: 2.0,
-  AREA_HP_GROWTH: 0.15, AREA_DAMAGE_GROWTH: 0.12, AREA_XP_GROWTH: 0.062,
+  // v0.20.4 HOTFIX: AREA_HP_GROWTH/AREA_DAMAGE_GROWTH dialed down from 0.15/0.12 (0.105/
+  // 0.09), and LATE_GAME_MONSTER_GROWTH_PER_LEVEL below is now permanently unused (see
+  // combatLateGameGrowthMult()) -- must stay in sync with Balance.AREA_HP_GROWTH/
+  // AREA_DAMAGE_GROWTH's own v0.20.4 comment in index.html for the full rationale, the
+  // tier-blended-monster-pool bug this accounts for, and why the late-game multiplier was
+  // removed outright instead of re-tuned again. Full methodology in BALANCE_REPORT_v0.20.4.md.
+  AREA_HP_GROWTH: 0.105, AREA_DAMAGE_GROWTH: 0.09, AREA_XP_GROWTH: 0.062,
   LATE_GAME_MONSTER_GROWTH_START_LEVEL: 10, LATE_GAME_MONSTER_GROWTH_PER_LEVEL: 0.10,
+  // v0.20.4: every point of total Strength grants this much flat Armor, for every class --
+  // must stay in sync with Balance.STR_TO_ARMOR_RATIO in index.html (see that constant's
+  // comment for the full calibration).
+  STR_TO_ARMOR_RATIO: 0.25,
   STRONGHOLD_GUARDIAN_HP_MULT: 3.0, STRONGHOLD_GUARDIAN_XP_MULT: 1.5, STRONGHOLD_KEY_DROP_CHANCE: 0.15,
   ROAMING_MOB_HP_MULT: 4.0, ROAMING_MOB_DAMAGE_MULT: 1.5, ROAMING_MOB_XP_MULT: 2.0,
   // v0.20.1 (#10): every kill now gets a shot at a SECOND (and rarely third) loot drop, on
@@ -1538,10 +1564,10 @@ function combatLevelDiffXpMult(charLevel, areaLevel) {
   if (gap <= 0) return 1.0;
   return Math.max(CB.UNDERLEVEL_XP_MIN_MULT, Math.pow(CB.UNDERLEVEL_XP_DECAY_PER_LEVEL, gap));
 }
+// v0.20.4: retired -- permanently returns 1.0. See Balance.lateGameMonsterGrowthMult()'s
+// matching comment in index.html for why this is a no-op now instead of deleted outright.
 function combatLateGameGrowthMult(areaLevel) {
-  const lvl = areaLevel || 1;
-  if (lvl < CB.LATE_GAME_MONSTER_GROWTH_START_LEVEL) return 1.0;
-  return 1.0 + CB.LATE_GAME_MONSTER_GROWTH_PER_LEVEL * (lvl - (CB.LATE_GAME_MONSTER_GROWTH_START_LEVEL - 1));
+  return 1.0;
 }
 function combatMonsterHp(baseHp, areaLevel) { return baseHp * CB.MONSTER_HP_MULT * Math.pow(1.0 + CB.AREA_HP_GROWTH, areaLevel) * combatLateGameGrowthMult(areaLevel); }
 function combatMonsterDamage(baseDmg, areaLevel) { return baseDmg * CB.MONSTER_DAMAGE_MULT * Math.pow(1.0 + CB.AREA_DAMAGE_GROWTH, areaLevel) * combatLateGameGrowthMult(areaLevel); }
@@ -1734,7 +1760,18 @@ function combatGetCritChance(data) { const c = COMBAT_CLASSES[data.class_id] || 
 // counter-attack (combatResolveMonsterTurn) and the pre-fight "strikes first" roll in
 // POST /api/combat/start -- both use the fight's own area_level as the monster's level.
 function combatGetMonsterCritChance(areaLevel) { return cbClampf(0.10 + (Math.max(1, areaLevel) - 1) * 0.01, 0, 0.95); }
-function combatGetArmor(data) { const c = COMBAT_CLASSES[data.class_id] || {}; return cbClampf((c.armor || 0.0) + combatGearBonus(data, "armor") / 100.0, 0, 0.75); }
+// v0.20.4: Armor rework -- used to be a 0-0.75 PERCENTAGE (class-innate base + gear%),
+// multiplicatively reducing monster damage (`mdmg *= 1-armor`, see the two call sites
+// below). Now a FLAT number: gear's "armor" affix (flat 2/4/6/8/10 per tier, see
+// ITEM_AFFIX_TIER1_MAX's comment) plus total Strength * CB.STR_TO_ARMOR_RATIO, for every
+// class chain -- subtracted directly from incoming damage instead, floored at 0, mirrors
+// index.html's PS.getArmor() exactly. No upper clamp -- unlike the old percentage (which
+// had to cap below 100% or damage could go negative), a flat subtraction can never turn a
+// hit into healing on its own; combatResolveMonsterTurn()/the first-strike branch below
+// both apply Math.max(0, mdmg-armor) as the actual floor.
+function combatGetArmor(data) {
+  return combatGearBonus(data, "armor") + combatGetTotalAttr(data, "str") * CB.STR_TO_ARMOR_RATIO;
+}
 function combatGetMagicFind(data) {
   // v0.20 BUG FIX: this used to read combatGetActiveTempBuff(data, "magic_find") -- the OLD
   // wall-clock temp-buff bag Magic Find moved off of in v0.20 (#7) -- see CB.SHRINE_MAGIC_FIND_PCT's
@@ -1988,7 +2025,9 @@ function combatResolveMonsterTurn(data, session, invulnActiveThisRound) {
   // as the player's own crit-then-quad-damage math above) -- 10% + 1%/area-level.
   const crit = Math.random() < combatGetMonsterCritChance(session.area_level);
   if (crit) mdmg *= CB.CRIT_MULTIPLIER;
-  mdmg *= (1.0 - combatGetArmor(data));
+  // v0.20.4: flat subtraction instead of a percentage multiplier -- see combatGetArmor()'s
+  // own comment for the full mechanic change.
+  mdmg = Math.max(0, mdmg - combatGetArmor(data));
   data.current_hp = (data.current_hp || 0) - mdmg;
   let fatal = false;
   if (data.current_hp < 1) { data.current_hp = 0; fatal = true; }
@@ -2037,7 +2076,7 @@ app.post("/api/combat/start", requireAuth, (req, res) => {
     // counter-attack in combatResolveMonsterTurn.
     const crit = Math.random() < combatGetMonsterCritChance(areaLevel);
     if (crit) mdmg *= CB.CRIT_MULTIPLIER;
-    mdmg *= (1.0 - combatGetArmor(data));
+    mdmg = Math.max(0, mdmg - combatGetArmor(data));
     data.current_hp = Math.max(1, (data.current_hp || 0) - mdmg);
     firstStrike = { damage: Math.round(mdmg), crit };
     log.push(`The ${name} strikes first, hitting you for ${Math.round(mdmg)} damage${crit ? " (Critical!)" : ""} before you can react!`);

@@ -425,22 +425,30 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 // chain has one specialization stat that's clearly highest for that chain: Thornguard
 // leans Strength+Vitality, Windrider leans Dexterity, Wizard leans Intelligence, see
 // PS.getTotalAttr()/getDamageRange()/getBlockChance() for what each attribute actually does.
+// v0.20.4: each class used to carry its own innate "armor" field here (a flat 0-0.25
+// PERCENTAGE damage-reduction baked into the old class, e.g. Thornguard 0.15, Rootbinder
+// 0.25, Wizard/Sorcerer/etc. 0.0) on top of whatever gear armor% it had. Retired entirely
+// and folded into one unified mechanic: PS.getArmor() now derives ALL Armor from gear (flat,
+// see AFFIX_TIER1_MAX's comment) plus total Strength * Balance.STR_TO_ARMOR_RATIO, for every
+// class. Thornguard-chain classes still end up meaningfully tankier in practice than
+// Windrider/Wizard since their whole build already stacks far more base Strength (16-40 vs
+// 2-10), without needing this second separate per-class knob layered on top of it.
 const CLASSES = {
-  wizard:{display_name:"Wizard",chain:"wizard",tier:1,next_class:"sorcerer",role:"damage",description:"Fragile but hits hard with raw magic.",base_hp:60,hp_per_level:8,base_damage_min:8,base_damage_max:14,damage_per_level:1.4,base_crit:0.05,armor:0.0,regen:0.0,base_str:2,base_dex:6,base_vit:16,base_int:16},
-  thornguard:{display_name:"Thornguard",chain:"thornguard",tier:1,next_class:"stonewarden",role:"tank",description:"Bark-skinned front-liner who shrugs off damage like rain off leaves.",base_hp:100,hp_per_level:14,base_damage_min:6,base_damage_max:10,damage_per_level:1.1,base_crit:0.05,armor:0.15,regen:0.0,base_str:16,base_dex:6,base_vit:16,base_int:2},
-  windrider:{display_name:"Windrider",chain:"windrider",tier:1,next_class:"galestrider",role:"damage",description:"Balanced fighter, quick as a gust through the canopy, high crit chance.",base_hp:75,hp_per_level:10,base_damage_min:7,base_damage_max:12,damage_per_level:1.2,base_crit:0.20,armor:0.0,regen:0.0,base_str:4,base_dex:16,base_vit:16,base_int:4},
-  sorcerer:{display_name:"Sorcerer",chain:"wizard",tier:2,next_class:"warlock",role:"damage",description:"Channels bigger, wilder spells than a Wizard ever could.",base_hp:80,hp_per_level:10,base_damage_min:12,base_damage_max:20,damage_per_level:1.9,base_crit:0.08,armor:0.0,regen:0.0,base_str:3,base_dex:8,base_vit:20,base_int:21},
-  stonewarden:{display_name:"Stonewarden",chain:"thornguard",tier:2,next_class:"treesinger",role:"tank",description:"Trades a little bark for a lot of stone, heavier, harder to put down.",base_hp:140,hp_per_level:18,base_damage_min:10,base_damage_max:16,damage_per_level:1.6,base_crit:0.10,armor:0.12,regen:0.0,base_str:20,base_dex:8,base_vit:21,base_int:3},
-  galestrider:{display_name:"Galestrider",chain:"windrider",tier:2,next_class:"shadowbloom",role:"stealth",description:"Faster, sharper, deadlier with every shot on the wind.",base_hp:100,hp_per_level:13,base_damage_min:11,base_damage_max:18,damage_per_level:1.7,base_crit:0.25,armor:0.0,regen:0.0,base_str:5,base_dex:21,base_vit:21,base_int:5},
-  warlock:{display_name:"Warlock",chain:"wizard",tier:3,next_class:"necromancer",role:"summoner",description:"Dark pacts trade a little self-healing for serious power.",base_hp:105,hp_per_level:13,base_damage_min:16,base_damage_max:26,damage_per_level:2.4,base_crit:0.10,armor:0.0,regen:1.0,base_str:3,base_dex:10,base_vit:27,base_int:26},
-  treesinger:{display_name:"Treesinger",chain:"thornguard",tier:3,next_class:"rootbinder",role:"hybrid",description:"Calls the grove to its side, disciplined, and mends wounds mid-fight.",base_hp:160,hp_per_level:20,base_damage_min:14,base_damage_max:22,damage_per_level:2.0,base_crit:0.15,armor:0.18,regen:2.5,base_str:27,base_dex:10,base_vit:26,base_int:3},
-  shadowbloom:{display_name:"Shadowbloom",chain:"windrider",tier:3,next_class:"druid",role:"stealth",description:"Blooms in the shadows between strikes, pure burst damage built around crits.",base_hp:125,hp_per_level:16,base_damage_min:18,base_damage_max:28,damage_per_level:2.4,base_crit:0.35,armor:0.0,regen:0.0,base_str:7,base_dex:26,base_vit:26,base_int:7},
-  necromancer:{display_name:"Summoner",chain:"wizard",tier:4,next_class:"archmage",role:"summoner",description:"Commands dark power and a steady drain of life.",base_hp:135,hp_per_level:17,base_damage_min:22,base_damage_max:34,damage_per_level:3.0,base_crit:0.12,armor:0.0,regen:1.5,base_str:4,base_dex:12,base_vit:33,base_int:33},
-  rootbinder:{display_name:"Rootbinder",chain:"thornguard",tier:4,next_class:"emberpriest",role:"hybrid",description:"Binds foes in living roots to shield its allies, heals as reliably as it blocks.",base_hp:210,hp_per_level:26,base_damage_min:18,base_damage_max:28,damage_per_level:2.6,base_crit:0.12,armor:0.25,regen:3.5,base_str:33,base_dex:12,base_vit:33,base_int:4},
-  druid:{display_name:"Druid",chain:"windrider",tier:4,next_class:"galeshaper",role:"hybrid",description:"Nature's balance of bite and resilience.",base_hp:160,hp_per_level:20,base_damage_min:24,base_damage_max:36,damage_per_level:3.1,base_crit:0.20,armor:0.08,regen:2.0,base_str:8,base_dex:33,base_vit:33,base_int:8},
-  emberpriest:{display_name:"Emberpriest",chain:"thornguard",tier:5,next_class:null,role:"healer",description:"Thornguard chain's endgame form, carries the last ember, trades raw damage for huge sustain.",base_hp:190,hp_per_level:24,base_damage_min:16,base_damage_max:24,damage_per_level:2.3,base_crit:0.10,armor:0.20,regen:6.0,base_str:40,base_dex:15,base_vit:40,base_int:5},
-  archmage:{display_name:"Archmage",chain:"wizard",tier:5,next_class:null,role:"damage",description:"Wizard chain's endgame form, raw magic mastered to its limit.",base_hp:165,hp_per_level:21,base_damage_min:28,base_damage_max:42,damage_per_level:3.6,base_crit:0.15,armor:0.0,regen:2.0,base_str:5,base_dex:15,base_vit:40,base_int:40},
-  galeshaper:{display_name:"Galeshaper",chain:"windrider",tier:5,next_class:null,role:"hybrid",description:"Windrider chain's endgame form, moves as one with the wind itself.",base_hp:195,hp_per_level:25,base_damage_min:30,base_damage_max:44,damage_per_level:3.8,base_crit:0.28,armor:0.10,regen:2.4,base_str:10,base_dex:40,base_vit:40,base_int:10},
+  wizard:{display_name:"Wizard",chain:"wizard",tier:1,next_class:"sorcerer",role:"damage",description:"Fragile but hits hard with raw magic.",base_hp:60,hp_per_level:8,base_damage_min:8,base_damage_max:14,damage_per_level:1.4,base_crit:0.05,regen:0.0,base_str:2,base_dex:6,base_vit:16,base_int:16},
+  thornguard:{display_name:"Thornguard",chain:"thornguard",tier:1,next_class:"stonewarden",role:"tank",description:"Bark-skinned front-liner who shrugs off damage like rain off leaves.",base_hp:100,hp_per_level:14,base_damage_min:6,base_damage_max:10,damage_per_level:1.1,base_crit:0.05,regen:0.0,base_str:16,base_dex:6,base_vit:16,base_int:2},
+  windrider:{display_name:"Windrider",chain:"windrider",tier:1,next_class:"galestrider",role:"damage",description:"Balanced fighter, quick as a gust through the canopy, high crit chance.",base_hp:75,hp_per_level:10,base_damage_min:7,base_damage_max:12,damage_per_level:1.2,base_crit:0.20,regen:0.0,base_str:4,base_dex:16,base_vit:16,base_int:4},
+  sorcerer:{display_name:"Sorcerer",chain:"wizard",tier:2,next_class:"warlock",role:"damage",description:"Channels bigger, wilder spells than a Wizard ever could.",base_hp:80,hp_per_level:10,base_damage_min:12,base_damage_max:20,damage_per_level:1.9,base_crit:0.08,regen:0.0,base_str:3,base_dex:8,base_vit:20,base_int:21},
+  stonewarden:{display_name:"Stonewarden",chain:"thornguard",tier:2,next_class:"treesinger",role:"tank",description:"Trades a little bark for a lot of stone, heavier, harder to put down.",base_hp:140,hp_per_level:18,base_damage_min:10,base_damage_max:16,damage_per_level:1.6,base_crit:0.10,regen:0.0,base_str:20,base_dex:8,base_vit:21,base_int:3},
+  galestrider:{display_name:"Galestrider",chain:"windrider",tier:2,next_class:"shadowbloom",role:"stealth",description:"Faster, sharper, deadlier with every shot on the wind.",base_hp:100,hp_per_level:13,base_damage_min:11,base_damage_max:18,damage_per_level:1.7,base_crit:0.25,regen:0.0,base_str:5,base_dex:21,base_vit:21,base_int:5},
+  warlock:{display_name:"Warlock",chain:"wizard",tier:3,next_class:"necromancer",role:"summoner",description:"Dark pacts trade a little self-healing for serious power.",base_hp:105,hp_per_level:13,base_damage_min:16,base_damage_max:26,damage_per_level:2.4,base_crit:0.10,regen:1.0,base_str:3,base_dex:10,base_vit:27,base_int:26},
+  treesinger:{display_name:"Treesinger",chain:"thornguard",tier:3,next_class:"rootbinder",role:"hybrid",description:"Calls the grove to its side, disciplined, and mends wounds mid-fight.",base_hp:160,hp_per_level:20,base_damage_min:14,base_damage_max:22,damage_per_level:2.0,base_crit:0.15,regen:2.5,base_str:27,base_dex:10,base_vit:26,base_int:3},
+  shadowbloom:{display_name:"Shadowbloom",chain:"windrider",tier:3,next_class:"druid",role:"stealth",description:"Blooms in the shadows between strikes, pure burst damage built around crits.",base_hp:125,hp_per_level:16,base_damage_min:18,base_damage_max:28,damage_per_level:2.4,base_crit:0.35,regen:0.0,base_str:7,base_dex:26,base_vit:26,base_int:7},
+  necromancer:{display_name:"Summoner",chain:"wizard",tier:4,next_class:"archmage",role:"summoner",description:"Commands dark power and a steady drain of life.",base_hp:135,hp_per_level:17,base_damage_min:22,base_damage_max:34,damage_per_level:3.0,base_crit:0.12,regen:1.5,base_str:4,base_dex:12,base_vit:33,base_int:33},
+  rootbinder:{display_name:"Rootbinder",chain:"thornguard",tier:4,next_class:"emberpriest",role:"hybrid",description:"Binds foes in living roots to shield its allies, heals as reliably as it blocks.",base_hp:210,hp_per_level:26,base_damage_min:18,base_damage_max:28,damage_per_level:2.6,base_crit:0.12,regen:3.5,base_str:33,base_dex:12,base_vit:33,base_int:4},
+  druid:{display_name:"Druid",chain:"windrider",tier:4,next_class:"galeshaper",role:"hybrid",description:"Nature's balance of bite and resilience.",base_hp:160,hp_per_level:20,base_damage_min:24,base_damage_max:36,damage_per_level:3.1,base_crit:0.20,regen:2.0,base_str:8,base_dex:33,base_vit:33,base_int:8},
+  emberpriest:{display_name:"Emberpriest",chain:"thornguard",tier:5,next_class:null,role:"healer",description:"Thornguard chain's endgame form, carries the last ember, trades raw damage for huge sustain.",base_hp:190,hp_per_level:24,base_damage_min:16,base_damage_max:24,damage_per_level:2.3,base_crit:0.10,regen:6.0,base_str:40,base_dex:15,base_vit:40,base_int:5},
+  archmage:{display_name:"Archmage",chain:"wizard",tier:5,next_class:null,role:"damage",description:"Wizard chain's endgame form, raw magic mastered to its limit.",base_hp:165,hp_per_level:21,base_damage_min:28,base_damage_max:42,damage_per_level:3.6,base_crit:0.15,regen:2.0,base_str:5,base_dex:15,base_vit:40,base_int:40},
+  galeshaper:{display_name:"Galeshaper",chain:"windrider",tier:5,next_class:null,role:"hybrid",description:"Windrider chain's endgame form, moves as one with the wind itself.",base_hp:195,hp_per_level:25,base_damage_min:30,base_damage_max:44,damage_per_level:3.8,base_crit:0.28,regen:2.4,base_str:10,base_dex:40,base_vit:40,base_int:10},
 };
 
 const MONSTERS = [
@@ -783,7 +791,7 @@ const Balance = {
   // fixed-area monster's reward ever will, without touching area-based combat/loot
   // balance at all (see xpRequiredForLevel/monsterXpReward below -- they're independent).
   LEVEL_XP_GROWTH:0.11,
-  AREA_LEVEL_MIN:1, AREA_LEVEL_MAX:100, AREA_HP_GROWTH:0.15, AREA_DAMAGE_GROWTH:0.12, AREA_LOOT_GROWTH:0.05,
+  AREA_LEVEL_MIN:1, AREA_LEVEL_MAX:100, AREA_HP_GROWTH:0.105, AREA_DAMAGE_GROWTH:0.09, AREA_LOOT_GROWTH:0.05,
   // v0.11 difficulty pass: combat was too easy (1-3 shotting things several area levels
   // above character level with only common gear). MONSTER_HP_MULT/MONSTER_DAMAGE_MULT
   // double every monster's level-1 baseline in one place (rather than editing each row
@@ -813,6 +821,26 @@ const Balance = {
   // rising difficulty curve (2.1x extra by level 20, 6.1x by level 60) without the runaway
   // explosion. Re-run balance_sim.js any time this needs revisiting; it's a permanent
   // fixture now, not a one-off script.
+  // v0.20.4 HOTFIX: that "flat/additive on top of an already-compounding exponential curve"
+  // design turned out to be the wrong shape after all -- players (correctly) reported it as
+  // an impassable wall starting around area level 15-20 and reaching +17748% HP / +8192%
+  // damage by level 30 (verified against Gwen's exact reported numbers with a standalone
+  // calc script before touching anything). The bug: LATE_GAME_MONSTER_GROWTH_PER_LEVEL was
+  // LINEAR-on-paper but got multiplied against AREA_HP_GROWTH/AREA_DAMAGE_GROWTH's own
+  // EXPONENTIAL compounding every single level from area level 10 onward -- two compounding
+  // effects stacked on each other, not one. Fix: the late-game multiplier is removed
+  // entirely (see combatLateGameGrowthMult() below, now permanently 1.0x) rather than
+  // re-tuned again, since re-tuning a second linear knob on top of an exponential curve is
+  // exactly the "up and down every release" pattern Gwen asked to avoid. In its place,
+  // AREA_HP_GROWTH/AREA_DAMAGE_GROWTH themselves were re-derived from scratch (0.15/0.12 ->
+  // 0.105/0.09) against a corrected player-power model that also accounts for something the
+  // OLD tuning pass never modeled: pickRandomMonsterForArea() blends in progressively
+  // tougher monster TIERS as area level rises (uncommon at 8+, rare at 20+, epic at 35+),
+  // which itself compounds with this per-level curve and was silently making monsters far
+  // stronger than the raw HP/damage growth numbers alone suggested. Full calculation
+  // methodology, the player-power ceiling model used to calibrate this, and the resulting
+  // difficulty curve at every level are written up in BALANCE_REPORT_v0.20.4.md alongside
+  // this patch -- re-run balance_sim.js any time this needs revisiting.
   LATE_GAME_MONSTER_GROWTH_START_LEVEL:10, LATE_GAME_MONSTER_GROWTH_PER_LEVEL:0.10,
   CRIT_MULTIPLIER:1.75,
   // v0.14: fleeing combat isn't a guaranteed clean exit anymore -- a 20% chance the
@@ -1058,7 +1086,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.20.3-web",
+  GAME_VERSION:"v0.20.4-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   // v0.20 (#10): each town tier previously shared the exact same "A quiet camp on the edge
@@ -1113,11 +1141,42 @@ const Balance = {
   // Dexterity and the Potion of Wardveil temp-buff into, see getBlockChance()'s comment). T1
   // max of 2 run through the same max(tier)=tier*max(T1) formula as everything else here
   // lands exactly on Gwen's spec of +2/4/6/8/10% across T1-T5.
+  // v0.20.4: Armor rework -- was a PERCENTAGE (20/40/60/80/100% across T1-T5, feeding
+  // getArmor()'s old `1 - armorPct` multiplicative mitigation), now a FLAT number (T1 max
+  // of 2, scaling to 2/4/6/8/10 across T1-T5 via the same max(tier)=tier*max(T1) formula as
+  // everything else here). Armor's actual effect changed to match: every point now
+  // subtracts that much RAW damage from a monster's direct hit (mob melee AND maze traps,
+  // never poison/DoT), instead of reducing damage by a percentage -- see getArmor()'s own
+  // comment below for the full mechanic and how it combines with the new Strength-derived
+  // Armor. Existing items rolled under the old percentage range are untouched by this
+  // change and will show up in the admin Legacy Gear tool (their old values, e.g. 20-100,
+  // vastly exceed the new 2-10 max) for Gwen to review/rescale case-by-case, exactly like
+  // every other stat-max tightening before it (see xp_find's own history above).
   AFFIX_TIER1_MAX:{
-    damage:5, hp:15, crit:5, armor:20, regen:5, gold_find:10, xp_find:5,
+    damage:5, hp:15, crit:5, armor:2, regen:5, gold_find:10, xp_find:5,
     stamina_max:15, strength:5, dexterity:5, vitality:5, intelligence:5, poison_resist:5,
     magic_find:10, block_chance:2,
   },
+  // v0.20.4: every point of TOTAL Strength (base + gear + temp buffs, same getTotalAttr("str")
+  // everything else reads) grants this much flat Armor, for EVERY class chain -- not just
+  // Thornguard, which already gets Strength-derived DAMAGE (see getDamageBreakdown()'s
+  // chain-specific statBonus below); Thornguard simply gets both, matching its
+  // bruiser-tank identity. Windrider/Wizard, whose primary damage stat is Dexterity/
+  // Intelligence respectively, get this as Strength's ONLY effect for them (previously
+  // zero), letting a player who deliberately gears/spends into Strength on those chains
+  // trade some damage for real survivability instead of Strength being a dead stat.
+  // Calibrated against Gwen's own ceiling math (a fully-Strength-focused Tier 5 character
+  // can reach ~350 total Strength by level 25: 275 from 11 fully-Strength-affixed gear
+  // slots at T5's 25-per-slot max, +75 from putting every one of 25 levels' worth of stat
+  // points into Strength) against this patch's REBALANCED level-25 monster damage average
+  // (see BALANCE_REPORT_v0.20.4.md) -- 350 * 0.25 = 87.5 Armor, which lands almost exactly
+  // on a 60% damage reduction vs. a level-25 area's average monster hit, matching Gwen's
+  // own "~60% for a fully Str-focused build" target. A straight 1:1 ratio (Gwen's own
+  // suggestion, offered as "does this seem fair?") was tested and rejected -- it would put
+  // that same 350-Armor build at 100%+ mitigation against average level-25 monster damage,
+  // i.e. functionally unkillable by anything but the hardest-hitting outliers, which is far
+  // past "noticeably easier" into "broken."
+  STR_TO_ARMOR_RATIO:0.25,
   RARITY_TABLE:[{name:"Common",slots:1,weight:60},{name:"Uncommon",slots:2,weight:25},{name:"Rare",slots:3,weight:10},{name:"Epic",slots:5,weight:4},{name:"Legendary",slots:8,weight:1}],
   // v0.12.1: player-facing rarity wording only -- RARITY_TABLE's own `name` values stay
   // Common/Uncommon/Rare/Epic/Legendary everywhere internally (CSS classes like
@@ -1330,10 +1389,13 @@ const Balance = {
   // for players who keep leveling normally within a tier instead of deliberately
   // over-venturing above their level (which the EXISTING compounding AREA_HP_GROWTH/
   // AREA_DAMAGE_GROWTH curve already punishes plenty on its own).
+  // v0.20.4: retired -- permanently returns 1.0 (no-op). Kept as a function (rather than
+  // deleted outright) purely so monsterHp()/monsterDamage() below don't need their own
+  // shape changed; every caller of this function keeps working unchanged, it just no
+  // longer contributes any extra growth. See AREA_HP_GROWTH's own v0.20.4 comment above for
+  // the full story on why this was removed instead of re-tuned.
   lateGameMonsterGrowthMult(areaLevel){
-    const lvl=areaLevel||1;
-    if(lvl<this.LATE_GAME_MONSTER_GROWTH_START_LEVEL) return 1.0;
-    return 1.0+this.LATE_GAME_MONSTER_GROWTH_PER_LEVEL*(lvl-(this.LATE_GAME_MONSTER_GROWTH_START_LEVEL-1));
+    return 1.0;
   },
   monsterHp(baseHp,areaLevel){return baseHp*this.MONSTER_HP_MULT*Math.pow(1.0+this.AREA_HP_GROWTH,areaLevel)*this.lateGameMonsterGrowthMult(areaLevel);},
   monsterDamage(baseDmg,areaLevel){return baseDmg*this.MONSTER_DAMAGE_MULT*Math.pow(1.0+this.AREA_DAMAGE_GROWTH,areaLevel)*this.lateGameMonsterGrowthMult(areaLevel);},
@@ -1839,7 +1901,8 @@ const IF = {
     const effectiveMax=(inst.slot==="weapon" && a.stat==="damage") ? Math.round(baseMax*Balance.WEAPON_DAMAGE_AFFIX_MULT) : baseMax;
     return a.value>=effectiveMax;
   },
-  affixIsPercent(stat){return ["crit","armor","gold_find","xp_find","poison_resist","magic_find","block_chance"].includes(stat);},
+  // v0.20.4: "armor" removed -- it's a flat number now (+N Armor), not a percentage.
+  affixIsPercent(stat){return ["crit","gold_find","xp_find","poison_resist","magic_find","block_chance"].includes(stat);},
   affixLabel(stat){
     switch(stat){
       case "damage": return "Damage"; case "hp": return "Hit Points"; case "crit": return "Critical Strike";
@@ -2707,7 +2770,22 @@ const PS = {
     return [d.totalMin, d.totalMax];
   },
   getCritChance(){const c=this.getClassData(); return clampf((c.base_crit||0.05)+this.gearBonus("crit")/100.0,0,0.95);},
-  getArmor(){const c=this.getClassData(); return clampf((c.armor||0.0)+this.gearBonus("armor")/100.0,0,0.75);},
+  // v0.20.4: Armor rework -- used to be a 0-0.75 PERCENTAGE (class-innate base + gear,
+  // multiplicatively reducing monster damage: `mdmg *= 1-armor`), and this getter was in
+  // fact dead code on the client (only server.js's combatGetArmor() actually applied it, to
+  // combat only -- maze traps had zero armor mitigation at all). It's now a FLAT number,
+  // wired up in BOTH places that deal direct damage to the player: onStepMaze()'s trap
+  // "bite" damage and (server-side, authoritative) combatResolveMonsterTurn()'s monster hit
+  // -- see those functions for `Math.max(0, dmg-armor)`. Poison/DoT damage is deliberately
+  // untouched (per Gwen's spec: Armor only ever mitigates DIRECT hits, not drains).
+  // Two sources, both flat and summed: the gear "armor" affix (now +2/4/6/8/10 per tier
+  // instead of a percentage, see AFFIX_TIER1_MAX's comment), and total Strength * Balance.
+  // STR_TO_ARMOR_RATIO -- granted to EVERY class chain now, not just Thornguard (see
+  // STR_TO_ARMOR_RATIO's own comment for the full rationale/calibration). The old per-class
+  // innate "armor%" field (CLASSES[x].armor) is retired entirely, folded into this one
+  // unified mechanic -- Thornguard-chain classes still end up tankier in practice since
+  // their whole build already stacks far more Strength than other chains do.
+  getArmor(){return this.gearBonus("armor")+this.getTotalAttr("str")*Balance.STR_TO_ARMOR_RATIO;},
   // v0.16: defensive stat, 0-100%, reduces the Poison effect's HP/sec drain proportionally
   // (100% = fully immune). Purely gear-driven for now (see AFFIX_POOL/AFFIX_TIER1_MAX's
   // poison_resist entry) -- no class innately has any.
@@ -2760,7 +2838,7 @@ const PS = {
     const dmg=this.gearBonus("damage"); if(dmg) parts.push(`+${Math.round(dmg)} Damage`);
     const hp=this.gearBonus("hp"); if(hp) parts.push(`+${Math.round(hp)} Hit Points`);
     const crit=this.gearBonus("crit"); if(crit) parts.push(`+${Math.round(crit)}% Critical Strike`);
-    const armor=this.gearBonus("armor"); if(armor) parts.push(`+${Math.round(armor)}% Armor`);
+    const armor=this.gearBonus("armor"); if(armor) parts.push(`+${Math.round(armor)} Armor`);
     const regen=this.gearBonus("regen"); if(regen) parts.push(`+${regen.toFixed(1)} Regeneration`);
     const gf=this.gearBonus("gold_find"); if(gf) parts.push(`+${Math.round(gf)}% Gold Found`);
     const xf=this.gearBonus("xp_find"); if(xf) parts.push(`+${Math.round(xf)}% Experience Gained`);
@@ -2800,8 +2878,9 @@ const PS = {
       // here -- Vitality's HP/Stamina contribution is now computed LIVE from attributes.vit
       // every time getMaxHp()/getMaxStamina() is called (see Balance.VIT_HP_PER_POINT_RATIO's
       // comment), so a level-up needs no special bookkeeping for it beyond the full-HP heal
-      // below. Strength still has no effect at all for Wizard or Windrider either way (only
-      // Thornguard uses Strength, for damage, see getDamageRange()).
+      // below. v0.20.4: Strength now grants flat Armor for every chain via getArmor(), on
+      // top of Thornguard's existing Strength-for-damage (see getDamageRange()), so it's no
+      // longer a dead stat for Wizard/Windrider either.
       this.current_hp=this.getMaxHp(); leveled=true;
     }
     if(this.level>=Balance.LEVEL_CAP) this.xp=0;
@@ -6605,7 +6684,16 @@ function onStepMaze(maze,targetIdx){
     // v0.13: scales with area level now (Gwen's report: a flat 4-12 damage trap was a
     // non-event at area level 13 with 357 HP) and can be outright lethal -- it no longer
     // floors at 1 HP the way the trapdoor's fall damage still does.
-    const dmg=Balance.trapDamage(maze.depth);
+    // v0.20.4: Armor now mitigates this exactly like a monster's direct hit in combat --
+    // flat subtraction, floored at 0 -- since a trap's instant "bite" damage is DIRECT
+    // damage by Gwen's own spec (mob hits AND traps, but not poison/DoT, which is why the
+    // "poison" branch above and the "fall" branch further above are both deliberately left
+    // untouched by this). Traps remain entirely client-side (no server-authoritative combat
+    // session backs this one), so this mitigation has to be applied here directly rather
+    // than through the server's combatResolveMonsterTurn(), which is the equivalent
+    // mob-hit codepath in evergrind-server/server.js.
+    const rawDmg=Balance.trapDamage(maze.depth);
+    const dmg=Math.max(0,rawDmg-PS.getArmor());
     if(dmg>=PS.current_hp){
       PS.current_hp=0;
       autosave();
@@ -7860,9 +7948,17 @@ function attributeSummaryLines(chain,classData){
   const vitHp=Math.round(Balance.vitHpBonus(classData||{},1));
   const vitStam=Math.round(Balance.vitStaminaBonus(classData||{},1));
   const vitLine=`Vitality: +${vitHp} HP and +${vitStam} Stamina per point, applied immediately.`;
+  // v0.20.4: Strength now grants flat Armor (reduces incoming direct-hit damage point for
+  // point -- mob melee and maze traps, not poison/DoT) for EVERY class chain, pulled live
+  // off Balance.STR_TO_ARMOR_RATIO so this copy can never drift out of sync with the real
+  // formula. Thornguard keeps its existing damage-per-point on top of this (see
+  // getDamageBreakdown()), Windrider/Wizard now get a real use for Strength for the first
+  // time instead of "no effect for this path".
+  const strArmorPerPoint=Balance.STR_TO_ARMOR_RATIO;
+  const strArmorLine=`+${strArmorPerPoint} Armor per point (reduces incoming direct-hit damage).`;
   if(chain==="thornguard"){
     return [
-      "Strength: +1 damage per point.",
+      `Strength: +1 damage per point, and ${strArmorLine}`,
       `Dexterity: +${blockPct}% Block Chance per point, a chance to take 0 damage from a hit.`,
       vitLine,
       "Intelligence: no effect for this path.",
@@ -7870,7 +7966,7 @@ function attributeSummaryLines(chain,classData){
   }
   if(chain==="windrider"){
     return [
-      "Strength: no effect for this path.",
+      `Strength: ${strArmorLine}`,
       `Dexterity: +1 damage per point, and +${blockPct}% Block Chance per point, a chance to take 0 damage from a hit.`,
       vitLine,
       "Intelligence: no effect for this path.",
@@ -7878,7 +7974,7 @@ function attributeSummaryLines(chain,classData){
   }
   if(chain==="wizard"){
     return [
-      "Strength: no effect for this path.",
+      `Strength: ${strArmorLine}`,
       `Dexterity: +${blockPct}% Block Chance per point, a chance to take 0 damage from a hit.`,
       vitLine,
       "Intelligence: +1 damage per point.",
@@ -10188,6 +10284,12 @@ function legacyGearSection(){
 // Kept brief on purpose -- players don't need the internal blow-by-blow, just the
 // highlights per version, most recent first.
 const CHANGELOG=[
+  { version:"v0.20.4", notes:[
+    "Armor reworked from a percentage (up to 100% at max tier, capped at 75% damage reduction) into a flat number: each point of Armor now reduces incoming direct damage (monster hits and maze traps) by exactly that much. Tier 1-5 gear now rolls 2/4/6/8/10 Armor instead of 20/40/60/80/100%.",
+    "Strength now grants Armor for every class, including Wizard and Windrider chains where it previously did nothing.",
+    "Fixed monster HP/damage scaling: a late-game growth bonus was compounding on top of an already-exponential curve, causing monster stats to balloon far beyond what gear/levels could keep up with by the mid-20s and beyond. The underlying growth rate has also been recalibrated so leveling up stays a real challenge without the runaway wall.",
+    "Old gear with percentage-based Armor rolls will show up in the admin Legacy Gear review tool for rescaling.",
+  ]},
   { version:"v0.20.3", notes:[
     "New Blacksmith service: Refine. Like Reforge, you pick one existing stat on an item, but Refine keeps that stat exactly as it is and only rerolls its value -- the tool for when every stat on an item is right and you just want a better roll on one of them. It's the priciest option of the three (1.4x Reforge's material cost, 4x Reforge's gold cost), reflecting that it's the final step toward a perfected item.",
     "The Reforge/Refine stat-picker popup now looks like the item's real in-game view: rarity-colored name and tier, category label, and each stat line shows the same 💎 \"perfected roll\" marker used everywhere else when a stat has rolled its maximum possible value.",
