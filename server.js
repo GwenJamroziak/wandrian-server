@@ -2154,8 +2154,9 @@ function combatResolveMonsterTurn(data, session, invulnActiveThisRound) {
 // session.last_monster_hit_at, based on REAL elapsed wall-clock time and this session's own
 // monster_attack_speed -- this is what makes the monster keep hitting the player once combat
 // is initiated even if the player never clicks Attack again (an idle stretch, or simply the
-// time between requests), on top of the existing guaranteed once-per-attack counter-hit
-// combatResolveMonsterTurn() already provides. Deliberately does NOT touch
+// time between requests). v0.21.5: this is now the ONLY way a monster deals damage during
+// /attack -- there is no separate guaranteed hit tied to the player's own action anymore (see
+// that handler's own comment). Deliberately does NOT touch
 // combatTickCombatRoundBuffs()'s round-based shrine-buff countdown (invuln/quad damage/magic
 // find) -- those still tick exactly once per player-initiated action (attack/flee/use-item),
 // not once per elapsed-time catch-up hit, so a shield doesn't drain faster just because the
@@ -2275,8 +2276,9 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
   // round's own action -- see combatCatchUpMonsterHits(). On a fast, actively-played round (and
   // in every existing automated test, which calls endpoints back-to-back with near-zero real
   // elapsed time) this resolves 0 ticks and changes nothing below. If catch-up alone is fatal,
-  // the fight ends here -- the player's own swing and the guaranteed counter-attack below never
-  // happen, matching how a real continuously-attacking monster would have already won.
+  // the fight ends here -- the player's own swing never happens, matching how a real
+  // continuously-attacking monster would have already won. v0.21.5: this catch-up is now the
+  // ONLY source of monster damage during this whole handler -- see the non-kill branch below.
   const catchUp = combatCatchUpMonsterHits(session, data, invulnActiveThisRound);
   if (catchUp.fatal) {
     updateCombatSession(session.id, { status: "lost", last_monster_hit_at: catchUp.newLastHitAt });
@@ -2403,10 +2405,16 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
     };
     updateCombatSession(session.id, { hp: 0, status: "won", last_monster_hit_at: catchUp.newLastHitAt });
   } else {
-    if (!(!mobBlocked && monsterDefeated)) {
-      monsterTurn = combatResolveMonsterTurn(data, session, invulnActiveThisRound);
-      fatal = monsterTurn.fatal;
-    }
+    // v0.21.5 BUG FIX: this used to ALSO call combatResolveMonsterTurn() here -- a guaranteed
+    // monster counter-hit every time the player attacked and didn't land a killing blow, on
+    // top of the independent elapsed-time catch-up above. That was a leftover from the old
+    // turn-based combat model (pre-v0.21.1) and, combined with the new continuous attack-speed
+    // system, meant the player took damage twice: once from the monster's own tempo, and once
+    // more just for having clicked. Per Gwen's exact spec, the two attack loops must be fully
+    // decoupled -- the monster ONLY ever deals damage on its own independent attack-speed tempo
+    // (combatCatchUpMonsterHits, above), never as a side effect of the player's own swing.
+    // monsterTurn stays null and fatal stays false here now; a kill this round can only ever
+    // come from the elapsed-time catch-up already resolved earlier in this handler.
     updateCombatSession(session.id, { hp: newMonsterHp, last_monster_hit_at: catchUp.newLastHitAt });
   }
 

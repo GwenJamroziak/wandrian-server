@@ -1076,7 +1076,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.21.4-web",
+  GAME_VERSION:"v0.21.5-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   
@@ -10889,6 +10889,9 @@ function legacyGearSection(){
 
 
 const CHANGELOG=[
+  { version:"v0.21.5", notes:[
+    "Fixed a bug where monsters would deal damage both on their own attack-speed tempo AND as a guaranteed counter-attack whenever you attacked them, effectively doubling incoming damage. Monsters now only ever attack on their own independent tempo, fully decoupled from your own attacks.",
+  ]},
   { version:"v0.21.4", notes:[
     "All 19 monsters now have bespoke hand-crafted portrait art (both their normal and defeated appearance), replacing the generic procedural blob art.",
   ]},
