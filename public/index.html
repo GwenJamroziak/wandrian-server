@@ -91,6 +91,12 @@ input[type=checkbox]:checked::after{content:"✓";position:absolute;top:-3px;lef
 .float-text{position:absolute;left:50%;transform:translateX(-50%);font-weight:bold;font-size:1.05em;white-space:nowrap;animation:floatUpFade 2s ease-out forwards;text-shadow:0 1px 3px rgba(0,0,0,.85);}
 .float-text-item{position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:4px;font-weight:bold;white-space:nowrap;animation:floatUpFade 2s ease-out forwards;text-shadow:0 1px 3px rgba(0,0,0,.85);}
 @keyframes floatUpFade{0%{transform:translate(-50%,0);opacity:1;}100%{transform:translate(-50%,-30px);opacity:0;}}
+.flee-cooldown-wrap{position:relative;display:inline-flex;}
+.flee-cooldown-ring{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-90deg);pointer-events:none;}
+.flee-cooldown-ring circle{fill:none;stroke-width:2.5;}
+.flee-cooldown-ring .flee-cooldown-track{stroke:rgba(255,255,255,.25);}
+.flee-cooldown-ring .flee-cooldown-fill{stroke:#fff;animation:fleeCooldownFill linear forwards;}
+@keyframes fleeCooldownFill{from{stroke-dashoffset:50.27;}to{stroke-dashoffset:0;}}
 .float-text-dmg{color:#ff5c5c;} .float-text-heal{color:#6cff6c;} .float-text-xp{color:#b46cff;}
 .float-text-gold{color:var(--gold);} .float-text-crit{color:#ffb400;font-size:1.2em;} .float-text-block{color:#9fb0c3;}
 .hp-text{color:var(--hp);} .stamina-text{color:var(--stamina);} .xp-text{color:var(--xp);} .gold-text{color:var(--gold);}
@@ -431,7 +437,7 @@ const ITEMS = {
   
   
   
-  elixir_of_clarity:{name:"Elixir of Clarity",type:"consumable",reveals_maze:true,sell_value:140},
+  elixir_of_clarity:{name:"Elixir of Clairvoyance",type:"consumable",reveals_maze:true,sell_value:140},
   traveler_pouch:{name:"Traveler's Pouch",type:"bag",capacity:8,sell_value:10},
   woven_bag:{name:"Woven Bramble Bag",type:"bag",capacity:16,sell_value:20},
   bramble_sack:{name:"Bramble Sack",type:"bag",capacity:24,sell_value:32},
@@ -493,7 +499,7 @@ const RECIPES = [
   
   
   
-  {id:"brew_elixir_of_clarity",result_item:"elixir_of_clarity",herbs:{sunpetal:4,moonleaf:4,emberroot:4,frostvine:3,starveil:3,cleanwort:2}},
+  {id:"brew_elixir_of_clarity",result_item:"elixir_of_clarity",herbs:{sunpetal:2,moonleaf:2,emberroot:2,frostvine:1,starveil:2,cleanwort:1}},
 ];
 
 
@@ -520,21 +526,21 @@ const LOOT_TABLES = {
 };
 
 const PORTRAITS = {
-wizard:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#ccd6ec"/><ellipse cx="70" cy="88" rx="32" ry="36" fill="#3f5cae"/><circle cx="70" cy="50" r="19" fill="#e8c9a0"/><circle cx="63" cy="49" r="2.4" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.4" fill="#2a2a2a"/><path d="M 40,94 Q 70,76 100,94 L 94,116 Q 70,126 46,116 Z" fill="#33478a"/><path d="M 70,8 L 94,50 Q 70,42 46,50 Z" fill="#4a6fd0"/><circle cx="70" cy="16" r="4" fill="#f4d94a"/><circle cx="98" cy="86" r="9" fill="#9db8ff" opacity="0.75"/><circle cx="98" cy="86" r="14" fill="#9db8ff" opacity="0.3"/></svg>`,
-thornguard:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#e7dcc2"/><ellipse cx="70" cy="86.8" rx="30" ry="34" fill="#6b4a2f"/><circle cx="70" cy="50.4" r="20" fill="#e8c9a0"/><circle cx="63" cy="49" r="2.5" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.5" fill="#2a2a2a"/><path d="M 40,92 Q 70,72 100,92 L 96,110 Q 70,122 44,110 Z" fill="#4b3524"/><ellipse cx="70" cy="45" rx="22" ry="10" fill="#2e4526"/><polygon points="55,42 60,20 65,42" fill="#3f6b3f"/><polygon points="70,42 75,16 80,42" fill="#3f6b3f"/><polygon points="85,42 88,22 92,42" fill="#3f6b3f"/></svg>`,
-windrider:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#d7ede6"/><ellipse cx="70" cy="86.8" rx="30" ry="34" fill="#3f7d4e"/><circle cx="70" cy="50.4" r="20" fill="#e8c9a0"/><circle cx="63" cy="49" r="2.5" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.5" fill="#2a2a2a"/><path d="M 42,95 Q 70,80 98,95 L 92,112 Q 70,120 48,112 Z" fill="#255530"/><path d="M 30,70 Q 70,52 110,70" stroke="#8fd0c4" stroke-width="5" fill="none" opacity="0.8"/><ellipse cx="70" cy="40" rx="24" ry="11" fill="#3f7d4e"/><path d="M 100,70 Q 118,60 112,88" stroke="#5f9f68" stroke-width="4" fill="none"/></svg>`,
-sorcerer:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#dcd4ea"/><ellipse cx="70" cy="88" rx="32" ry="36" fill="#3a2c6b"/><circle cx="70" cy="50" r="19" fill="#e8c9a0"/><circle cx="63" cy="49" r="2.4" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.4" fill="#2a2a2a"/><path d="M 40,94 Q 70,76 100,94 L 94,116 Q 70,126 46,116 Z" fill="#4a3a8a"/><path d="M 70,10 L 92,48 Q 70,40 48,48 Z" fill="#5a3fa0"/><circle cx="70" cy="18" r="4" fill="#e8c96a"/><circle cx="100" cy="86" r="10" fill="#b39cff" opacity="0.85"/><circle cx="100" cy="86" r="15" fill="#b39cff" opacity="0.3"/></svg>`,
-warlock:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#c9b8c4"/><ellipse cx="70" cy="88" rx="32" ry="36" fill="#2a1830"/><circle cx="70" cy="50" r="19" fill="#d8b592"/><circle cx="63" cy="49" r="2.4" fill="#7a2a2a"/><circle cx="77" cy="49" r="2.4" fill="#7a2a2a"/><path d="M 40,94 Q 70,76 100,94 L 94,116 Q 70,126 46,116 Z" fill="#3a1e40"/><path d="M 54,36 Q 48,24 42,20 Q 50,28 52,38 Z" fill="#4a2a2a"/><path d="M 86,36 Q 92,24 98,20 Q 90,28 88,38 Z" fill="#4a2a2a"/><path d="M 96,90 Q 108,84 108,96 Q 100,94 96,90 Z" fill="#9a3fbf" opacity="0.7"/><path d="M 100,100 Q 112,98 110,110 Q 102,106 100,100 Z" fill="#9a3fbf" opacity="0.5"/></svg>`,
-necromancer:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#a8b8a8"/><ellipse cx="70" cy="88" rx="32" ry="36" fill="#1a1a1a"/><circle cx="70" cy="50" r="19" fill="#c9c9b8"/><circle cx="63" cy="49" r="2.6" fill="#4fff8a"/><circle cx="77" cy="49" r="2.6" fill="#4fff8a"/><path d="M 40,94 Q 70,76 100,94 L 94,116 Q 70,126 46,116 Z" fill="#242424"/><path d="M 46,42 Q 70,20 94,42 Q 88,30 70,28 Q 52,30 46,42 Z" fill="#141414"/><circle cx="70" cy="104" r="7" fill="#e8e4d0"/><circle cx="67" cy="103" r="1.6" fill="#141414"/><circle cx="73" cy="103" r="1.6" fill="#141414"/><circle cx="100" cy="88" r="6" fill="#4fff8a" opacity="0.6"/><circle cx="40" cy="88" r="5" fill="#4fff8a" opacity="0.5"/></svg>`,
-stonewarden:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#d8d4c8"/><ellipse cx="70" cy="88" rx="34" ry="36" fill="#5a5850"/><circle cx="70" cy="50" r="20" fill="#c99a70"/><circle cx="63" cy="49" r="2.5" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.5" fill="#2a2a2a"/><path d="M 38,92 Q 70,74 102,92 L 96,118 Q 70,130 44,118 Z" fill="#6e6a5e"/><ellipse cx="44" cy="82" rx="14" ry="12" fill="#8a8678"/><ellipse cx="96" cy="82" rx="14" ry="12" fill="#8a8678"/><polygon points="55,42 60,20 65,42" fill="#3f6b3f"/><polygon points="85,42 88,22 92,42" fill="#3f6b3f"/></svg>`,
-treesinger:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#e0e8d0"/><ellipse cx="70" cy="88" rx="32" ry="36" fill="#4a6a3a"/><circle cx="70" cy="50" r="19" fill="#e8c9a0"/><circle cx="63" cy="49" r="2.4" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.4" fill="#2a2a2a"/><path d="M 40,92 Q 70,74 100,92 L 94,116 Q 70,126 46,116 Z" fill="#5a8a48"/><polygon points="50,44 56,18 62,44" fill="#3f8a3f"/><polygon points="62,40 70,14 78,40" fill="#4fae4f"/><polygon points="78,44 84,18 90,44" fill="#3f8a3f"/><circle cx="42" cy="92" r="7" fill="#8fce6a" opacity="0.8"/><circle cx="98" cy="92" r="7" fill="#8fce6a" opacity="0.8"/></svg>`,
-rootbinder:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#c8d4c0"/><ellipse cx="70" cy="88" rx="34" ry="37" fill="#3a4a2a"/><circle cx="70" cy="50" r="19" fill="#c99a70"/><circle cx="63" cy="49" r="2.4" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.4" fill="#2a2a2a"/><path d="M 38,92 Q 70,74 102,92 L 96,120 Q 70,132 44,120 Z" fill="#4a5e34"/><path d="M 38,90 Q 30,100 40,112 Q 32,116 34,126" stroke="#5a4028" stroke-width="4" fill="none" stroke-linecap="round"/><path d="M 102,90 Q 110,100 100,112 Q 108,116 106,126" stroke="#5a4028" stroke-width="4" fill="none" stroke-linecap="round"/><polygon points="58,42 63,22 68,42" fill="#3f6b3f"/><polygon points="72,42 77,22 82,42" fill="#3f6b3f"/></svg>`,
-emberpriest:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#e8d4c0"/><circle cx="70" cy="42" r="26" fill="#ffcf7a" opacity="0.35"/><ellipse cx="70" cy="88" rx="32" ry="36" fill="#7a2a1e"/><circle cx="70" cy="50" r="19" fill="#dcae82"/><circle cx="63" cy="49" r="2.4" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.4" fill="#2a2a2a"/><path d="M 40,92 Q 70,74 100,92 L 94,118 Q 70,130 46,118 Z" fill="#9a3a28"/><path d="M 56,74 Q 70,86 84,74 L 84,84 Q 70,94 56,84 Z" fill="#e0c458"/><circle cx="70" cy="112" r="8" fill="#ffcf7a"/><circle cx="70" cy="112" r="13" fill="#ff9d3d" opacity="0.35"/></svg>`,
-galestrider:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#cfe4ea"/><ellipse cx="70" cy="88" rx="30" ry="35" fill="#2e5a68"/><circle cx="70" cy="50" r="19" fill="#e8c9a0"/><path d="M 54,46 Q 70,40 86,46 L 84,54 Q 70,50 56,54 Z" fill="#1c3a44"/><path d="M 40,92 Q 70,74 100,92 L 94,114 Q 70,124 46,114 Z" fill="#3f7a8a"/><path d="M 40,90 L 20,100 L 38,102 Z" fill="#8fd0dc"/><path d="M 100,90 L 120,100 L 102,102 Z" fill="#8fd0dc"/><path d="M 44,110 L 24,124 L 44,120 Z" fill="#6fb0c0"/><path d="M 96,110 L 116,124 L 96,120 Z" fill="#6fb0c0"/></svg>`,
-shadowbloom:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#c0b0c8"/><ellipse cx="70" cy="88" rx="30" ry="35" fill="#241830"/><circle cx="70" cy="50" r="19" fill="#d8b0a8"/><path d="M 54,46 Q 70,40 86,46 L 84,54 Q 70,50 56,54 Z" fill="#180f1e"/><path d="M 40,90 Q 70,72 100,90 L 94,112 Q 70,122 46,112 Z" fill="#3a2444"/><g fill="#e05fa0"><circle cx="40" cy="94" r="5"/><circle cx="34" cy="90" r="3.5"/><circle cx="46" cy="88" r="3.5"/><circle cx="100" cy="94" r="5"/><circle cx="106" cy="90" r="3.5"/><circle cx="94" cy="88" r="3.5"/></g><circle cx="40" cy="94" r="2" fill="#fff0a0"/><circle cx="100" cy="94" r="2" fill="#fff0a0"/></svg>`,
-druid:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#d8e0c4"/><ellipse cx="70" cy="88" rx="32" ry="36" fill="#5a4a2e"/><circle cx="70" cy="50" r="19" fill="#c99a70"/><circle cx="63" cy="49" r="2.4" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.4" fill="#2a2a2a"/><path d="M 40,92 Q 70,74 100,92 L 94,116 Q 70,126 46,116 Z" fill="#3f6b3f"/><path d="M 56,38 Q 48,26 38,24 Q 48,32 50,42 M 50,32 Q 42,28 36,30" stroke="#7a5a3a" stroke-width="2.2" fill="none"/><path d="M 84,38 Q 92,26 102,24 Q 92,32 90,42 M 90,32 Q 98,28 104,30" stroke="#7a5a3a" stroke-width="2.2" fill="none"/><polygon points="62,40 70,22 78,40" fill="#4fae4f"/></svg>`,
-archmage:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#8a7ab8"/><ellipse cx="70" cy="88" rx="33" ry="37" fill="#241a4a"/><circle cx="70" cy="50" r="19" fill="#e0c9a8"/><circle cx="63" cy="49" r="2.6" fill="#ffe98a"/><circle cx="77" cy="49" r="2.6" fill="#ffe98a"/><path d="M 38,92 Q 70,72 102,92 L 96,120 Q 70,132 44,120 Z" fill="#332470"/><path d="M 70,8 L 96,50 Q 70,40 44,50 Z" fill="#7a5fce"/><circle cx="70" cy="16" r="5" fill="#ffe98a"/><circle cx="100" cy="86" r="12" fill="#c9b3ff" opacity="0.85"/><circle cx="100" cy="86" r="18" fill="#c9b3ff" opacity="0.3"/><circle cx="40" cy="86" r="8" fill="#c9b3ff" opacity="0.5"/></svg>`,
-galeshaper:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><circle cx="70" cy="70" r="68" fill="#c8ecec"/><ellipse cx="70" cy="88" rx="31" ry="36" fill="#1f6a6a"/><circle cx="70" cy="50" r="19" fill="#e8c9a0"/><path d="M 54,46 Q 70,40 86,46 L 84,54 Q 70,50 56,54 Z" fill="#134646"/><path d="M 40,92 Q 70,72 100,92 L 94,118 Q 70,128 46,118 Z" fill="#2a8a8a"/><path d="M 26,66 Q 70,46 114,66" stroke="#bdf2f2" stroke-width="5" fill="none" opacity="0.9"/><path d="M 30,80 Q 70,62 110,80" stroke="#8fe0e0" stroke-width="4" fill="none" opacity="0.7"/><path d="M 40,114 L 16,132 L 40,122 Z" fill="#7fd4d4"/><path d="M 100,114 L 124,132 L 100,122 Z" fill="#7fd4d4"/></svg>`,
+wizard:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="wz-robe" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6f86d8"/><stop offset="1" stop-color="#3f56a8"/></linearGradient><radialGradient id="wz-orb" cx="50%" cy="45%" r="55%"><stop offset="0" stop-color="#dff0ff"/><stop offset="1" stop-color="#8fb4ff"/></radialGradient></defs><circle cx="70" cy="70" r="68" fill="#ccd6ec"/><ellipse cx="70" cy="90" rx="33" ry="36" fill="url(#wz-robe)"/><path d="M40,94 Q70,78 100,94 L96,116 Q70,126 44,116 Z" fill="#33478a"/><circle cx="70" cy="50" r="19" fill="#e8c9a0"/><path d="M70,8 L92,50 Q70,42 48,50 Z" fill="#4a6fd0"/><path d="M70,10 L77,30 L70,26 L63,30 Z" fill="#33478a" opacity="0.55"/><circle cx="70" cy="14" r="4" fill="#f4d94a"/><path d="M48,50 Q70,44 92,50 L90,56 Q70,50 50,56 Z" fill="#33478a"/><path d="M60,41 L68,43 M80,41 L72,43" stroke="#8a6a4a" stroke-width="1.5" stroke-linecap="round"/><circle cx="63" cy="49" r="2.4" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.4" fill="#2a2a2a"/><circle cx="98" cy="88" r="9" fill="url(#wz-orb)"/><circle cx="98" cy="88" r="13" fill="#9db8ff" opacity="0.3"/></svg>`,
+thornguard:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="tg-body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7a5636"/><stop offset="1" stop-color="#4b3524"/></linearGradient></defs><circle cx="70" cy="70" r="68" fill="#e7dcc2"/><ellipse cx="70" cy="88" rx="33" ry="35" fill="url(#tg-body)"/><path d="M40,92 Q70,74 100,92 L96,112 Q70,122 44,112 Z" fill="#3a2c1c"/><ellipse cx="44" cy="86" rx="13" ry="11" fill="#3f6b3f"/><ellipse cx="96" cy="86" rx="13" ry="11" fill="#3f6b3f"/><circle cx="70" cy="50" r="20" fill="#e8c9a0"/><ellipse cx="70" cy="44" rx="22" ry="10" fill="#2e4526"/><polygon points="55,42 60,20 65,42" fill="#3f6b3f"/><polygon points="70,42 75,16 80,42" fill="#4fae4f"/><polygon points="85,42 88,22 92,42" fill="#3f6b3f"/><path d="M60,41 L68,43 M80,41 L72,43" stroke="#5a3f28" stroke-width="1.6" stroke-linecap="round"/><circle cx="63" cy="50" r="2.5" fill="#2a2a2a"/><circle cx="77" cy="50" r="2.5" fill="#2a2a2a"/><path d="M56,56 l6,3 M84,56 l-6,3" stroke="#b5545a" stroke-width="2" stroke-linecap="round" opacity="0.7"/><path d="M62,60 Q70,64 78,60" stroke="#8a6a4a" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg>`,
+windrider:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="wr-body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4f9a5e"/><stop offset="1" stop-color="#2e6a3e"/></linearGradient></defs><circle cx="70" cy="70" r="68" fill="#d7ede6"/><path d="M26,64 Q70,46 114,64" stroke="#8fd0c4" stroke-width="4" fill="none" opacity="0.7"/><ellipse cx="70" cy="90" rx="31" ry="35" fill="url(#wr-body)"/><path d="M42,94 Q70,80 98,94 L92,114 Q70,122 48,114 Z" fill="#255530"/><circle cx="70" cy="50" r="19" fill="#e8c9a0"/><path d="M48,50 Q70,32 92,50 Q86,42 70,40 Q54,42 48,50 Z" fill="#3f7d4e"/><path d="M92,44 Q104,40 110,50 Q100,50 92,52 Z" fill="#5f9f68"/><path d="M60,42 L68,44 M80,42 L72,44" stroke="#6a5a3a" stroke-width="1.5" stroke-linecap="round"/><circle cx="63" cy="49" r="2.4" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.4" fill="#2a2a2a"/><path d="M62,58 Q70,62 78,58" stroke="#3f7d4e" stroke-width="1.6" fill="none" stroke-linecap="round"/><path d="M100,72 Q116,64 112,86" stroke="#8fd0c4" stroke-width="3" fill="none" opacity="0.6"/></svg>`,
+sorcerer:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="so-robe" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7a5fce"/><stop offset="1" stop-color="#3a2c6b"/></linearGradient><radialGradient id="so-orb" cx="50%" cy="45%" r="55%"><stop offset="0" stop-color="#efe0ff"/><stop offset="1" stop-color="#b39cff"/></radialGradient></defs><circle cx="70" cy="70" r="68" fill="#dcd4ea"/><ellipse cx="70" cy="90" rx="34" ry="37" fill="url(#so-robe)"/><path d="M38,94 Q70,76 102,94 L98,118 Q70,128 42,118 Z" fill="#4a3a8a"/><circle cx="70" cy="50" r="19" fill="#e8c9a0"/><path d="M70,6 L94,50 Q70,42 46,50 Z" fill="#5a3fa0"/><circle cx="70" cy="14" r="4" fill="#f0d86a"/><circle cx="64" cy="30" r="2" fill="#f0d86a"/><circle cx="78" cy="24" r="1.6" fill="#f0d86a"/><path d="M46,50 Q70,44 94,50 L92,57 Q70,51 48,57 Z" fill="#4a3a8a"/><path d="M60,41 L68,43 M80,41 L72,43" stroke="#8a6a4a" stroke-width="1.5" stroke-linecap="round"/><circle cx="63" cy="49" r="2.4" fill="#3a2a5a"/><circle cx="77" cy="49" r="2.4" fill="#3a2a5a"/><circle cx="100" cy="86" r="10" fill="url(#so-orb)"/><circle cx="100" cy="86" r="15" fill="#b39cff" opacity="0.3"/><circle cx="40" cy="90" r="6" fill="#b39cff" opacity="0.5"/></svg>`,
+warlock:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="wl-robe" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4a2a5a"/><stop offset="1" stop-color="#2a1830"/></linearGradient></defs><circle cx="70" cy="70" r="68" fill="#c9b8c4"/><circle cx="70" cy="60" r="42" fill="#7a3fbf" opacity="0.12"/><ellipse cx="70" cy="90" rx="33" ry="36" fill="url(#wl-robe)"/><path d="M40,94 Q70,76 100,94 L96,116 Q70,126 44,116 Z" fill="#3a1e40"/><circle cx="70" cy="50" r="19" fill="#d8b592"/><path d="M46,52 Q70,30 94,52 Q88,38 70,36 Q52,38 46,52 Z" fill="#2a1830"/><path d="M52,34 Q46,22 40,18 Q49,26 52,38 Z" fill="#4a2a2a"/><path d="M88,34 Q94,22 100,18 Q91,26 88,38 Z" fill="#4a2a2a"/><path d="M58,45 L66,47 M82,45 L74,47" stroke="#5a4030" stroke-width="1.5" stroke-linecap="round"/><circle cx="63" cy="50" r="2.6" fill="#c65fbf"/><circle cx="77" cy="50" r="2.6" fill="#c65fbf"/><path d="M96,90 Q108,84 108,96 Q100,94 96,90 Z" fill="#9a3fbf" opacity="0.7"/><path d="M100,100 Q112,98 110,110 Q102,106 100,100 Z" fill="#9a3fbf" opacity="0.5"/><circle cx="40" cy="92" r="5" fill="#9a3fbf" opacity="0.5"/></svg>`,
+necromancer:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="nc-robe" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2e2e2e"/><stop offset="1" stop-color="#161616"/></linearGradient></defs><circle cx="70" cy="70" r="68" fill="#a8b8a8"/><circle cx="70" cy="62" r="44" fill="#4fff8a" opacity="0.1"/><ellipse cx="70" cy="90" rx="33" ry="37" fill="url(#nc-robe)"/><path d="M40,94 Q70,76 100,94 L96,118 Q70,128 44,118 Z" fill="#242424"/><circle cx="70" cy="50" r="19" fill="#c9c9b8"/><path d="M46,50 Q70,26 94,50 Q88,32 70,30 Q52,32 46,50 Z" fill="#141414"/><circle cx="63" cy="49" r="2.8" fill="#4fff8a"/><circle cx="77" cy="49" r="2.8" fill="#4fff8a"/><circle cx="63" cy="49" r="5" fill="#4fff8a" opacity="0.25"/><circle cx="77" cy="49" r="5" fill="#4fff8a" opacity="0.25"/><path d="M62,59 Q70,62 78,59" stroke="#5a5a4a" stroke-width="1.4" fill="none" stroke-linecap="round"/><circle cx="100" cy="88" r="6" fill="#4fff8a" opacity="0.6"/><circle cx="40" cy="86" r="5" fill="#4fff8a" opacity="0.5"/></svg>`,
+stonewarden:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="sn-body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7a746a"/><stop offset="1" stop-color="#4f4a44"/></linearGradient><linearGradient id="sn-stone" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9a948c"/><stop offset="1" stop-color="#6a655e"/></linearGradient></defs><circle cx="70" cy="70" r="68" fill="#d8d4c8"/><ellipse cx="70" cy="90" rx="35" ry="37" fill="url(#sn-body)"/><path d="M38,92 Q70,74 102,92 L98,118 Q70,130 42,118 Z" fill="#5a554e"/><ellipse cx="42" cy="84" rx="15" ry="13" fill="url(#sn-stone)" stroke="#4a453e" stroke-width="1.5"/><ellipse cx="98" cy="84" rx="15" ry="13" fill="url(#sn-stone)" stroke="#4a453e" stroke-width="1.5"/><path d="M37,84 q4,-6 8,0 M91,84 q4,-6 8,0" stroke="#6f9a52" stroke-width="2" fill="none" opacity="0.7"/><circle cx="70" cy="50" r="20" fill="#c99a70"/><path d="M50,44 L90,44 L86,35 L54,35 Z" fill="url(#sn-stone)" stroke="#4a453e" stroke-width="1.5"/><polygon points="58,38 62,22 66,38" fill="#3f6b3f"/><polygon points="82,38 86,22 90,38" fill="#3f6b3f"/><circle cx="63" cy="51" r="2.5" fill="#2a2a2a"/><circle cx="77" cy="51" r="2.5" fill="#2a2a2a"/><path d="M60,45 L68,47 M80,45 L72,47" stroke="#7a5a3a" stroke-width="1.6" stroke-linecap="round"/><path d="M56,58 l6,3 M84,58 l-6,3" stroke="#b5545a" stroke-width="2" stroke-linecap="round" opacity="0.65"/><path d="M62,62 L78,62" stroke="#7a5a3a" stroke-width="1.8" stroke-linecap="round"/></svg>`,
+treesinger:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="tr-robe" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6f9a52"/><stop offset="1" stop-color="#3f6b38"/></linearGradient></defs><circle cx="70" cy="70" r="68" fill="#e0e8d0"/><ellipse cx="70" cy="90" rx="33" ry="36" fill="url(#tr-robe)"/><path d="M40,94 Q70,76 100,94 L96,116 Q70,126 44,116 Z" fill="#5a8a48"/><circle cx="70" cy="50" r="19" fill="#e8c9a0"/><polygon points="50,44 56,18 62,44" fill="#3f8a3f"/><polygon points="62,40 70,14 78,40" fill="#4fae4f"/><polygon points="78,44 84,18 90,44" fill="#3f8a3f"/><path d="M60,41 L68,43 M80,41 L72,43" stroke="#5a7a3a" stroke-width="1.5" stroke-linecap="round"/><circle cx="63" cy="49" r="2.4" fill="#2a2a2a"/><circle cx="77" cy="49" r="2.4" fill="#2a2a2a"/><path d="M62,58 Q70,63 78,58" stroke="#6a9a4a" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="42" cy="92" r="6" fill="#9fd66a" opacity="0.7"/><circle cx="98" cy="92" r="6" fill="#9fd66a" opacity="0.7"/><circle cx="33" cy="74" r="2.5" fill="#bfe89a" opacity="0.85"/><circle cx="107" cy="76" r="2.5" fill="#bfe89a" opacity="0.85"/></svg>`,
+rootbinder:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="rb-body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5a4a2e"/><stop offset="1" stop-color="#3a3020"/></linearGradient></defs><circle cx="70" cy="70" r="68" fill="#c8d4c0"/><ellipse cx="70" cy="90" rx="34" ry="37" fill="url(#rb-body)"/><path d="M38,94 Q70,74 102,94 L98,120 Q70,130 42,120 Z" fill="#4a3e28"/><path d="M40,92 Q30,102 40,114 Q32,118 34,128" stroke="#6a4c2e" stroke-width="4" fill="none" stroke-linecap="round"/><path d="M100,92 Q110,102 100,114 Q108,118 106,128" stroke="#6a4c2e" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="70" cy="50" r="19" fill="#c99a70"/><path d="M48,48 Q70,26 92,48 Q86,34 70,32 Q54,34 48,48 Z" fill="#2e4526"/><polygon points="58,40 63,22 68,40" fill="#3f6b3f"/><polygon points="72,40 77,22 82,40" fill="#3f6b3f"/><circle cx="70" cy="45" r="3" fill="#c94a4a" opacity="0.85"/><path d="M60,42 L68,44 M80,42 L72,44" stroke="#5a3f28" stroke-width="1.5" stroke-linecap="round"/><circle cx="63" cy="50" r="2.4" fill="#2a2a2a"/><circle cx="77" cy="50" r="2.4" fill="#2a2a2a"/><path d="M62,60 Q70,64 78,60" stroke="#7a5a3a" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg>`,
+emberpriest:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="ep-robe" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a24a34"/><stop offset="1" stop-color="#5a281e"/></linearGradient><linearGradient id="ep-fire" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#e08a4a"/><stop offset="1" stop-color="#f4cf8a"/></linearGradient></defs><circle cx="70" cy="70" r="68" fill="#e8d4c0"/><circle cx="70" cy="42" r="27" fill="#ffcf7a" opacity="0.3"/><ellipse cx="70" cy="90" rx="33" ry="37" fill="url(#ep-robe)"/><path d="M40,94 Q70,76 100,94 L96,118 Q70,128 44,118 Z" fill="#9a3a28"/><path d="M40,95 Q70,89 100,95" stroke="#e0b23d" stroke-width="2" fill="none" opacity="0.7"/><circle cx="70" cy="50" r="19" fill="#dcae82"/><path d="M70,8 Q60,26 66,40 Q70,32 74,40 Q80,26 70,8 Z" fill="url(#ep-fire)"/><circle cx="70" cy="16" r="4" fill="#ffe0a8"/><path d="M60,42 L68,44 M80,42 L72,44" stroke="#8a5a3a" stroke-width="1.5" stroke-linecap="round"/><circle cx="63" cy="50" r="2.4" fill="#2a2a2a"/><circle cx="77" cy="50" r="2.4" fill="#2a2a2a"/><path d="M56,74 Q70,84 84,74 L84,82 Q70,90 56,82 Z" fill="#e0c458"/><circle cx="70" cy="112" r="7" fill="#ffcf7a"/><circle cx="70" cy="112" r="12" fill="#ff9d3d" opacity="0.3"/></svg>`,
+galestrider:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="gs-body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3f8a8a"/><stop offset="1" stop-color="#245858"/></linearGradient></defs><circle cx="70" cy="70" r="68" fill="#cfe4ea"/><path d="M24,60 Q70,42 116,60" stroke="#8fd0dc" stroke-width="4" fill="none" opacity="0.6"/><ellipse cx="70" cy="90" rx="30" ry="35" fill="url(#gs-body)"/><path d="M42,94 Q70,80 98,94 L92,114 Q70,122 48,114 Z" fill="#2e5a68"/><path d="M40,90 L20,100 L38,102 Z" fill="#8fd0dc"/><path d="M100,90 L120,100 L102,102 Z" fill="#8fd0dc"/><circle cx="70" cy="50" r="19" fill="#e8c9a0"/><path d="M50,48 Q70,32 90,48 L88,54 Q70,46 52,54 Z" fill="#1c3a44"/><path d="M50,53 Q70,49 90,53 L88,58 Q70,52 52,58 Z" fill="#2e5a68"/><circle cx="63" cy="50" r="2.4" fill="#1a2a2a"/><circle cx="77" cy="50" r="2.4" fill="#1a2a2a"/><path d="M62,60 Q70,63 78,60" stroke="#2e5a68" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>`,
+shadowbloom:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="sb-body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a2444"/><stop offset="1" stop-color="#201830"/></linearGradient></defs><circle cx="70" cy="70" r="68" fill="#c0b0c8"/><ellipse cx="70" cy="90" rx="30" ry="35" fill="url(#sb-body)"/><path d="M42,94 Q70,78 98,94 L92,114 Q70,122 48,114 Z" fill="#241830"/><circle cx="70" cy="50" r="19" fill="#d8b0a8"/><path d="M48,50 Q70,30 92,50 Q86,40 70,38 Q54,40 48,50 Z" fill="#180f1e"/><path d="M52,53 Q70,59 88,53 L88,59 Q70,65 52,59 Z" fill="#241830"/><circle cx="63" cy="49" r="2.6" fill="#e05fa0"/><circle cx="77" cy="49" r="2.6" fill="#e05fa0"/><g fill="#e05fa0"><circle cx="40" cy="92" r="5"/><circle cx="34" cy="88" r="3.4"/><circle cx="46" cy="88" r="3.4"/><circle cx="100" cy="92" r="5"/><circle cx="106" cy="88" r="3.4"/><circle cx="94" cy="88" r="3.4"/></g><circle cx="40" cy="92" r="2" fill="#fff0a0"/><circle cx="100" cy="92" r="2" fill="#fff0a0"/></svg>`,
+druid:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="dr-body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5a6a34"/><stop offset="1" stop-color="#3a4a24"/></linearGradient></defs><circle cx="70" cy="70" r="68" fill="#d8e0c4"/><ellipse cx="70" cy="90" rx="32" ry="36" fill="url(#dr-body)"/><path d="M40,94 Q70,76 100,94 L96,116 Q70,126 44,116 Z" fill="#3f6b3f"/><path d="M56,38 Q48,26 38,24 Q48,32 50,42 M50,32 Q42,28 36,30" stroke="#7a5a3a" stroke-width="2.2" fill="none"/><path d="M84,38 Q92,26 102,24 Q92,32 90,42 M90,32 Q98,28 104,30" stroke="#7a5a3a" stroke-width="2.2" fill="none"/><polygon points="62,40 70,22 78,40" fill="#4fae4f"/><path d="M60,42 L68,44 M80,42 L72,44" stroke="#5a3f28" stroke-width="1.5" stroke-linecap="round"/><circle cx="63" cy="50" r="2.4" fill="#2a2a2a"/><circle cx="77" cy="50" r="2.4" fill="#2a2a2a"/><path d="M62,60 Q70,64 78,60" stroke="#6a8a3a" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg>`,
+archmage:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="am-robe" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7a5fce"/><stop offset="1" stop-color="#241a4a"/></linearGradient><radialGradient id="am-orb" cx="50%" cy="45%" r="55%"><stop offset="0" stop-color="#f4ecff"/><stop offset="1" stop-color="#c9b3ff"/></radialGradient></defs><circle cx="70" cy="70" r="68" fill="#8a7ab8"/><circle cx="70" cy="48" r="26" fill="#ffe98a" opacity="0.18"/><ellipse cx="70" cy="90" rx="34" ry="38" fill="url(#am-robe)"/><path d="M38,94 Q70,74 102,94 L98,120 Q70,130 42,120 Z" fill="#332470"/><path d="M38,95 Q70,89 102,95" stroke="#e0b23d" stroke-width="2" fill="none" opacity="0.7"/><circle cx="70" cy="50" r="19" fill="#e0c9a8"/><path d="M70,6 L96,50 Q70,40 44,50 Z" fill="#5a3fa0"/><path d="M44,50 Q70,40 96,50 L94,56 Q70,48 46,56 Z" fill="#e0b23d"/><circle cx="70" cy="12" r="5" fill="#ffe98a"/><path d="M59,42 L68,44 M81,42 L72,44" stroke="#8a6a4a" stroke-width="1.5" stroke-linecap="round"/><circle cx="63" cy="49" r="2.6" fill="#3a2a5a"/><circle cx="77" cy="49" r="2.6" fill="#3a2a5a"/><circle cx="100" cy="86" r="12" fill="url(#am-orb)"/><circle cx="100" cy="86" r="18" fill="#c9b3ff" opacity="0.3"/><circle cx="40" cy="86" r="8" fill="#c9b3ff" opacity="0.5"/></svg>`,
+galeshaper:`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="gh-body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2f9a9a"/><stop offset="1" stop-color="#1f6a6a"/></linearGradient></defs><circle cx="70" cy="70" r="68" fill="#c8ecec"/><path d="M22,58 Q70,38 118,58" stroke="#bdf2f2" stroke-width="5" fill="none" opacity="0.8"/><path d="M26,74 Q70,56 114,74" stroke="#8fe0e0" stroke-width="4" fill="none" opacity="0.6"/><ellipse cx="70" cy="90" rx="31" ry="36" fill="url(#gh-body)"/><path d="M40,94 Q70,76 100,94 L94,116 Q70,124 46,116 Z" fill="#2a8a8a"/><path d="M40,110 L16,126 L40,118 Z" fill="#7fd4d4"/><path d="M100,110 L124,126 L100,118 Z" fill="#7fd4d4"/><circle cx="70" cy="50" r="19" fill="#e8c9a0"/><path d="M50,48 Q70,32 90,48 L88,54 Q70,46 52,54 Z" fill="#134646"/><path d="M88,42 Q100,38 106,48 Q96,48 88,50 Z" fill="#7fd4d4"/><circle cx="63" cy="50" r="2.4" fill="#16323a"/><circle cx="77" cy="50" r="2.4" fill="#16323a"/><path d="M62,60 Q70,63 78,60" stroke="#1f6a6a" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>`,
 };
 
 const MONSTER_PORTRAITS = {
@@ -830,6 +836,8 @@ const Balance = {
   
   
   FLEE_FAIL_CHANCE:0.20,
+  FLEE_BUTTON_COOLDOWN_MS:1000,
+  WIZARD_INT_DAMAGE_PER_POINT:2,
   
   
   
@@ -906,6 +914,7 @@ const Balance = {
   
   
   FOREST_REPUTATION_XP_PCT_PER_POINT:1,
+  FOREST_REPUTATION_MIN:-100, FOREST_REPUTATION_MAX:100,
   
   
   
@@ -994,8 +1003,8 @@ const Balance = {
   
   
   
-  STRONGHOLD_GUARDIAN_HP_MULT:3.0, STRONGHOLD_GUARDIAN_XP_MULT:1.5,
-  
+  STRONGHOLD_GUARDIAN_HP_MULT:4.0, STRONGHOLD_GUARDIAN_XP_MULT:2.0, STRONGHOLD_GUARDIAN_DAMAGE_MULT:1.5,
+
   STRONGHOLD_KEY_DROP_CHANCE:0.30,
   
   
@@ -1008,7 +1017,7 @@ const Balance = {
   
   
   
-  ROAMING_MOB_COUNT_PER_MAZE:3, ROAMING_MOB_HP_MULT:4.0, ROAMING_MOB_DAMAGE_MULT:1.5, ROAMING_MOB_XP_MULT:2.0,
+  ROAMING_MOB_COUNT_PER_MAZE:3, ROAMING_MOB_HP_MULT:3.0, ROAMING_MOB_DAMAGE_MULT:1.0, ROAMING_MOB_XP_MULT:1.5,
   
   
   
@@ -1045,10 +1054,11 @@ const Balance = {
     return tier<=1 ? "stronghold_key" : `stronghold_key_t${tier}`;
   },
   STRONGHOLD_CHEST_GOLD_MIN:500, STRONGHOLD_CHEST_GOLD_MAX:1500,
-  STRONGHOLD_CHEST_HERBS_MIN:5, STRONGHOLD_CHEST_HERBS_MAX:15,
+  STRONGHOLD_CHEST_HERBS_MIN:3, STRONGHOLD_CHEST_HERBS_MAX:7,
   STRONGHOLD_CHEST_GEAR_COUNT_MIN:2, STRONGHOLD_CHEST_GEAR_COUNT_MAX:4,
   STRONGHOLD_CHEST_SCROLL_CHANCE:0.25, STRONGHOLD_CHEST_EYESIGHT_CHANCE:0.10, STRONGHOLD_CHEST_BAG_CHANCE:0.30,
   STRONGHOLD_CHEST_POTIONS_MIN:3, STRONGHOLD_CHEST_POTIONS_MAX:9,
+  STRONGHOLD_CHEST_ELIXIRS_MIN:1, STRONGHOLD_CHEST_ELIXIRS_MAX:3,
   
   
   
@@ -1076,7 +1086,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.21.5-web",
+  GAME_VERSION:"v0.22-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   
@@ -1143,7 +1153,7 @@ const Balance = {
   
   
   AFFIX_TIER1_MAX:{
-    damage:5, hp:15, crit:5, armor:2, regen:5, gold_find:10, xp_find:5,
+    damage:5, hp:15, crit:5, armor:2, regen:1, stamina_regen:1, gold_find:10, xp_find:5,
     stamina_max:15, strength:5, dexterity:5, vitality:5, intelligence:5, poison_resist:5,
     magic_find:10, block_chance:2,
     
@@ -1208,7 +1218,7 @@ const Balance = {
   
   
   
-  AFFIX_POOL:["damage","hp","crit","armor","regen","gold_find","xp_find","stamina_max","strength","dexterity","vitality","intelligence","poison_resist","magic_find","block_chance","flee_chance","crit_multiplier","attack_speed"],
+  AFFIX_POOL:["damage","hp","crit","armor","regen","stamina_regen","gold_find","xp_find","stamina_max","strength","dexterity","vitality","intelligence","poison_resist","magic_find","block_chance","flee_chance","crit_multiplier","attack_speed"],
   
   
   
@@ -1506,6 +1516,12 @@ const Balance = {
     return base*t;
   },
   affixRangeForTier(stat, tier){ return [1, this.affixMaxForTier(stat,tier)]; },
+  rollAffixValue(stat, tier){
+    const max=this.affixMaxForTier(stat,tier);
+    const step=max/20;
+    const k=randi(20)+1;
+    return round2(k*step);
+  },
   itemTierAdjective(tier){return this.ITEM_TIER_ADJECTIVES[clampi(tier-1,0,this.ITEM_TIER_ADJECTIVES.length-1)];},
   rollRarity(mfPct=0){
     const rollOnce=()=>{
@@ -1638,6 +1654,8 @@ function clampf(v,lo,hi){return Math.max(lo,Math.min(hi,v));}
 function randi(n){return Math.floor(Math.random()*n);}
 function randRange(a,b){return a+Math.random()*(b-a);}
 function randIntRange(a,b){return a+Math.floor(Math.random()*(b-a+1));}
+function round2(v){return Math.round(v*100)/100;}
+function trimDecimal(v){let s=round2(v).toFixed(2); if(s.indexOf(".")!==-1){ s=s.replace(/0+$/,""); s=s.replace(/\.$/,""); } return s;}
 function pick(arr){return arr[randi(arr.length)];}
 
 
@@ -1689,7 +1707,7 @@ const DL = {
     }
     if(item.cures_poison) return "Instantly cures the Poison effect, if you're currently poisoned.";
     
-    if(item.reveals_maze) return "Reveals the entire current maze's fog of war. Usable only while inside a maze -- lasts for that one maze run.";
+    if(item.reveals_maze) return "Reveals the entire current maze's fog of war. Usable inside a maze; each elixir holds 10 reveals.";
     if(item.level_bonus!=null) return `Your next venture starts ${item.level_bonus} area level${item.level_bonus===1?"":"s"} higher than your current one.`;
     if(item.type==="bag") return `+${item.capacity} inventory capacity while equipped.`;
     return "";
@@ -1897,9 +1915,8 @@ const IF = {
     const affixes=[];
     for(let i=0;i<affixCount;i++){
       const stat=pool[i];
-      const [lo,hi]=Balance.affixRangeForTier(stat,tier);
-      let value=randIntRange(lo,hi);
-      if(chosenSlot==="weapon" && stat==="damage") value=Math.round(value*Balance.WEAPON_DAMAGE_AFFIX_MULT);
+      let value=Balance.rollAffixValue(stat,tier);
+      if(chosenSlot==="weapon" && stat==="damage") value=round2(value*Balance.WEAPON_DAMAGE_AFFIX_MULT);
       affixes.push({stat, value});
     }
     if(Math.random()<Balance.EYESIGHT_AFFIX_CHANCE){
@@ -1955,7 +1972,7 @@ const IF = {
     if(!inst || a.stat==="eyesight") return false;
     const baseMax=Balance.affixMaxForTier(a.stat, inst.tier);
     if(baseMax<=0) return false;
-    const effectiveMax=(inst.slot==="weapon" && a.stat==="damage") ? Math.round(baseMax*Balance.WEAPON_DAMAGE_AFFIX_MULT) : baseMax;
+    const effectiveMax=(inst.slot==="weapon" && a.stat==="damage") ? round2(baseMax*Balance.WEAPON_DAMAGE_AFFIX_MULT) : baseMax;
     return a.value>=effectiveMax;
   },
   
@@ -1967,7 +1984,7 @@ const IF = {
       
       
       case "crit": return "Critical Strike Chance";
-      case "armor": return "Armor"; case "regen": return "Regeneration"; case "gold_find": return "Gold Found";
+      case "armor": return "Armor"; case "regen": return "Health Regeneration"; case "stamina_regen": return "Stamina Regeneration"; case "gold_find": return "Gold Found";
       case "xp_find": return "Experience Gained"; case "stamina_max": return "Stamina"; case "eyesight": return "Eyesight";
       case "strength": return "Strength"; case "dexterity": return "Dexterity"; case "vitality": return "Vitality"; case "intelligence": return "Intelligence";
       case "poison_resist": return "Poison Resistance";
@@ -1975,7 +1992,7 @@ const IF = {
       
       case "block_chance": return "Block Chance";
       
-      case "flee_chance": return "Flee Chance";
+      case "flee_chance": return "Increased chance to flee";
       
       case "crit_multiplier": return "Critical Strike Multiplier";
       
@@ -1992,14 +2009,9 @@ const IF = {
   formatAffix(a, inst){
     const label=this.affixLabel(a.stat);
     const diamond=this.isAffixMaxRoll(a,inst)?" \u{1F48E}":"";
-    if(this.affixIsPercent(a.stat)) return `+${Math.round(a.value)}% ${label}${diamond}`;
-    if(a.stat==="regen") return `+${a.value.toFixed(1)} ${label}${diamond}`;
-    
-    
-    
-    
     if(a.stat==="crit_multiplier") return `+${(a.value/100).toFixed(2)} ${label}${diamond}`;
-    return `+${Math.round(a.value)} ${label}${diamond}`;
+    if(this.affixIsPercent(a.stat)) return `+${trimDecimal(a.value)}% ${label}${diamond}`;
+    return `+${trimDecimal(a.value)} ${label}${diamond}`;
   },
   tooltipText(inst){
     
@@ -2033,8 +2045,9 @@ const IF = {
   },
   reroll(inst){
     const newAffixes=inst.affixes.map(a=>{
-      const [lo,hi]=Balance.affixRangeForTier(a.stat,inst.tier);
-      return {stat:a.stat, value:randIntRange(lo,hi)};
+      let value=Balance.rollAffixValue(a.stat,inst.tier);
+      if(inst.slot==="weapon" && a.stat==="damage") value=round2(value*Balance.WEAPON_DAMAGE_AFFIX_MULT);
+      return {stat:a.stat, value};
     });
     return {...inst, affixes:newAffixes};
   },
@@ -2675,7 +2688,7 @@ const PS = {
   
   forest_reputation:{},
   hardcore:false, current_slot:-1,
-  lifetime_xp:0, isRestingAtCampfire:false, eyesight_potion_steps_left:0, max_maze_depth_reached:1,
+  lifetime_xp:0, isRestingAtCampfire:false, eyesight_potion_steps_left:0, clarity_charges_left:0, max_maze_depth_reached:1,
   
   
   
@@ -2868,24 +2881,24 @@ const PS = {
     
     
     
-    let statBonus=0;
+    let statBonus=0, intDmgBonus=0;
     if(c.chain==="thornguard") statBonus=this.getTotalAttr("str");
     else if(c.chain==="windrider") statBonus=this.getTotalAttr("dex");
-    else if(c.chain==="wizard") statBonus=this.getTotalAttr("int");
-    
-    
-    
-    
-    
+    else if(c.chain==="wizard"){ intDmgBonus=this.getTotalAttr("int")*Balance.WIZARD_INT_DAMAGE_PER_POINT; statBonus=intDmgBonus; }
+
+
+
+
+
     const weaponType=this.getEquippedWeaponType();
     const skillLevel=weaponType?this.getWeaponSkillLevel(weaponType):0;
     const weaponSkillPct=skillLevel*Balance.WEAPON_SKILL_DAMAGE_PCT_PER_LEVEL;
     const baseMin=(c.base_damage_min||1)+perLevel+statBonus, baseMax=(c.base_damage_max||2)+perLevel+statBonus;
     const preSkillMin=baseMin+gearBonus, preSkillMax=baseMax+gearBonus;
     const totalMin=preSkillMin*(1+weaponSkillPct), totalMax=preSkillMax*(1+weaponSkillPct);
-    
-    
-    return {baseMin, baseMax, gearBonus, weaponSkillPct, weaponSkillBonus:totalMin-preSkillMin, totalMin, totalMax};
+
+
+    return {baseMin, baseMax, gearBonus, weaponSkillPct, weaponSkillBonus:totalMin-preSkillMin, totalMin, totalMax, intDmgBonus};
   },
   getDamageRange(){
     const d=this.getDamageBreakdown();
@@ -2959,6 +2972,7 @@ const PS = {
     if(this.magic_find_rounds_left>0) this.magic_find_rounds_left--;
   },
   getRegen(){const c=this.getClassData(); return (c.regen||0.0)+this.gearBonus("regen");},
+  getStaminaRegen(){const c=this.getClassData(); return (c.stamina_regen||0.0)+this.gearBonus("stamina_regen");},
   
   
   getMaxStamina(){return Balance.STAMINA_MAX_BASE+this.gearBonus("stamina_max")+Balance.vitStaminaBonus(this.getClassData(),this.attributes.vit);},
@@ -2973,7 +2987,8 @@ const PS = {
     const hp=this.gearBonus("hp"); if(hp) parts.push(`+${Math.round(hp)} Hit Points`);
     const crit=this.gearBonus("crit"); if(crit) parts.push(`+${Math.round(crit)}% Critical Strike Chance`);
     const armor=this.gearBonus("armor"); if(armor) parts.push(`+${Math.round(armor)} Armor`);
-    const regen=this.gearBonus("regen"); if(regen) parts.push(`+${regen.toFixed(1)} Regeneration`);
+    const regen=this.gearBonus("regen"); if(regen) parts.push(`+${regen.toFixed(1)} Health Regeneration`);
+    const staminaRegen=this.gearBonus("stamina_regen"); if(staminaRegen) parts.push(`+${staminaRegen.toFixed(1)} Stamina Regeneration`);
     const gf=this.gearBonus("gold_find"); if(gf) parts.push(`+${Math.round(gf)}% Gold Found`);
     const xf=this.gearBonus("xp_find"); if(xf) parts.push(`+${Math.round(xf)}% Experience Gained`);
     const sm=this.gearBonus("stamina_max"); if(sm) parts.push(`+${Math.round(sm)} Stamina`);
@@ -2992,7 +3007,7 @@ const PS = {
     
     const bc=this.gearBonus("block_chance"); if(bc) parts.push(`+${Math.round(bc)}% Block Chance`);
     
-    const fc=this.gearBonus("flee_chance"); if(fc) parts.push(`+${Math.round(fc)}% Flee Chance`);
+    const fc=this.gearBonus("flee_chance"); if(fc) parts.push(`+${Math.round(fc)}% Increased chance to flee`);
     
     
     const cm=this.gearBonus("crit_multiplier"); if(cm) parts.push(`+${(cm/100).toFixed(2)} Critical Strike Multiplier`);
@@ -3295,12 +3310,16 @@ const PS = {
   
   
   
-  getForestReputation(tier){ return (this.forest_reputation && this.forest_reputation[tier]) || 0; },
+  getForestReputation(tier){
+    const raw=(this.forest_reputation && this.forest_reputation[tier]) || 0;
+    return Math.max(Balance.FOREST_REPUTATION_MIN,Math.min(Balance.FOREST_REPUTATION_MAX,raw));
+  },
   getCurrentForestReputation(){ return this.getForestReputation(this.highest_tier_reached||1); },
   adjustForestReputation(delta){
     const tier=this.highest_tier_reached||1;
     if(!this.forest_reputation) this.forest_reputation={};
-    this.forest_reputation[tier]=(this.forest_reputation[tier]||0)+delta;
+    const next=(this.forest_reputation[tier]||0)+delta;
+    this.forest_reputation[tier]=Math.max(Balance.FOREST_REPUTATION_MIN,Math.min(Balance.FOREST_REPUTATION_MAX,next));
   },
   
   
@@ -3374,38 +3393,43 @@ const PS = {
     if(item.buff_type){ this.applyTempBuff(item.buff_type,item.buff_amount,item.buff_duration_ms||Balance.POTION_BUFF_DURATION_MS); used=true; }
     
     if(item.cures_poison && this.isPoisoned()){ this.curePoison(); used=true; }
-    
-    
-    
-    
-    
-    
-    if(item.reveals_maze && GF.screen==="maze" && GF.overworld_snapshot){
+
+
+
+
+
+
+    if(item.reveals_maze){
+      if(!(GF.screen==="maze" && GF.overworld_snapshot)) return false;
+      if(this.clarity_charges_left<=0){
+        if((this.consumables[itemId]||0)<1) return false;
+        this._removeConsumableOne(itemId);
+        this.clarity_charges_left=10;
+      }
       const maze=GF.overworld_snapshot;
       for(const c of maze.cells) c.discovered=true;
-      used=true;
+      this.clarity_charges_left--;
+      return true;
     }
     if(used) this._removeConsumableOne(itemId);
     return used;
   },
   canUseConsumable(itemId){
-    if((this.consumables[itemId]||0)<=0) return false;
     const item=DL.getItem(itemId);
+    if(item.reveals_maze){
+      if(GF.screen!=="maze" || !GF.overworld_snapshot) return false;
+      if(!GF.overworld_snapshot.cells.some(c=>!c.discovered)) return false;
+      return this.clarity_charges_left>0 || (this.consumables[itemId]||0)>=1;
+    }
+    if((this.consumables[itemId]||0)<=0) return false;
     if((item.heal_amount||0)>0 && (this.current_hp+this.getPendingHealAmount())<this.getMaxHp()) return true;
     if((item.stamina_amount||0)>0 && (this.current_stamina+this.getPendingStaminaHealAmount())<this.getMaxStamina()) return true;
     if((item.eyesight_steps||0)>0) return true;
     if(item.buff_type) return true;
-    
-    
-    
+
+
+
     if(item.cures_poison && this.isPoisoned()) return true;
-    
-    
-    
-    if(item.reveals_maze){
-      if(GF.screen!=="maze" || !GF.overworld_snapshot) return false;
-      return GF.overworld_snapshot.cells.some(c=>!c.discovered);
-    }
     return false;
   },
   
@@ -3475,6 +3499,19 @@ const PS = {
       const amt=item[field]||0;
       if(amt<=0) continue;
       if(amt>bestAmt){ bestAmt=amt; bestId=itemId; }
+    }
+    return bestId;
+  },
+  lowestAvailableConsumable(kind){
+    const field=kind==="health"?"heal_amount":"stamina_amount";
+    let bestId="", bestAmt=Infinity;
+    for(const itemId in this.consumables){
+      if((this.consumables[itemId]||0)<=0) continue;
+      const item=DL.getItem(itemId);
+      if(item.type!=="consumable") continue;
+      const amt=item[field]||0;
+      if(amt<=0) continue;
+      if(amt<bestAmt){ bestAmt=amt; bestId=itemId; }
     }
     return bestId;
   },
@@ -3690,7 +3727,7 @@ const PS = {
     this.equipped_bags=[]; this.pending_scroll_bonus=0; this.xp_buff_multiplier=1.0;
     this.xp_buff_encounters_left=0; this.stamina_shrine_buff=0.0; this.highest_tier_reached=1;
     this.season_won=false; this.kill_streak=0; this.max_kill_streak=0; this.total_kills=0; this.forest_reputation={}; this.xp_to_next=Balance.xpRequiredForLevel(this.level);
-    this.lifetime_xp=0; this.isRestingAtCampfire=false; this.eyesight_potion_steps_left=0;
+    this.lifetime_xp=0; this.isRestingAtCampfire=false; this.eyesight_potion_steps_left=0; this.clarity_charges_left=0;
     this.max_maze_depth_reached=1;
     
     
@@ -3770,6 +3807,7 @@ const PS = {
       gear_instances:this.gear_instances,equipped:this.equipped,equipped_bags:this.equipped_bags,
       highest_tier_reached:this.highest_tier_reached,season_won:this.season_won,lifetime_xp:this.lifetime_xp,
       eyesight_potion_steps_left:this.eyesight_potion_steps_left,
+      clarity_charges_left:this.clarity_charges_left,
       max_maze_depth_reached:this.max_maze_depth_reached,
       
       
@@ -3860,6 +3898,7 @@ const PS = {
     this.pending_scroll_bonus=0; this.xp_buff_multiplier=1.0; this.xp_buff_encounters_left=0; this.stamina_shrine_buff=0.0;
     this.lifetime_xp=parsed.lifetime_xp||0; this.isRestingAtCampfire=false;
     this.eyesight_potion_steps_left=parsed.eyesight_potion_steps_left||0;
+    this.clarity_charges_left=parsed.clarity_charges_left||0;
     this.max_maze_depth_reached=parsed.max_maze_depth_reached||1;
     
     
@@ -3941,7 +3980,7 @@ const PS = {
 
 
 
-const REGEN_ACTIVE_SCREENS=["town","inventory","merchant","alchemist","blacksmith","auctionHouse","vault","gamblingGoblin","masterTrial"];
+const REGEN_ACTIVE_SCREENS=["town","inventory","merchant","alchemist","blacksmith","auctionHouse","vault","gamblingGoblin","masterTrial","maze"];
 
 
 
@@ -4825,30 +4864,30 @@ function damageLine(){
   
   const baseFlat=Math.round((d.baseMin+d.baseMax)/2);
   const gearPart=d.gearBonus>0?`, +${Math.round(d.gearBonus)} from gear`:"";
-  
-  
-  
-  
-  
-  
+
+
+
+
+
+
   const skillTip=d.weaponSkillPct>0?`\nFrom skill bonuses: +${Math.round(d.weaponSkillPct*100)}%`:"";
-  
-  
-  
-  
-  
+  const intTip=d.intDmgBonus>0?`\nFrom Intelligence: +${Math.round(d.intDmgBonus)}`:"";
+
+
+
+
   const skillPart=d.weaponSkillPct>0?`, +${Math.round(d.weaponSkillBonus)} from skill`:"";
-  
-  
-  
-  
-  
-  
-  
+  const intPart=d.intDmgBonus>0?`, +${Math.round(d.intDmgBonus)} from Intelligence`:"";
+
+
+
+
+
+
   const flatTotal=Math.round((d.totalMin+d.totalMax)/2);
   const children=[
-    h("span",{class:"muted tooltip",style:{fontSize:".85em"},"data-tip":`Base (level + attributes): ${baseFlat}\nFrom equipped gear: +${Math.round(d.gearBonus)}${skillTip}`},[
-      `Damage: ${flatTotal} (${baseFlat} base${gearPart}${skillPart})`
+    h("span",{class:"muted tooltip",style:{fontSize:".85em"},"data-tip":`Base (level + attributes): ${baseFlat}\nFrom equipped gear: +${Math.round(d.gearBonus)}${skillTip}${intTip}`},[
+      `Damage: ${flatTotal} (${baseFlat} base${gearPart}${skillPart}${intPart})`
     ]),
   ];
   
@@ -5465,49 +5504,43 @@ function primaryAttrBadgeSvg(chainId){
 
 
 
+const CLASS_PATH_COLORS={ wizard:"#9d86f5", thornguard:"#d1594a", windrider:"#6cc466" };
+
 function screenClassProgression(){
   const root=h("div",{});
   root.appendChild(h("h2",{},["Player Classes"]));
   root.appendChild(h("div",{class:"lore"},["Every hero begins along one of three paths below. Passing that class's Broken Bridge Trial promotes you to the next tier down the same column. Whoever is first to pass the final trial of the final tier wins the season, at that moment, every player's level and class progress resets for a fresh season, but gear, gold, and other (future) skill progress carry over."]));
-  
+
   root.appendChild(h("button",{style:{marginBottom:"10px"},onClick:()=>GF.goto("mainMenuSlots")},["← Back"]));
   const chainIds=["wizard","thornguard","windrider"];
-  const grid=h("div",{class:"class-grid"});
-  chainIds.forEach((chainId,i)=>{
-    grid.appendChild(h("div",{class:"class-path-bg",style:{gridColumn:String(i+1),gridRow:"1 / -1"}}));
-  });
-  chainIds.forEach((chainId,i)=>{
-    const col=String(i+1);
+  const row=h("div",{class:"row",style:{alignItems:"stretch",gap:"14px",flexWrap:"wrap"}});
+  chainIds.forEach((chainId)=>{
     const entries=classChainEntries(chainId);
-    let r=1;
-    grid.appendChild(h("div",{class:"row gap",style:{gridColumn:col,gridRow:String(r++),zIndex:"1",alignItems:"center",justifyContent:"center",padding:"16px 14px 4px"}},[
-      iconBadge(primaryAttrBadgeSvg(chainId),32),
-      h("div",{style:{fontWeight:"bold",fontSize:"1.35em"}},[DL.getClass(chainId).display_name+" Path"]),
+    const col=h("div",{class:"panel",style:{flex:"1 1 280px",minWidth:"260px"}});
+
+    col.appendChild(h("div",{class:"row gap",style:{justifyContent:"center",alignItems:"center",borderBottom:"1px solid var(--border)",paddingBottom:"10px",marginBottom:"10px"}},[
+      iconBadge(primaryAttrBadgeSvg(chainId),30),
+      h("div",{style:{fontWeight:"bold",fontSize:"1.1em",color:CLASS_PATH_COLORS[chainId]||"#fff"}},[DL.getClass(chainId).display_name+" Path"]),
     ]));
-    grid.appendChild(h("ul",{class:"muted",style:{gridColumn:col,gridRow:String(r++),zIndex:"1",fontSize:".82em",lineHeight:"1.4em",margin:"0",padding:"0 22px 10px 26px"}},attributeSummaryLines(chainId,DL.getClass(chainId)).map(l=>h("li",{style:{marginBottom:"2px"}},[l]))));
+
+    col.appendChild(h("ul",{class:"muted",style:{fontSize:".8em",lineHeight:"1.45em",margin:"0 0 10px",padding:"0 0 10px 18px",borderBottom:"1px solid var(--border)"}},attributeSummaryLines(chainId,DL.getClass(chainId)).map(l=>h("li",{style:{marginBottom:"2px"}},[l]))));
+
     entries.forEach(([classId,c],idx)=>{
       const isFinal=!c.next_class;
-      grid.appendChild(h("div",{class:"tile row",style:{gridColumn:col,gridRow:String(r++),zIndex:"1",alignItems:"center",gap:"0",margin:"0 14px"+(isFinal?" 16px":"")}},[
-        h("div",{style:{flex:"0 0 30%",display:"flex",justifyContent:"center"}},[iconBadge(PORTRAITS[classId]||"",42)]),
-        h("div",{style:{flex:"1 1 70%",minWidth:"0"}},[
-          
-          
+      col.appendChild(h("div",{style:{display:"flex",alignItems:"center",gap:"12px",padding:"10px 2px",borderBottom:idx<entries.length-1?"1px solid rgba(255,255,255,.08)":"none"}},[
+        iconBadge(PORTRAITS[classId]||"",56),
+        h("div",{style:{flex:"1",minWidth:"0"}},[
           h("div",{style:{fontWeight:"bold"}},[`Tier ${tierRomanNumeral(c.tier)}: ${c.display_name}`]),
-          h("div",{class:"muted"},[c.description]),
-          h("div",{class:"muted",style:{fontSize:".82em",marginTop:"2px"}},[`Starting attributes: STR ${c.base_str} · DEX ${c.base_dex} · VIT ${c.base_vit} · INT ${c.base_int}`]),
-          
-          
-          
-          
-          h("div",{class:"muted",style:{fontSize:".82em",marginTop:"2px"}},[`Weapons: ${IF.weaponTypesForClass(classId).map(wt=>IF.WEAPON_TYPE_LABELS[wt]).join(", ")}`]),
-          isFinal?h("div",{style:{color:"#e0b23d",fontWeight:"bold",marginTop:"2px"}},["★ Final tier, wins the season"]):null,
+          h("div",{class:"muted",style:{fontSize:".82em"}},[c.description]),
+          h("div",{class:"muted",style:{fontSize:".8em",marginTop:"2px"}},[`Starting attributes: STR ${c.base_str} · DEX ${c.base_dex} · VIT ${c.base_vit} · INT ${c.base_int}`]),
+          h("div",{class:"muted",style:{fontSize:".8em",marginTop:"2px"}},[`Weapons: ${IF.weaponTypesForClass(classId).map(wt=>IF.WEAPON_TYPE_LABELS[wt]).join(", ")}`]),
+          isFinal?h("div",{style:{color:"#e0b23d",fontWeight:"bold",fontSize:".8em",marginTop:"2px"}},["★ Final tier, wins the season"]):null,
         ]),
       ]));
-      if(idx<entries.length-1) grid.appendChild(h("div",{class:"muted",style:{gridColumn:col,gridRow:String(r++),zIndex:"1",textAlign:"center"}},["↓"]));
     });
-    grid.appendChild(h("div",{style:{gridColumn:col,gridRow:String(r++),zIndex:"1",padding:"0 0 14px"}},[]));
+    row.appendChild(col);
   });
-  root.appendChild(grid);
+  root.appendChild(row);
   return root;
 }
 
@@ -6098,10 +6131,7 @@ function kindleBonfirePanel(){
       h("button",{disabled:have<=0,onClick:(e)=>{
         e.stopPropagation();
         const ok=PS.kindleBonfire(1);
-        if(ok){
-          autosave();
-          pushSystemChatMessage("You feed 1 Dry Log into the bonfire. Regen surges for 10 minutes.");
-        }
+        if(ok) autosave();
         render();
       }},["+1"]),
     ]),
@@ -6729,7 +6759,7 @@ function screenMaze(){
           PS.useConsumable("elixir_of_clarity");
           maze._clarityReveal=ripple;
           autosave(); render(); animateMazeMovers(null,null);
-        }},["Use Elixir of Clarity"]),
+        }},[`Use Elixir of Clairvoyance (${PS.clarity_charges_left>0?PS.clarity_charges_left:10} left)`]),
       ]),
       
       
@@ -6902,22 +6932,6 @@ function onStepMaze(maze,targetIdx){
   if(roamerAlreadyHere){
     PS.tickXpBuff();
     GF.goto("combat",{maze_depth:maze.depth, pending_monster_id:roamerAlreadyHere.monsterId, pending_roamer_id:roamerAlreadyHere.roamerId, pending_guardian_cell_idx:null});
-    return;
-  }
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  tickRoamingMobs(maze);
-  const roamerWanderedIn=maze.roamers && maze.roamers.find(r=>!r.defeated && r.idx===maze.playerIdx);
-  if(roamerWanderedIn){
-    PS.tickXpBuff();
-    GF.goto("combat",{maze_depth:maze.depth, pending_monster_id:roamerWanderedIn.monsterId, pending_roamer_id:roamerWanderedIn.roamerId, pending_guardian_cell_idx:null});
     return;
   }
 
@@ -7117,6 +7131,8 @@ function attemptMazeMove(dx,dy){
 
 
 
+const MAZE_MOVE_REPEAT_THROTTLE_MS=300;
+let lastMazeMoveCommitAt=0;
 const KEYBIND_STORAGE_KEY="wandrian_keybind_scheme";
 const KEYBIND_SCHEMES={
   arrows:{label:"Arrow Keys only", extraUp:[], extraDown:[], extraLeft:[], extraRight:[]},
@@ -7125,11 +7141,38 @@ const KEYBIND_SCHEMES={
 };
 function getKeybindScheme(){
   const v=Storage_.getItem(KEYBIND_STORAGE_KEY);
+  if(v==="custom") return "custom";
   return KEYBIND_SCHEMES[v]?v:"arrows";
 }
 function setKeybindScheme(v){
-  if(!KEYBIND_SCHEMES[v]) return;
+  if(v!=="custom" && !KEYBIND_SCHEMES[v]) return;
   Storage_.setItem(KEYBIND_STORAGE_KEY,v);
+}
+const KEYBIND_CUSTOM_STORAGE_KEY="wandrian_keybind_custom";
+function getCustomKeybinds(){
+  let parsed=null;
+  try{ parsed=JSON.parse(Storage_.getItem(KEYBIND_CUSTOM_STORAGE_KEY)||"null"); }catch(e){ parsed=null; }
+  return Object.assign({up:"",down:"",left:"",right:""}, parsed||{});
+}
+function setCustomKeybinds(v){
+  Storage_.setItem(KEYBIND_CUSTOM_STORAGE_KEY, JSON.stringify(v));
+}
+function customKeybindWarning(c){
+  const dirs=["up","down","left","right"];
+  const vals=dirs.map(d=>c[d]).filter(v=>v);
+  const dupes=vals.filter((v,i)=>vals.indexOf(v)!==i);
+  if(dupes.length) return `"${dupes[0].toUpperCase()}" is assigned to more than one direction.`;
+  if(vals.some(v=>v==="arrowup"||v==="arrowdown"||v==="arrowleft"||v==="arrowright")) return "That key collides with an Arrow Key.";
+  return null;
+}
+function getActiveKeybindExtras(){
+  const schemeId=getKeybindScheme();
+  if(schemeId==="custom"){
+    const c=getCustomKeybinds();
+    const pair=(v)=>v?[v.toLowerCase(),v.toUpperCase()]:[];
+    return { extraUp:pair(c.up), extraDown:pair(c.down), extraLeft:pair(c.left), extraRight:pair(c.right) };
+  }
+  return KEYBIND_SCHEMES[schemeId]||KEYBIND_SCHEMES.arrows;
 }
 
 
@@ -7162,8 +7205,49 @@ function keybindSchemeButton(key){
   const selected=getKeybindScheme()===key;
   return h("button",{
     style:{background:selected?"var(--accent,#3a6a2a)":undefined,borderColor:selected?"#7ac67a":undefined},
-    onClick:()=>{ setKeybindScheme(key); render(); },
+    onClick:()=>{
+      setKeybindScheme(key);
+      const preset=KEYBIND_SCHEMES[key];
+      setCustomKeybinds({
+        up:(preset.extraUp[0]||"").toLowerCase(),
+        down:(preset.extraDown[0]||"").toLowerCase(),
+        left:(preset.extraLeft[0]||"").toLowerCase(),
+        right:(preset.extraRight[0]||"").toLowerCase(),
+      });
+      render();
+    },
   },[KEYBIND_SCHEMES[key].label]);
+}
+function customKeybindInput(dirKey,label){
+  const c=getCustomKeybinds();
+  const input=h("input",{type:"text",maxlength:"1",value:(c[dirKey]||"").toUpperCase(),style:{width:"36px",textAlign:"center",fontWeight:"bold",textTransform:"uppercase"}});
+  input.addEventListener("input",()=>{
+    const clean=(input.value||"").trim().toLowerCase().slice(0,1);
+    const updated=Object.assign({},getCustomKeybinds(),{[dirKey]:clean});
+    setCustomKeybinds(updated);
+    setKeybindScheme("custom");
+    render();
+  });
+  return h("div",{style:{display:"flex",flexDirection:"column",alignItems:"center",gap:"4px"}},[
+    input,
+    h("div",{class:"muted",style:{fontSize:".75em"}},[label]),
+  ]);
+}
+function customKeybindPanel(){
+  const c=getCustomKeybinds();
+  const warning=customKeybindWarning(c);
+  const active=getKeybindScheme()==="custom";
+  return h("div",{style:{marginTop:"10px",paddingTop:"10px",borderTop:"1px solid var(--border)"}},[
+    h("div",{style:{fontWeight:"bold",marginBottom:"6px"}},["Custom Keys"+(active?" (active)":"")]),
+    h("div",{class:"muted",style:{marginBottom:"8px",fontSize:".85em"}},["Type a single key for each direction. Clicking a preset above fills these in as a starting point -- editing any field here switches you to your own custom scheme."]),
+    h("div",{class:"row gap",style:{marginBottom:"6px"}},[
+      customKeybindInput("up","Up"),
+      customKeybindInput("down","Down"),
+      customKeybindInput("left","Left"),
+      customKeybindInput("right","Right"),
+    ]),
+    warning?h("div",{style:{color:"#e05a5a",fontSize:".85em"}},[warning]):null,
+  ]);
 }
 
 
@@ -7198,6 +7282,7 @@ function screenSettings(){
       keybindSchemeButton("wasd"),
       keybindSchemeButton("zqsd"),
     ]),
+    customKeybindPanel(),
   ]));
   
   
@@ -7253,10 +7338,18 @@ window.addEventListener("keydown",(e)=>{
     return;
   }
   if(keyLower===shortcuts.venture){
-    
-    
+
+
     e.preventDefault();
     ventureShortcutAction();
+    return;
+  }
+
+  if(GF.screen==="combat"){
+    if(!GF._combatUI) return;
+    if(e.key==="1"){ e.preventDefault(); GF._combatUI.useHealth(); return; }
+    if(e.key==="2"){ e.preventDefault(); GF._combatUI.useStamina(); return; }
+    if(keyLower==="f"){ e.preventDefault(); GF._combatUI.attemptFlee(); return; }
     return;
   }
 
@@ -7270,14 +7363,19 @@ window.addEventListener("keydown",(e)=>{
   const arrowMap={ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0]};
   let d=arrowMap[e.key];
   if(!d){
-    const scheme=KEYBIND_SCHEMES[getKeybindScheme()];
-    if(scheme.extraUp.includes(e.key)) d=[0,-1];
-    else if(scheme.extraDown.includes(e.key)) d=[0,1];
-    else if(scheme.extraLeft.includes(e.key)) d=[-1,0];
-    else if(scheme.extraRight.includes(e.key)) d=[1,0];
+    const extras=getActiveKeybindExtras();
+    if(extras.extraUp.includes(e.key)) d=[0,-1];
+    else if(extras.extraDown.includes(e.key)) d=[0,1];
+    else if(extras.extraLeft.includes(e.key)) d=[-1,0];
+    else if(extras.extraRight.includes(e.key)) d=[1,0];
   }
   if(!d) return;
   e.preventDefault();
+  const nowTs=Date.now();
+  if(e.repeat){
+    if(nowTs-lastMazeMoveCommitAt<MAZE_MOVE_REPEAT_THROTTLE_MS) return;
+  }
+  lastMazeMoveCommitAt=nowTs;
   attemptMazeMove(d[0],d[1]);
 });
 
@@ -7585,6 +7683,11 @@ function syncCombatRoundBuffs(playerPayload){
   if(playerPayload.invuln_rounds_left!=null) PS.invuln_rounds_left=playerPayload.invuln_rounds_left;
   if(playerPayload.quad_dmg_rounds_left!=null) PS.quad_dmg_rounds_left=playerPayload.quad_dmg_rounds_left;
   if(playerPayload.magic_find_rounds_left!=null) PS.magic_find_rounds_left=playerPayload.magic_find_rounds_left;
+  // v0.22 (batch2 #5): current_stamina is now also a per-round server-authoritative value
+  // (a Stamina Regen gear affix ticks once per combat round, same as HP regen) -- adopt it
+  // here alongside the round-based shrine buffs so every attack/flee call site picks it up
+  // without needing its own separate assignment.
+  if(playerPayload.current_stamina!=null) PS.current_stamina=playerPayload.current_stamina;
 }
 
 function screenCombat(){
@@ -7720,7 +7823,7 @@ function screenCombat(){
     
     
     
-    cb.defeated?h("div",{class:"muted",style:{textAlign:"center",marginTop:"8px",fontSize:".9em"}},["click to continue wandering"]):null,
+    cb.defeated?h("div",{class:"muted",style:{textAlign:"center",marginTop:"8px",fontSize:".9em"}},["click to continue wandering"]):(!busy?h("div",{class:"muted",style:{textAlign:"center",marginTop:"8px",fontSize:".9em"}},["click or hold to attack"]):null),
   ]);
   
   
@@ -7932,6 +8035,9 @@ function screenCombat(){
   
   async function attemptFlee(){
     if(GF.combatResolving) return;
+    if(GF.fleeCooldownUntil && Date.now()<GF.fleeCooldownUntil) return;
+    GF.fleeCooldownUntil=Date.now()+Balance.FLEE_BUTTON_COOLDOWN_MS;
+    setTimeout(()=>{ if(GF.screen==="combat") render(); }, Balance.FLEE_BUTTON_COOLDOWN_MS+50);
     GF.combatResolving=true; render();
     try{
       const result=await Net.fleeCombat(cb.session_id);
@@ -8001,8 +8107,7 @@ function screenCombat(){
         PS._queueGradualHeal(PS.active_stamina_heals,item.stamina_amount,PS.getMaxStamina()-PS.current_stamina,totalTicks);
       }
       PS.current_stamina=result.player.current_stamina;
-      
-      
+      if(item.cures_poison) PS.curePoison();
       PS._removeConsumableOne(itemId);
     }catch(e){
       setToast("Could not use that item: "+e.message);
@@ -8013,15 +8118,26 @@ function screenCombat(){
   }
 
   const busyDisabled=!!GF.combatResolving;
-  
-  
-  
+  const fleeCooldownActive=!!(GF.fleeCooldownUntil && Date.now()<GF.fleeCooldownUntil);
+  const fleeElapsedMs=fleeCooldownActive?(Balance.FLEE_BUTTON_COOLDOWN_MS-(GF.fleeCooldownUntil-Date.now())):0;
+  const fleeCooldownRing=fleeCooldownActive?h("svg",{class:"flee-cooldown-ring",width:"20",height:"20",viewBox:"0 0 20 20"},[
+    h("circle",{class:"flee-cooldown-track",cx:"10",cy:"10",r:"8"},[]),
+    h("circle",{class:"flee-cooldown-fill",cx:"10",cy:"10",r:"8",style:{strokeDasharray:"50.27",animationDuration:Balance.FLEE_BUTTON_COOLDOWN_MS+"ms",animationDelay:(-fleeElapsedMs)+"ms"}},[]),
+  ]):null;
   root.appendChild(h("div",{class:"row",style:{marginTop:"10px"}},[
     h("button",{disabled:busyDisabled||!PS.canUseConsumable(PS.bestAvailableConsumable("health")),onClick:()=>useItemInCombat(PS.bestAvailableConsumable("health"))},["Use Health Potion"]),
     h("button",{disabled:busyDisabled||!PS.canUseConsumable(PS.bestAvailableConsumable("stamina")),onClick:()=>useItemInCombat(PS.bestAvailableConsumable("stamina"))},["Use Stamina Potion"]),
     h("button",{disabled:busyDisabled||!PS.canUseConsumable("antidote"),onClick:()=>useItemInCombat("antidote")},["Use Antidote"]),
-    h("button",{class:"danger",disabled:busyDisabled,onClick:attemptFlee},["Flee"]),
+    h("div",{class:"flee-cooldown-wrap"},[
+      h("button",{class:"danger",disabled:busyDisabled||fleeCooldownActive,onClick:attemptFlee},["Flee"]),
+      fleeCooldownRing,
+    ]),
   ]));
+  GF._combatUI={
+    useHealth:()=>useItemInCombat(PS.lowestAvailableConsumable("health")),
+    useStamina:()=>useItemInCombat(PS.lowestAvailableConsumable("stamina")),
+    attemptFlee:attemptFlee,
+  };
   return root;
 }
 
@@ -8185,6 +8301,15 @@ function screenStrongholdChest(){
       }
       for(const itemId of Object.keys(potionCounts)) entries.push({kind:"consumable", itemId, qty:potionCounts[itemId]});
 
+      const elixirTotal=randIntRange(Balance.STRONGHOLD_CHEST_ELIXIRS_MIN,Balance.STRONGHOLD_CHEST_ELIXIRS_MAX);
+      const elixirCounts={};
+      for(let i=0;i<elixirTotal;i++){
+        const elixirId=pick(["elixir_of_clarity","elixir_of_eyesight"]);
+        PS.addConsumable(elixirId,1);
+        elixirCounts[elixirId]=(elixirCounts[elixirId]||0)+1;
+      }
+      for(const itemId of Object.keys(elixirCounts)) entries.push({kind:"consumable", itemId, qty:elixirCounts[itemId]});
+
       if(Math.random()<Balance.STRONGHOLD_CHEST_SCROLL_CHANCE){
         const scroll=pick(["scroll_of_challenge_1","scroll_of_challenge_2","scroll_of_challenge_3"]);
         PS.addConsumable(scroll,1); entries.push({kind:"consumable", itemId:scroll, qty:1});
@@ -8347,7 +8472,7 @@ function affixDeltaSpan(stat,delta){
   const isPercent=IF.affixIsPercent(stat);
   const sign=delta>0?"+":"-";
   const mag=Math.abs(delta);
-  const text=stat==="regen" ? mag.toFixed(1) : Math.round(mag)+(isPercent?"%":"");
+  const text=(stat==="crit_multiplier") ? (mag/100).toFixed(2) : trimDecimal(mag)+(isPercent?"%":"");
   return h("span",{class:delta>0?"stat-delta-good":"stat-delta-bad"},[` (${sign}${text})`]);
 }
 
@@ -8506,7 +8631,7 @@ function attributeSummaryLines(chain,classData){
       `Strength: ${strArmorLine}`,
       `Dexterity: +${blockPct}% Block Chance per point, a chance to take 0 damage from a hit.`,
       vitLine,
-      "Intelligence: +1 damage per point.",
+      `Intelligence: +${Balance.WIZARD_INT_DAMAGE_PER_POINT} damage per point.`,
     ];
   }
   return [];
@@ -10889,6 +11014,30 @@ function legacyGearSection(){
 
 
 const CHANGELOG=[
+  { version:"v0.22", notes:[
+    "In combat, a living monster now shows a \"click or hold to attack\" hint, mirroring the existing \"click to continue wandering\" hint shown once it's defeated.",
+    "Elixir of Clarity renamed to Elixir of Clairvoyance.",
+    "Elixir of Clairvoyance is now much cheaper to brew and holds 10 maze-reveal charges per elixir instead of being consumed on every use.",
+    "Stronghold chests now always contain 1-3 elixirs (a mix of Clairvoyance and Eyesight), and give out fewer herbs than before.",
+    "Monster Guide's per-level table now shows a row every 5 levels instead of a sparser sampling.",
+    "All 15 class portraits redrawn with new art.",
+    "Player Classes page redesigned around the new portraits, styled like a character gallery.",
+    "Settings: added a Custom movement keybind scheme -- type any single key into the Up/Down/Left/Right fields (Arrow Keys always stay active alongside it). Picking a preset like WASD or ZQSD pre-fills the fields as a starting point, and you're warned if a key collides with Arrows or with another direction. (Contribution by ImpulseBE)",
+    "In combat, 1/2 now drink your lowest-tier Health/Stamina potion and F flees, matching the on-screen buttons (F still respects the flee button's cooldown).",
+    "Wizard chain (Wizard/Sorcerer/Warlock/Summoner/Archmage): Intelligence now grants double its old damage-per-point.",
+    "Stronghold guardians are now the toughest monsters in the maze (more HP, a new damage multiplier, more XP), while roaming mobs have been eased back to guardians' old numbers -- guardians are meant to be the fights you specifically seek out, roamers the ones you stumble into.",
+    "Regeneration reworked: Health Regeneration and Stamina Regeneration are now separate gear stats (previously one stat covered both). Health Regeneration's tier-1 maximum is much lower than before to make room for Stamina Regeneration alongside it, and both now also tick while you're out in the maze or mid-combat, not just in town.",
+    "Every stat roll on a piece of gear now lands on one of 20 even steps between 0 and its tier maximum, instead of any whole number -- rolling the exact maximum (a 💎 perfected stat) is now precisely a 1-in-20 chance. (Contribution by ImpulseBE)",
+    "The Flee button now has a 1-second cooldown with a circular fill animation, so it can't be spammed. (Contribution by ImpulseBE)",
+    "Fixed a bug where Antidote couldn't be used from the in-combat item menu while poisoned. (Reported by dcfroggert and ImpulseBE)",
+    "Fixed a bug where roaming mobs would take an extra step whenever you moved, on top of their own once-per-second movement. (Contribution by ImpulseBE)",
+    "Holding down a movement key now steps at a steady ~300ms pace instead of sprinting at your keyboard's repeat rate; a single tap still moves instantly. (Contribution by ImpulseBE)",
+    "Forest Reputation is now capped at +100/-100. (Contribution by ImpulseBE)",
+    "Renamed the 'Flee Chance' gear stat label to 'Increased chance to flee'.",
+    "Admin Legacy Gear tool now also flags gear rolled under the old Regeneration and pre-20-step affix systems for review and rescaling.",
+    "Removed the personal chat message that fired when picking up a Dry Log.",
+    "Fixed a bug where an active Touch of Unicorn buff didn't block the very first hit a monster could land the instant combat started, only hits after that. (Reported by dcfroggert)",
+  ]},
   { version:"v0.21.5", notes:[
     "Fixed a bug where monsters would deal damage both on their own attack-speed tempo AND as a guaranteed counter-attack whenever you attacked them, effectively doubling incoming damage. Monsters now only ever attack on their own independent tempo, fully decoupled from your own attacks.",
   ]},
@@ -11354,7 +11503,7 @@ function screenItemization(){
   root.appendChild(weaponClassPanel);
 
   root.appendChild(h("h3",{},["Max Affix Rolls Per Tier"]));
-  root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},["Every affix rolls between 1 and the max shown below for its own stat and tier -- each stat's max always scales up linearly with tier (Tier N's max = N x that stat's Tier 1 max). Weapons roll a further +40% on any Damage affix they get. Mana and Spell Power affixes are planned for a future update."]));
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},["Every affix rolls on 20 discrete steps between the max shown below and 1/20th of it, for its own stat and tier -- each stat's max always scales up linearly with tier (Tier N's max = N x that stat's Tier 1 max), and hitting the exact max (a 1-in-20 chance) is a perfected roll. Weapons roll a further +40% on any Damage affix they get. Mana and Spell Power affixes are planned for a future update."]));
   const affixPanel=h("div",{class:"panel",style:{marginBottom:"16px",overflowX:"auto"}});
   const cols=`1.3fr repeat(${Balance.ITEM_TIER_MAX},1fr)`;
   affixPanel.appendChild(gridRow(["Stat",...Array.from({length:Balance.ITEM_TIER_MAX},(_,i)=>`T${i+1}`)],{cols,header:true}));
@@ -11603,7 +11752,7 @@ function monsterGuidePerLevelTable(){
   const root=h("div",{class:"panel",style:{maxHeight:"360px",overflowY:"auto"}});
   const cols=".7fr 1.1fr 1.1fr .9fr .9fr .9fr 1fr";
   root.appendChild(gridRow(["Area Lv","HP vs Lv1","Damage vs Lv1","Crit %","Crit Mult","Block %","Loot Quality (Item Tier)"],{cols,header:true}));
-  const sampleLevels=[1,5,10,15,20,30,40,60];
+  const sampleLevels=[1,5,10,15,20,25,30,35,40,45,50,55,60];
   const baseHpAtOne=Balance.monsterHp(1,1);
   const baseDmgAtOne=Balance.monsterDamage(1,1);
   sampleLevels.forEach((lvl,i)=>{
@@ -11644,8 +11793,8 @@ function monsterGuideSpawnTypePanel(){
   ));
   panel.appendChild(monsterGuideSpawnTypeRow(
     mazeTileSwatch(TILE_COLOR.stronghold_guardian,TILE_GLYPH.stronghold_guardian), "Stronghold Guardian",
-    Balance.STRONGHOLD_GUARDIAN_HP_MULT, "1", Balance.STRONGHOLD_GUARDIAN_XP_MULT,
-    "A tough, fixed-position defender -- much more HP and more XP for the extra effort, but hits no harder than an ordinary monster its own level.",
+    Balance.STRONGHOLD_GUARDIAN_HP_MULT, Balance.STRONGHOLD_GUARDIAN_DAMAGE_MULT, Balance.STRONGHOLD_GUARDIAN_XP_MULT,
+    "The toughest fight in the maze -- you choose to engage it, so it hits back harder too: more HP, more damage, and more XP than a Roaming Mob.",
   ));
   panel.appendChild(monsterGuideSpawnTypeRow(
     mazeTileSwatch(ROAMING_MOB_COLOR_BY_BEHAVIOR.regular,ROAMING_MOB_GLYPH), "Roaming Mob (Regular)",
@@ -11791,10 +11940,12 @@ setInterval(()=>{
   
   
   
-  const bonus=PS.getActiveBonfireBonus()+PS.getActiveTempBuff("regen")+PS.getRegen();
+  const sharedBonus=PS.getActiveBonfireBonus()+PS.getActiveTempBuff("regen");
+  const hpBonus=sharedBonus+PS.getRegen();
+  const staminaBonus=sharedBonus+PS.getStaminaRegen();
   let changed=false;
-  if(PS.current_hp<PS.getMaxHp()){ PS.current_hp=Math.min(PS.getMaxHp(),PS.current_hp+Balance.CAMPFIRE_REGEN_PER_SECOND+bonus); changed=true; }
-  if(PS.current_stamina<PS.getMaxStamina()){ PS.current_stamina=Math.min(PS.getMaxStamina(),PS.current_stamina+Balance.CAMPFIRE_STAMINA_REGEN_PER_SECOND+bonus); changed=true; }
+  if(PS.current_hp<PS.getMaxHp()){ PS.current_hp=Math.min(PS.getMaxHp(),PS.current_hp+Balance.CAMPFIRE_REGEN_PER_SECOND+hpBonus); changed=true; }
+  if(PS.current_stamina<PS.getMaxStamina()){ PS.current_stamina=Math.min(PS.getMaxStamina(),PS.current_stamina+Balance.CAMPFIRE_STAMINA_REGEN_PER_SECOND+staminaBonus); changed=true; }
   if(changed) PS.saveGame();
 
   

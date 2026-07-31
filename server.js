@@ -935,7 +935,7 @@ app.post("/api/trial/attempt", requireAuth, (req, res) => {
    the Auction House and Storage Vault. */
 const ITEM_TIER_MAX = 5;
 const ITEM_AFFIX_POOL = [
-  "damage", "hp", "crit", "armor", "regen", "gold_find", "xp_find", "stamina_max",
+  "damage", "hp", "crit", "armor", "regen", "stamina_regen", "gold_find", "xp_find", "stamina_max",
   "strength", "dexterity", "vitality", "intelligence", "poison_resist", "magic_find",
   "block_chance", "flee_chance", "crit_multiplier", "attack_speed",
 ];
@@ -950,8 +950,15 @@ const ITEM_AFFIX_POOL = [
 // Balance.AFFIX_TIER1_MAX (see that constant's v0.20.4 comment for the full mechanic
 // change). See ITEM_AFFIX_TIER1_MAX_CEILING just below for why the OLD max (20) is
 // preserved there instead of being lowered along with this one.
+// v0.22 (batch2 #5): "regen" (now displayed as "Health Regeneration") had its Tier-1 max
+// nerfed from 5 down to 1 (1/2/3/4/5 across T1-T5, was 5/10/15/20/25), and a NEW sibling
+// affix "stamina_regen" ("Stamina Regeneration") was added at the same Tier-1 max of 1 --
+// must stay in sync with index.html's Balance.AFFIX_TIER1_MAX. The internal key "regen" is
+// NEVER renamed (that would orphan live gear/saves) -- only its Tier-1 max and display label
+// changed. See ITEM_AFFIX_TIER1_MAX_CEILING just below for why regen's OLD max (5) is
+// preserved there instead of being lowered along with this one.
 const ITEM_AFFIX_TIER1_MAX = {
-  damage: 5, hp: 15, crit: 5, armor: 2, regen: 5, gold_find: 10, xp_find: 5,
+  damage: 5, hp: 15, crit: 5, armor: 2, regen: 1, stamina_regen: 1, gold_find: 10, xp_find: 5,
   stamina_max: 15, strength: 5, dexterity: 5, vitality: 5, intelligence: 5, poison_resist: 5,
   magic_find: 10, block_chance: 2, flee_chance: 2,
   // v0.21 (#8): new "crit_multiplier" gear affix -- stored/rolled as a plain integer (10-50
@@ -1003,7 +1010,12 @@ const ITEM_REFINE_MATERIAL_COST_MULT = 1.4, ITEM_REFINE_GOLD_COST_MULT = 4;
 // listed on the Auction House, deposited to the Vault, etc.) even though FRESH rolls now
 // cap at 2/4/6/8/10 -- see legacyGearScan() below for how these old-spec items still get
 // surfaced to an admin for optional manual rescale despite remaining valid here.
-const ITEM_AFFIX_TIER1_MAX_CEILING = Object.assign({}, ITEM_AFFIX_TIER1_MAX, { xp_find: 10, armor: 20 });
+// v0.22 (batch2 #5): regen's ceiling is pinned at 5 (its old, pre-nerf T1 max) rather than
+// inheriting the new tightened live max of 1 -- same reasoning as xp_find/armor's overrides.
+// A regen-5 item rolled before this patch must keep passing validateGearItem()'s bounds
+// check (reforge/list/deposit) even though fresh rolls now cap at 1/2/3/4/5 -- see
+// legacyGearScan() below for how these old-spec items still get surfaced for optional rescale.
+const ITEM_AFFIX_TIER1_MAX_CEILING = Object.assign({}, ITEM_AFFIX_TIER1_MAX, { xp_find: 10, armor: 20, regen: 5 });
 
 function itemAffixMaxForTier(stat, tier) {
   const base = ITEM_AFFIX_TIER1_MAX[stat];
@@ -1012,6 +1024,20 @@ function itemAffixMaxForTier(stat, tier) {
 function itemAffixCeilingForTier(stat, tier) {
   const base = ITEM_AFFIX_TIER1_MAX_CEILING[stat];
   return base != null ? base * tier : 0;
+}
+// v0.22 (batch2 #6): every affix now rolls on 20 discrete steps of (max/20) instead of an
+// integer [1..max] -- a perfect roll is k=20 (exactly the tier max), a 1-in-20 chance. Mirrors
+// index.html's Balance.rollAffixValue() exactly. The weapon-damage +40% bonus is applied AFTER
+// this roll (post-multiply), never folded into `max` before rolling -- all four call sites
+// below (gear generation, reroll, reforge, refine) and the client's IF.generate()/isAffixMaxRoll()
+// diamond-marker check all use this same post-multiply order, so a "perfect" weapon-damage roll
+// always resolves to the identical value everywhere and never disagrees on the 💎 marker.
+function round2(v) { return Math.round(v * 100) / 100; }
+function rollAffixValue(stat, tier) {
+  const max = itemAffixMaxForTier(stat, tier);
+  const step = max / 20;
+  const k = Math.floor(Math.random() * 20) + 1;
+  return round2(k * step);
 }
 function itemSalvageValue(tier, slots) { return Math.round(Math.pow(tier, 1.5) * slots * ITEM_SALVAGE_MATERIALS_PER_SLOT); }
 function itemRerollCost(tier, slots) { return itemSalvageValue(tier, slots) * ITEM_REROLL_MATERIAL_COST_MULT; }
@@ -1047,8 +1073,13 @@ function validateGearItem(item) {
     }
     if (!ITEM_AFFIX_POOL.includes(a.stat)) return "Unknown affix stat.";
     let max = itemAffixCeilingForTier(a.stat, tier);
-    if (item.slot === "weapon" && a.stat === "damage") max = Math.round(max * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
-    if (a.value < 1 || a.value > max) return `Affix "${a.stat}" value is beyond what a Tier ${tier} item could roll.`;
+    if (item.slot === "weapon" && a.stat === "damage") max = round2(max * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
+    // v0.22 (batch2 #6): the lower bound used to be a flat `< 1` back when every affix rolled
+    // an integer in [1, max] -- but the 20-step grid's smallest possible roll is max/20, which
+    // for a low-tier low-max stat (e.g. Tier 1 Health Regen, max=1) is 0.05, well under 1. Using
+    // `<= 0` instead still rejects anything actually invalid (zero/negative) without rejecting
+    // legitimate low rolls on the new fractional grid.
+    if (a.value <= 0 || a.value > max) return `Affix "${a.stat}" value is beyond what a Tier ${tier} item could roll.`;
     statCount++;
   }
   if (eyesightCount > 1) return "An item can only carry one Eyesight affix.";
@@ -1125,9 +1156,8 @@ app.post("/api/blacksmith/reroll", requireAuth, (req, res) => {
   // reroll, but it can no longer dictate what comes back.
   const newAffixes = inst.affixes.map((a) => {
     if (a.stat === "eyesight") return { stat: a.stat, value: a.value };
-    let max = itemAffixMaxForTier(a.stat, inst.tier);
-    if (inst.slot === "weapon" && a.stat === "damage") max = Math.round(max * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
-    const value = 1 + Math.floor(Math.random() * max);
+    let value = rollAffixValue(a.stat, inst.tier);
+    if (inst.slot === "weapon" && a.stat === "damage") value = round2(value * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
     return { stat: a.stat, value };
   });
   const rerolled = Object.assign({}, inst, { affixes: newAffixes });
@@ -1224,9 +1254,8 @@ app.post("/api/blacksmith/reforge", requireAuth, (req, res) => {
     ? candidatePool[Math.floor(Math.random() * candidatePool.length)]
     : inst.affixes[targetPos].stat;
 
-  let max = itemAffixMaxForTier(newStat, inst.tier);
-  if (inst.slot === "weapon" && newStat === "damage") max = Math.round(max * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
-  const newValue = 1 + Math.floor(Math.random() * Math.max(1, max));
+  let newValue = rollAffixValue(newStat, inst.tier);
+  if (inst.slot === "weapon" && newStat === "damage") newValue = round2(newValue * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
 
   const newAffixes = inst.affixes.slice();
   newAffixes[targetPos] = { stat: newStat, value: newValue };
@@ -1304,9 +1333,8 @@ app.post("/api/blacksmith/refine", requireAuth, (req, res) => {
   // Reroll endpoint's per-affix math above, just targeted at this one affix instead of all of
   // them.
   const targetStat = inst.affixes[affixIndex].stat;
-  let max = itemAffixMaxForTier(targetStat, inst.tier);
-  if (inst.slot === "weapon" && targetStat === "damage") max = Math.round(max * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
-  const newValue = 1 + Math.floor(Math.random() * Math.max(1, max));
+  let newValue = rollAffixValue(targetStat, inst.tier);
+  if (inst.slot === "weapon" && targetStat === "damage") newValue = round2(newValue * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
 
   const newAffixes = inst.affixes.slice();
   newAffixes[affixIndex] = { stat: targetStat, value: newValue };
@@ -1510,6 +1538,11 @@ const CB = {
   VIT_HP_PER_POINT_RATIO: 0.35, VIT_STAMINA_PER_POINT_RATIO: 0.15,
   MOB_BLOCK_CHANCE_BASE: 0.05, MOB_BLOCK_CHANCE_PER_LEVEL: 0.005,
   MONSTER_HP_MULT: 2.0, MONSTER_DAMAGE_MULT: 2.0,
+  // v0.22 (batch2 #3): each class chain's primary attribute grants +1 damage/point by default
+  // (thornguard->str, windrider->dex, wizard->int, see combatGetDamageRange() above) -- this
+  // doubles ONLY the Wizard chain's Intelligence term to +2/point, per Gwen's exact spec. Must
+  // stay in sync with Balance.WIZARD_INT_DAMAGE_PER_POINT in index.html.
+  WIZARD_INT_DAMAGE_PER_POINT: 2,
   // v0.20.4 HOTFIX: AREA_HP_GROWTH/AREA_DAMAGE_GROWTH dialed down from 0.15/0.12 (0.105/
   // 0.09), and LATE_GAME_MONSTER_GROWTH_PER_LEVEL below is now permanently unused (see
   // combatLateGameGrowthMult()) -- must stay in sync with Balance.AREA_HP_GROWTH/
@@ -1522,10 +1555,16 @@ const CB = {
   // must stay in sync with Balance.STR_TO_ARMOR_RATIO in index.html (see that constant's
   // comment for the full calibration).
   STR_TO_ARMOR_RATIO: 0.25,
-  STRONGHOLD_GUARDIAN_HP_MULT: 3.0, STRONGHOLD_GUARDIAN_XP_MULT: 1.5,
+  // v0.22 (batch2 #4): guardians are engage-chosen (the player picks the fight) and are meant
+  // to be the hardest encounter in a maze, so they now carry the tougher numbers that used to
+  // belong to roamers (including a brand-new damage multiplier -- guardians previously hit at
+  // plain monster damage). Roamers, which can ambush the player mid-step, get the milder set
+  // that used to belong to guardians. Must stay in sync with Balance.STRONGHOLD_GUARDIAN_HP_MULT/
+  // XP_MULT/DAMAGE_MULT and Balance.ROAMING_MOB_HP_MULT/DAMAGE_MULT/XP_MULT in index.html.
+  STRONGHOLD_GUARDIAN_HP_MULT: 4.0, STRONGHOLD_GUARDIAN_XP_MULT: 2.0, STRONGHOLD_GUARDIAN_DAMAGE_MULT: 1.5,
   // v0.21 (#5): doubled per Gwen's exact request (was 0.15) -- mirrors Balance.STRONGHOLD_KEY_DROP_CHANCE in index.html.
   STRONGHOLD_KEY_DROP_CHANCE: 0.30,
-  ROAMING_MOB_HP_MULT: 4.0, ROAMING_MOB_DAMAGE_MULT: 1.5, ROAMING_MOB_XP_MULT: 2.0,
+  ROAMING_MOB_HP_MULT: 3.0, ROAMING_MOB_DAMAGE_MULT: 1.0, ROAMING_MOB_XP_MULT: 1.5,
   // v0.20.1 (#10): every kill now gets a shot at a SECOND (and rarely third) loot drop, on
   // top of the always-resolved first drop above -- base chance is deliberately small so it
   // reads as a nice surprise rather than the new normal, but climbs with Magic Find so
@@ -1716,9 +1755,8 @@ function combatGenerateGearItem(tier, magicFindPct) {
   const affixes = [];
   for (let i = 0; i < affixCount; i++) {
     const stat = pool[i];
-    const max = itemAffixMaxForTier(stat, tier);
-    let value = 1 + Math.floor(Math.random() * max);
-    if (chosenSlot === "weapon" && stat === "damage") value = Math.round(value * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
+    let value = rollAffixValue(stat, tier);
+    if (chosenSlot === "weapon" && stat === "damage") value = round2(value * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
     affixes.push({ stat, value });
   }
   if (Math.random() < CB.EYESIGHT_AFFIX_CHANCE) affixes.push({ stat: "eyesight", value: 2 });
@@ -1786,6 +1824,13 @@ function combatGetMaxStamina(data) {
   const vit = (data.attributes && data.attributes.vit) || 0;
   return CB.STAMINA_MAX_BASE + combatGearBonus(data, "stamina_max") + combatVitStaminaBonus(c, vit);
 }
+// v0.22 (batch2 #5): Health Regen (the "regen" affix key, unchanged internally -- only its
+// Tier-1 max and display label changed) and the new sibling "stamina_regen" affix. Mirrors
+// index.html's PS.getRegen()/getStaminaRegen() exactly -- must stay in sync with those. Class
+// base regen (COMBAT_CLASSES) feeds Health Regen only; base Stamina Regen is always 0 unless
+// a future patch adds per-class values.
+function combatGetRegen(data) { const c = COMBAT_CLASSES[data.class_id] || {}; return (c.regen || 0.0) + combatGearBonus(data, "regen"); }
+function combatGetStaminaRegen(data) { return combatGearBonus(data, "stamina_regen"); }
 function combatGetEquippedWeaponType(data) { return combatWeaponTypeForInstance(data.equipped && data.equipped.weapon); }
 function combatWeaponSkillCumulativeHitsForLevel(level) { return CB.WEAPON_SKILL_HIT_STEP * level * (level + 1) / 2; }
 function combatWeaponSkillLevelForHits(hits) {
@@ -1804,7 +1849,10 @@ function combatGetDamageRange(data) {
   let statBonus = 0;
   if (c.chain === "thornguard") statBonus = combatGetTotalAttr(data, "str");
   else if (c.chain === "windrider") statBonus = combatGetTotalAttr(data, "dex");
-  else if (c.chain === "wizard") statBonus = combatGetTotalAttr(data, "int");
+  // v0.22 (batch2 #3): Wizard chain's Intelligence damage term doubled from x1 to x2 per point
+  // (CB.WIZARD_INT_DAMAGE_PER_POINT) -- must stay in sync with index.html's
+  // PS.getDamageBreakdown()/getAttackDamage(), which apply the identical x2 multiplier.
+  else if (c.chain === "wizard") statBonus = combatGetTotalAttr(data, "int") * CB.WIZARD_INT_DAMAGE_PER_POINT;
   // v0.19.1 (#14): % damage bonus applied multiplicatively to the whole base+gear total,
   // mirroring PS.getDamageBreakdown() in index.html -- must stay in sync with that function.
   const weaponType = combatGetEquippedWeaponType(data);
@@ -1947,6 +1995,16 @@ function combatTickCombatRoundBuffs(data) {
   if (data.invuln_rounds_left > 0) data.invuln_rounds_left--;
   if (data.quad_dmg_rounds_left > 0) data.quad_dmg_rounds_left--;
   if (data.magic_find_rounds_left > 0) data.magic_find_rounds_left--;
+  // v0.22 (batch2 #5): apply Health/Stamina Regen gear-affix ticks once per combat round.
+  // Combat HP/Stamina is server-authoritative, so a client-only regen tick during combat
+  // would desync -- this mirrors the client's town/maze wall-clock regen tick (see the
+  // setInterval() in index.html) but keyed to combat rounds instead of real seconds. Every
+  // combat endpoint below already echoes data.current_hp/current_stamina back in its
+  // `player` payload, so the client picks this up automatically as the authoritative value.
+  const regen = combatGetRegen(data);
+  if (regen > 0) data.current_hp = Math.min(combatGetMaxHp(data), (data.current_hp || 0) + regen);
+  const staminaRegen = combatGetStaminaRegen(data);
+  if (staminaRegen > 0) data.current_stamina = Math.min(combatGetMaxStamina(data), (data.current_stamina || 0) + staminaRegen);
 }
 // Shared fragment merged into every combat endpoint's `player` response object so the client
 // always has a fresh, authoritative snapshot of all 3 round-based shrine buffs to overwrite
@@ -2206,7 +2264,7 @@ app.post("/api/combat/start", requireAuth, (req, res) => {
   db.prepare("DELETE FROM combat_sessions WHERE account_id = ? AND slot = ? AND status = 'active'").run(req.account.id, slot);
 
   const hpMult = isGuardian ? CB.STRONGHOLD_GUARDIAN_HP_MULT : isRoamer ? CB.ROAMING_MOB_HP_MULT : 1;
-  const dmgMult = isRoamer ? CB.ROAMING_MOB_DAMAGE_MULT : 1;
+  const dmgMult = isGuardian ? CB.STRONGHOLD_GUARDIAN_DAMAGE_MULT : isRoamer ? CB.ROAMING_MOB_DAMAGE_MULT : 1;
   const xpMult = isGuardian ? CB.STRONGHOLD_GUARDIAN_XP_MULT : isRoamer ? CB.ROAMING_MOB_XP_MULT : 1;
   const maxHp = combatMonsterHp(monster.base_hp, areaLevel) * hpMult;
   const dmgMin = combatMonsterDamage(monster.base_damage_min, areaLevel) * dmgMult;
@@ -2221,7 +2279,12 @@ app.post("/api/combat/start", requireAuth, (req, res) => {
   combatSettleAllHeals(data);
   const log = [];
   let firstStrike = null;
-  if (Math.random() < CB.MONSTER_FIRST_STRIKE_CHANCE) {
+  // v0.22 (batch2 #18): Touch of Unicorn (Invulnerability) is supposed to block ALL incoming
+  // damage while active, but this engage-time first-strike roll never checked it -- a player
+  // who triggered the shrine and then walked straight into a fight would still eat the
+  // "monster strikes first" hit before ever getting a turn. combatIsInvulnerable(data) is the
+  // same check /attack, /flee, and /use-item already gate their monster-turn damage on.
+  if (!combatIsInvulnerable(data) && Math.random() < CB.MONSTER_FIRST_STRIKE_CHANCE) {
     let mdmg = cbRandRange(dmgMin, dmgMax);
     // v0.19.1 (#10): the first-strike hit can crit too, same formula/order as the regular
     // counter-attack in combatResolveMonsterTurn. v0.21 (#9/#10): critMult is this hit's own
@@ -2424,7 +2487,11 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
     ok: true, mob_blocked: mobBlocked, player_hit: playerHit, weapon_skill: weaponSkill,
     monster: { hp: Math.max(0, newMonsterHp), max_hp: session.max_hp, defeated: monsterDefeated },
     kill, monster_turn: monsterTurn, monster_ticks: catchUp.ticks,
-    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), ...combatRoundBuffsPayload(data) },
+    // v0.22 (batch2 #5): current_stamina/max_stamina now echoed here too (previously only
+    // current_hp was) -- combatTickCombatRoundBuffs() above may have applied a Stamina Regen
+    // gear-affix tick this round, and the client must adopt the server's post-tick value the
+    // same way it already does for current_hp, or its own copy silently desyncs.
+    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
     fatal, _save_seq: saveSeq,
   });
 });
@@ -2473,7 +2540,10 @@ app.post("/api/combat/:sessionId/flee", requireAuth, (req, res) => {
   const saveSeq = saveCharacterRow(req.account.id, session.slot, data);
   res.json({
     ok: true, failed, monster_turn: monsterTurn, monster_ticks: catchUp.ticks, fatal,
-    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), ...combatRoundBuffsPayload(data) },
+    // v0.22 (batch2 #5): see the identical comment on /attack's success response above --
+    // a failed flee still ticks combat-round buffs (including regen), so current_stamina must
+    // be echoed here too.
+    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
     _save_seq: saveSeq,
   });
 });
@@ -3105,7 +3175,7 @@ function legacyGearOutOfSpecAffixes(item) {
   for (const a of item.affixes) {
     if (!a || typeof a.stat !== "string" || a.stat === "eyesight" || !Number.isFinite(a.value)) continue;
     let max = itemAffixMaxForTier(a.stat, item.tier);
-    if (item.slot === "weapon" && a.stat === "damage") max = Math.round(max * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
+    if (item.slot === "weapon" && a.stat === "damage") max = round2(max * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
     if (a.value > max) out.push({ stat: a.stat, value: a.value, max });
   }
   return out;
@@ -3119,7 +3189,7 @@ function legacyGearRescale(item) {
   const affixes = item.affixes.map((a) => {
     if (!a || a.stat === "eyesight") return a;
     let max = itemAffixMaxForTier(a.stat, item.tier);
-    if (item.slot === "weapon" && a.stat === "damage") max = Math.round(max * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
+    if (item.slot === "weapon" && a.stat === "damage") max = round2(max * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
     return a.value > max ? Object.assign({}, a, { value: max }) : a;
   });
   return Object.assign({}, item, { affixes });
