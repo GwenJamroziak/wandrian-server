@@ -1123,7 +1123,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.22.1-web",
+  GAME_VERSION:"v0.22.2-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   
@@ -4699,6 +4699,37 @@ function render(){
   const fn=SCREENS[GF.screen]||SCREENS.mainMenuSlots;
   app.appendChild(fn());
   const cp=chatPanel(); if(cp) app.appendChild(cp);
+  maybeShowWhatsNewPopup();
+}
+
+// v0.22.2 (#7): one-time "what's new" popup, keyed off CHANGELOG[0].version (the latest release)
+// rather than Balance.GAME_VERSION (which carries a "-web" suffix that wouldn't cleanly match).
+const WHATS_NEW_STORAGE_KEY="wandrian_last_seen_changelog_version";
+function maybeShowWhatsNewPopup(){
+  if(NO_TOPBAR_SCREENS.includes(GF.screen)) return; // no player tile on these screens -- not "in the game" yet
+  if(PS.current_slot==null || PS.current_slot<0) return; // no character loaded
+  if(modalRoot.children.length>0) return; // don't clobber some other already-open modal
+  const latest=CHANGELOG[0];
+  if(!latest) return;
+  if(Storage_.getItem(WHATS_NEW_STORAGE_KEY)===latest.version) return;
+  const markSeen=()=>{ Storage_.setItem(WHATS_NEW_STORAGE_KEY, latest.version); };
+  const dismiss=()=>{ markSeen(); closeConfirmModal(); };
+  modalRoot.innerHTML="";
+  modalRoot.appendChild(h("div",{class:"modal-backdrop",onClick:(e)=>{ if(e.target===e.currentTarget) dismiss(); }},[
+    h("div",{class:"modal-box"},[
+      h("h3",{style:{marginTop:"0"}},[`What's new in ${latest.version}`]),
+      h("ul",{style:{paddingLeft:"20px",margin:"0 0 10px"}},latest.notes.map(n=>h("li",{style:{marginBottom:"6px"}},[n]))),
+      h("div",{class:"row gap"},[
+        h("span",{class:"linklike",onClick:()=>{
+          markSeen();
+          closeConfirmModal();
+          GF._preChangelogScreen=GF.screen;
+          GF.goto("changelog");
+        }},["Read full changelog"]),
+        h("button",{class:"play",style:{marginLeft:"auto"},onClick:dismiss},["Got it"]),
+      ]),
+    ]),
+  ]));
 }
 
 
@@ -4991,68 +5022,37 @@ function forestReputationTooltipText(rep){
   }
   return "Neutral standing with this tier's forest -- no bonus or penalty yet. Squash a Critter encounter to lower it, or spare one to raise it.";
 }
+// v0.22.2 (#2): secondary-stats panel occupies the right column of statHeader()'s main row --
+// holds Damage/Kill streak/Forest Reputation, which used to live in the left identity column.
+function secondaryStatsPanel(){
+  return h("div",{class:"col gap",style:{flex:"1",minWidth:"0"}},[
+    damageLine(),
+    PS.kill_streak>0?h("div",{class:"muted"},[`Kill streak: ${PS.kill_streak} (+${PS.kill_streak*Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL}% Magic Find)`]):null,
+    h("div",{class:"tooltip muted","data-tip":forestReputationTooltipText(PS.getCurrentForestReputation())},[`Forest Reputation (Tier ${tierRomanNumeral(PS.highest_tier_reached||1)}): ${PS.getCurrentForestReputation()}`]),
+  ]);
+}
 function statHeader(opts={}){
   const compact=!!opts.compact;
   const c=PS.getClassData();
   const buffIcons=activePotionBuffIcons();
-  
-  
-  
-  
-  
-  
-  
-  
+  // v0.22.2 (#2): three-zone header row -- left = bare identity (name/hardcore/level/class),
+  // middle = Character-Sheet entry (unchanged, kept at its existing structural spot), right =
+  // economy (gold/materials, unchanged). Damage/Kill streak/Forest Reputation moved out of the
+  // identity column into secondaryStatsPanel() below; consumables/herbs preview removed entirely
+  // (relocated to the Character Sheet, see item 8).
   return h("div",{id:"stat-header-panel",class:"panel",style:{marginBottom:compact?"0":"14px"}},[
     h("div",{class:"row",style:{justifyContent:"space-between",alignItems:"flex-start"}},[
       h("div",{},[
         h("div",{style:{fontWeight:"bold"}},[PS.character_name, PS.hardcore?h("span",{style:{color:"#e07a7a"}},[" [Hardcore]"]):null]),
         h("div",{class:"muted"},[`Lv ${PS.level} ${c.display_name||""}`]),
-        damageLine(),
-        
-        
-        
-        PS.kill_streak>0?h("div",{class:"muted"},[`Kill streak: ${PS.kill_streak} (+${PS.kill_streak*Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL}% Magic Find)`]):null,
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        h("div",{class:"tooltip muted","data-tip":forestReputationTooltipText(PS.getCurrentForestReputation())},[`Forest Reputation (Tier ${tierRomanNumeral(PS.highest_tier_reached||1)}): ${PS.getCurrentForestReputation()}`]),
         buffIcons.length?h("div",{style:{marginTop:"2px"}},buffIcons):null,
       ]),
       h("div",{class:"row gap",style:{alignItems:"center"}},[
-        
-        
-        
         h("div",{class:"linklike",style:{fontWeight:"bold",cursor:GF.screen==="inventory"?"default":"pointer"},onClick:GF.screen==="inventory"?null:()=>GF.goto("inventory",{inventory_return_to:GF.screen})},["Character Sheet"]),
-        
-        
-        
-        
         characterSheetEntryIcon(),
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
         (PS.unspent_stat_points>0 && GF.screen!=="inventory")?h("span",{class:"stat-point-cta",title:`${PS.unspent_stat_points} unspent stat point${PS.unspent_stat_points===1?"":"s"} -- click to assign them`,onClick:()=>GF.goto("inventory",{inventory_return_to:GF.screen})},["+"]):null,
       ]),
       h("div",{class:"col",style:{alignItems:"flex-end"}},[
-        
-        
-        
-        
         h("div",{style:{position:"relative"}},[
           h("div",{class:"gold-text"},[`${PS.gold} gold`]),
           floatLayer("gold"),
@@ -5062,69 +5062,28 @@ function statHeader(opts={}){
     ]),
     h("div",{class:"row",style:{marginTop:"8px",alignItems:"flex-start",gap:"14px"}},[
       h("div",{class:"col",style:{gap:compact?"3px":"6px",flex:"0 0 33%",maxWidth:"33%",minWidth:"0"}},[
-        
-        
-        
-        
-        
-        
         h("div",{class:"col",style:{gap:"1px"}},[
-        
-        
-        
-        
-        
         h("div",{},[h("span",{class:"xp-text"},[`XP ${PS.xp}/${PS.xp_to_next}`]), PS.xp_buff_encounters_left>0?h("span",{class:"tooltip","data-tip":`Experience shrine active: bonus XP for ${PS.xp_buff_encounters_left} more battle${PS.xp_buff_encounters_left===1?"":"s"}.`,style:{marginLeft:"4px"}},["✨"]):null]),
-        
-        
-        
-        
-        
-        
-        
-        
         h("div",{style:{position:"relative"}},[bar(PS.xp/PS.xp_to_next*100,"bar-xp bar-fill-xp-grow",compact,"stat-xp-bar-fill"), floatLayer("xpbar")]),
         ]),
         h("div",{class:"col",style:{gap:"1px"}},[
-        
-        
-        
-        
-        
-        
-        
-        
         h("div",{},[h("span",{id:"stat-hp-text",class:PS.isPoisoned()?"hp-text hp-text-poisoned":"hp-text"},[`HP ${Math.round(PS.current_hp)}/${Math.round(PS.getMaxHp())}`]), PS.isPoisoned()?h("span",{id:"stat-poison-icon",class:"poison-icon",title:`Poisoned: draining ${PS.getPoisonHpPerSec().toFixed(1)} HP/sec for ${formatMsAsMinSec(PS.getPoisonMsLeft())} more (won't drop you below 1 HP on its own).`,style:{marginLeft:"4px",opacity:"1"}},["🤢"]):null,
-        
-        
-        
-        
-        
         PS.isInvulnerable()?h("span",{class:"tooltip","data-tip":`Touch of Unicorn: immune to damage/poison for ${PS.invuln_rounds_left} more round(s) (combat or traps).`,style:{marginLeft:"4px"}},["🦄"]):null,
-        
-        
-        
+        // v0.22.2 (#3): dedicated Elixir of Eyesight indicator, mirroring the 🦄/🔍 dedicated-icon
+        // pattern right beside it -- shown whenever eyesight_potion_steps_left>0, re-renders (and
+        // counts down) on every maze step since the header re-renders each step.
+        PS.eyesight_potion_steps_left>0?h("span",{class:"tooltip","data-tip":`Elixir of Eyesight: maze reveal widened to 5×5 for ${PS.eyesight_potion_steps_left} more step${PS.eyesight_potion_steps_left===1?"":"s"}.`,style:{marginLeft:"4px"}},["👁️"]):null,
         PS.hasMagicFindShrineBuff()?h("span",{class:"tooltip","data-tip":`Magic Find Shrine: +${Balance.SHRINE_MAGIC_FIND_PCT}% Magic Find for ${PS.magic_find_rounds_left} more round${PS.magic_find_rounds_left===1?"":"s"}.`,style:{marginLeft:"4px"}},["🔍"]):null,
-        
-        
-        
-        
-        
-        
-        
-        
         h("span",{id:"stat-healing-text",class:"muted",style:{marginLeft:"4px",display:PS.getHealPerSecond()>0?"inline":"none"}},[`(healing +${PS.getHealPerSecond().toFixed(1)}/sec)`])]),
         hpBar(compact),
         ]),
         h("div",{class:"col",style:{gap:"1px"}},[
         h("div",{},[h("span",{id:"stat-stamina-text",class:"stamina-text"},[`Stamina ${Math.round(PS.current_stamina)}/${Math.round(PS.getMaxStamina())}`]), PS.stamina_shrine_buff>0?h("span",{class:"tooltip","data-tip":`Stamina shrine active: ${Math.round(PS.stamina_shrine_buff)} bonus stamina in reserve.`,style:{marginLeft:"4px"}},["✨"]):null,
-        
-        
         h("span",{id:"stat-stamina-healing-text",class:"muted",style:{marginLeft:"4px",display:PS.getStaminaHealPerSecond()>0?"inline":"none"}},[`(recovering +${PS.getStaminaHealPerSecond().toFixed(1)}/sec)`])]),
         staminaBar(compact),
         ]),
       ]),
-      inventoryPreview(),
+      secondaryStatsPanel(),
     ]),
   ]);
 }
@@ -5219,6 +5178,9 @@ function authForm(mode){
     try{
       const json = isLogin ? await Net.login(username,passcode) : await Net.register(username,passcode,email);
       await Net.afterAuth(json.username, json.token);
+      // v0.22.2 (#7): brand-new accounts silently start "caught up" on the changelog, so a
+      // fresh registrant isn't shown a "what's new" popup for changes that predate them.
+      if(!isLogin && CHANGELOG[0]) Storage_.setItem(WHATS_NEW_STORAGE_KEY, CHANGELOG[0].version);
       setToast(`Welcome, ${json.username}!`);
       GF.goto("mainMenuSlots");
     }catch(e){
@@ -6183,6 +6145,10 @@ function kindleBonfirePanel(){
 
 function screenTown(){
   const root=h("div",{});
+  // v0.22.2 (#9): statHeader() now renders as its own element right after the top community
+  // container, above the town title -- it's no longer one of the town-quadrants grid cells
+  // (see below, that grid is now 3 cells instead of 4).
+  root.appendChild(statHeader());
   root.appendChild(h("h2",{},[getTownName()]));
   root.appendChild(h("div",{class:"lore"},[getTownLore()]));
   const t=toastBox(); if(t) root.appendChild(t);
@@ -6217,9 +6183,7 @@ function screenTown(){
       ]),
       kindleBonfirePanel(),
     ]),
-    
-    statHeader({compact:true}),
-    
+
     h("div",{class:"col gap"},[
       serviceButton("Blacksmith","🔨",()=>GF.goto("blacksmith")),
       serviceButton("Alchemist","⚗",()=>GF.goto("alchemist")),
@@ -6645,12 +6609,10 @@ function screenMaze(){
   
   
   
-  root.appendChild(h("h2",{},[`The Woods, Area Level ${depth} (Tier ${tierRomanNumeral(Balance.mobTierForAreaLevel(depth))})`]));
-  
-  
-  
-  root.appendChild(h("div",{class:"lore"},["Overgrown paths wind through the trees -- arrows or click to move."]));
+  // v0.22.2 (#9): statHeader() now renders first, with the area title/lore below it.
   root.appendChild(statHeader());
+  root.appendChild(h("h2",{},[`The Woods, Area Level ${depth} (Tier ${tierRomanNumeral(Balance.mobTierForAreaLevel(depth))})`]));
+  root.appendChild(h("div",{class:"lore"},["Overgrown paths wind through the trees -- arrows or click to move."]));
   
   
   
@@ -7723,16 +7685,17 @@ function screenCombat(){
   const cb=ensureCombat();
   const root=h("div",{});
   if(!cb){
-    
-    
-    
-    root.appendChild(h("h2",{},["A wild monster blocks the path!"]));
+    // v0.22.2 (#9): statHeader() now renders first, with the encounter title below it.
     root.appendChild(statHeader());
+    root.appendChild(h("h2",{},["A wild monster blocks the path!"]));
     root.appendChild(h("div",{class:"panel muted"},["Sizing up the fight..."]));
     return root;
   }
-  root.appendChild(h("h2",{},[cb.defeated?`The ${cb.name} lies defeated.`:`A wild ${cb.name} blocks the path!`]));
+  // v0.22.2 (#9): statHeader() first, encounter title below it.
+  // v0.22.2 (#6): the "lies defeated" wording no longer appears in this page-level title -- it
+  // now renders inside mobPanel next to the slain portrait (see below). Living-mob title unchanged.
   root.appendChild(statHeader());
+  if(!cb.defeated) root.appendChild(h("h2",{},[`A wild ${cb.name} blocks the path!`]));
 
   const portraitWrap=h("div",{style:{width:"140px",height:"140px",margin:"0 auto 8px"}});
   portraitWrap.innerHTML=monsterPortrait(cb.monster_id,{slain:cb.defeated});
@@ -7862,9 +7825,9 @@ function screenCombat(){
 
     h("div",{style:{position:"relative"}},[bar(Math.max(0,cb.hp)/cb.maxHp*100,"bar-hp"), floatLayer("monster")]),
 
-
-
-
+    // v0.22.2 (#6): the "lies defeated" message now lives here, beside the slain portrait,
+    // instead of the page-level title above the player tile.
+    cb.defeated?h("div",{style:{fontWeight:"bold",textAlign:"center",marginTop:"6px"}},[`The ${cb.name} lies defeated.`]):null,
     // v0.22.1 (Part B4): this container is now ALWAYS rendered (never swapped to null), so its
     // reserved height never collapses/reflows the action area when combat is busy mid-round --
     // only the text content toggles, using a non-breaking space as a same-height placeholder.
@@ -8200,8 +8163,9 @@ function ensureChest(){
 function screenChest(){
   const chest=ensureChest();
   const root=h("div",{});
-  root.appendChild(h("h2",{},["A weathered chest, bound in vines"]));
+  // v0.22.2 (#9): statHeader() first, encounter title below it.
   root.appendChild(statHeader());
+  root.appendChild(h("h2",{},["A weathered chest, bound in vines"]));
   root.appendChild(h("div",{class:"panel"},[
     h("div",{},[`Pry it open: ${chest.hits_done}/${chest.hits_required} hits`]),
     bar(chest.hits_done/chest.hits_required*100,"bar-gold"),
@@ -8245,8 +8209,9 @@ function screenChest(){
 function screenChestReveal(){
   const reveal=GF.chestReveal;
   const root=h("div",{});
-  root.appendChild(h("h2",{},[reveal&&reveal.title||"The chest creaks open!"]));
+  // v0.22.2 (#9): statHeader() first, encounter title below it.
   root.appendChild(statHeader());
+  root.appendChild(h("h2",{},[reveal&&reveal.title||"The chest creaks open!"]));
   const list=h("div",{class:"panel",style:{marginTop:"10px"}},
     (reveal&&reveal.entries.length)
       ?reveal.entries.map(entry=>h("div",{style:{padding:"8px 0",borderBottom:"1px solid var(--border)"}},[chestLootEntryNode(entry)]))
@@ -8272,10 +8237,11 @@ function screenStrongholdChest(){
   const root=h("div",{});
   const maze=GF.overworld_snapshot;
   const cellIdx=GF.stronghold_chest_cell_idx;
+  // v0.22.2 (#9): statHeader() first, encounter title/lore below it.
+  root.appendChild(statHeader());
   root.appendChild(h("h2",{},["A locked Stronghold chest"]));
   root.appendChild(h("div",{class:"lore"},["Iron-bound and half-buried in roots. Whatever the guardians were protecting, it's still in here."]));
   const t=toastBox(); if(t) root.appendChild(t);
-  root.appendChild(statHeader());
 
   
   
@@ -8399,9 +8365,10 @@ function screenHerbEncounter(){
   const node=ensureHerbNode();
   const herb=DL.getHerb(node.herb_id);
   const root=h("div",{});
+  // v0.22.2 (#9): statHeader() first, encounter title/lore below it.
+  root.appendChild(statHeader());
   root.appendChild(h("h2",{},[herb.rare?`A rare bloom, ${herb.name}`:`Gathering ${herb.name}`]));
   root.appendChild(h("div",{class:"lore"},["Careful hands find more than hasty ones. No danger here, just patience."]));
-  root.appendChild(statHeader());
   root.appendChild(h("div",{class:"panel",style:{marginBottom:"10px"}},[
     h("div",{},[`Gathering: ${node.ticks_done}/${node.ticks_required}`]),
     bar(node.ticks_done/node.ticks_required*100,"bar-xp"),
@@ -8466,9 +8433,10 @@ function ensureCritter(){
 function screenCritterEncounter(){
   const critter=ensureCritter();
   const root=h("div",{});
+  // v0.22.2 (#9): statHeader() first, encounter title/lore below it.
+  root.appendChild(statHeader());
   root.appendChild(h("h2",{},["A small critter, minding its own business"]));
   root.appendChild(h("div",{class:"lore"},["It hasn't noticed you. Whatever you decide, it won't fight back."]));
-  root.appendChild(statHeader());
   root.appendChild(h("div",{class:"panel"},[
     h("div",{},[`Squash: ${critter.hits_done}/${critter.hits_required}`]),
     bar(critter.hits_done/critter.hits_required*100,"bar-hp"),
@@ -9003,24 +8971,43 @@ function characterSheetTabBar(){
 
 
 
+// v0.22.2 (#8): converted from a vertical row-per-item list into a horizontal, wrapping chip
+// grid (icon + name + xcount) -- this is the same content that used to live in the player tile's
+// inventoryPreview() (removed there by item 2), repurposed here as the Character Sheet's home for
+// it. Consumable chips keep click-to-use (and the same tooltip); herb chips stay read-only.
 function consumablesListPanel(){
   const wrap=h("div",{});
   wrap.appendChild(h("h3",{style:{marginTop:"0"}},["Consumables"]));
   const consEntries=Object.keys(PS.consumables).filter(k=>PS.consumables[k]>0);
-  if(consEntries.length===0) wrap.appendChild(h("div",{class:"muted"},["None."]));
-  for(const itemId of consEntries){
+  if(consEntries.length===0){ wrap.appendChild(h("div",{class:"muted"},["None."])); return wrap; }
+  const chips=consEntries.map(itemId=>{
     const item=DL.getItem(itemId);
-    
-    
-    
-    
-    
-    wrap.appendChild(h("div",{class:"row gap",style:{marginBottom:"4px",alignItems:"center",justifyContent:"space-between"}},[
-      h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(itemId,22), h("div",{},[h("span",{class:"tooltip","data-tip":DL.itemEffectDescription(itemId)},[`${item.name} x${PS.consumables[itemId]}`]), h("div",{class:"muted",style:{fontSize:".85em"}},[DL.itemCategoryLabel(itemId)])])]),
-      item.type==="consumable"?h("button",{disabled:!PS.canUseConsumable(itemId),onClick:()=>{PS.useConsumable(itemId);autosave();render();}},["Use"]):
-        h("button",{onClick:()=>{PS.useScroll(itemId);autosave();setToast(`${item.name} will boost your next descent by ${item.level_bonus} levels.`);render();}},["Use"]),
-    ]));
-  }
+    const isPotion=item.type==="consumable";
+    const disabled=isPotion && !PS.canUseConsumable(itemId);
+    const onUse=()=>{
+      if(isPotion){
+        // v0.22.2 (#3): brief confirmation toast when the Elixir of Eyesight is used, since it
+        // otherwise has no other on-use feedback (the ongoing effect is now shown via the header's
+        // dedicated 👁️ indicator instead).
+        const wasEyesight=(item.eyesight_steps||0)>0;
+        const ok=PS.useConsumable(itemId);
+        autosave();
+        if(ok && wasEyesight) setToast("Your sight sharpens -- the woods reveal more around you.");
+      } else {
+        PS.useScroll(itemId);
+        autosave();
+        setToast(`${item.name} will boost your next descent by ${item.level_bonus} levels.`);
+      }
+      render();
+    };
+    return h("div",{
+      class:"tile row gap tooltip",
+      "data-tip":DL.itemEffectDescription(itemId),
+      style:{alignItems:"center",gap:"6px",padding:"4px 8px",cursor:disabled?"default":"pointer",opacity:disabled?"0.5":"1"},
+      onClick:disabled?null:onUse,
+    },[itemIcon(itemId,22), h("span",{},[`${item.name} x${PS.consumables[itemId]}`])]);
+  });
+  wrap.appendChild(h("div",{class:"row gap",style:{flexWrap:"wrap"}},chips));
   return wrap;
 }
 
@@ -9029,11 +9016,13 @@ function herbsListPanel(){
   const wrap=h("div",{});
   wrap.appendChild(h("h3",{style:{marginTop:"0"}},["Herbs"]));
   const herbEntries=Object.keys(PS.herbs).filter(k=>PS.herbs[k]>0);
-  if(herbEntries.length===0) wrap.appendChild(h("div",{class:"muted"},["None."]));
-  for(const herbId of herbEntries){
-    
-    wrap.appendChild(h("div",{class:"row gap",style:{marginBottom:"4px",alignItems:"center"}},[herbIcon(herbId,22), h("div",{},[h("span",{class:"tooltip","data-tip":DL.getHerb(herbId).found_in||""},[`${DL.getHerb(herbId).name} x${PS.herbs[herbId]}`]), h("div",{class:"muted",style:{fontSize:".85em"}},["Herb"])])]));
-  }
+  if(herbEntries.length===0){ wrap.appendChild(h("div",{class:"muted"},["None."])); return wrap; }
+  const chips=herbEntries.map(herbId=>h("div",{
+    class:"tile row gap tooltip",
+    "data-tip":DL.getHerb(herbId).found_in||"",
+    style:{alignItems:"center",gap:"6px",padding:"4px 8px"},
+  },[herbIcon(herbId,22), h("span",{},[`${DL.getHerb(herbId).name} x${PS.herbs[herbId]}`])]));
+  wrap.appendChild(h("div",{class:"row gap",style:{flexWrap:"wrap"}},chips));
   return wrap;
 }
 
@@ -9375,17 +9364,18 @@ function salvageAllGearOfRarity(rarityName, busy){
 
 function screenBlacksmith(){
   const root=h("div",{});
+  // v0.22.2 (#9): statHeader() first, NPC title/back-button/toast below it.
+  root.appendChild(statHeader());
   root.appendChild(h("div",{class:"row gap"},[iconBadge(`<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="19" fill="#5a4028"/><rect x="10" y="26" width="20" height="6" rx="1" fill="#333"/></svg>`,52),h("div",{},[h("h2",{},[Balance.NPC_BLACKSMITH_NAME]),h("div",{class:"flavor"},["\"Bring me your battered gear. I'll see what can be salvaged, or improved.\""])])]));
-  
+
   root.appendChild(h("div",{class:"row gap"},[
     h("button",{style:{marginBottom:"8px"},onClick:()=>GF.goto("town")},["← Back to Town"]),
-    
-    
-    
+
+
+
     h("button",{style:{marginBottom:"8px"},onClick:()=>{ GF._preBlacksmithGuideScreen="blacksmith"; GF.goto("blacksmithGuide"); }},["Blacksmith Guide"]),
   ]));
   const t=toastBox(); if(t) root.appendChild(t);
-  root.appendChild(statHeader());
 
   
   
@@ -9510,16 +9500,15 @@ function alchemistAmountPicker(recipeId,maxQty){
 
 function screenAlchemist(){
   const root=h("div",{});
+  // v0.22.2 (#9): statHeader() first, NPC title/back-button/toast below it.
+  root.appendChild(statHeader());
   root.appendChild(h("div",{class:"row",style:{justifyContent:"space-between",alignItems:"center"}},[
     h("div",{class:"row gap"},[iconBadge(`<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="19" fill="#2a5a4a"/><rect x="16" y="10" width="8" height="18" rx="3" fill="#8fd0aa"/></svg>`,52),h("div",{},[h("h2",{},[Balance.NPC_ALCHEMIST_NAME]),h("div",{class:"flavor"},["\"The forest gives freely, if you know what to pick.\""])])]),
-    
-    
     h("button",{onClick:()=>{ GF._preHerbalismScreen="alchemist"; GF.goto("herbalism"); }},["Herbalism & Alchemy Guide"]),
   ]));
-  
+
   root.appendChild(h("button",{style:{marginBottom:"8px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
   const t=toastBox(); if(t) root.appendChild(t);
-  root.appendChild(statHeader());
 
   root.appendChild(h("h3",{},["Your Herbs"]));
   const herbEntries=Object.keys(PS.herbs).filter(k=>PS.herbs[k]>0);
@@ -10145,11 +10134,12 @@ function merchantSellTab(){
 
 function screenMerchant(){
   const root=h("div",{});
+  // v0.22.2 (#9): statHeader() first, NPC title/back-button/toast below it.
+  root.appendChild(statHeader());
   root.appendChild(h("div",{class:"row gap"},[iconBadge(`<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="19" fill="#6a4a20"/><circle cx="20" cy="24" r="10" fill="#c99a50"/></svg>`,52),h("div",{},[h("h2",{},[`${Balance.NPC_MERCHANT_NAME} the Merchant`]),h("div",{class:"flavor"},["\"Best prices this side of the treeline. Probably.\""])])]));
-  
+
   root.appendChild(h("button",{style:{marginBottom:"8px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
   const t=toastBox(); if(t) root.appendChild(t);
-  root.appendChild(statHeader());
 
   
   
@@ -10173,12 +10163,13 @@ function screenMerchant(){
 
 function screenAuctionHouse(){
   const root=h("div",{});
+  // v0.22.2 (#9): statHeader() first, title/lore below it.
+  root.appendChild(statHeader());
   root.appendChild(h("h2",{},["Auction House"]));
   root.appendChild(h("div",{class:"lore"},["A dusty ledger and an idle gavel. List your own finds, or see what other travelers are selling."]));
-  
+
   root.appendChild(h("button",{style:{marginBottom:"8px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
   const t=toastBox(); if(t) root.appendChild(t);
-  root.appendChild(statHeader());
 
   if(!Net.online){
     root.appendChild(h("div",{class:"muted"},["Log in online to buy and sell with other travelers."]));
@@ -10379,11 +10370,12 @@ function screenAuctionHouse(){
 
 function screenGamblingGoblin(){
   const root=h("div",{});
+  // v0.22.2 (#9): statHeader() first, NPC title/back-button/toast below it.
+  root.appendChild(statHeader());
   root.appendChild(h("div",{class:"row gap"},[iconBadge(`<svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="19" fill="#2a4a1a"/><circle cx="14" cy="18" r="3" fill="#eee"/><circle cx="26" cy="18" r="3" fill="#eee"/><circle cx="14" cy="18" r="1.2" fill="#111"/><circle cx="26" cy="18" r="1.2" fill="#111"/><path d="M14,27 Q20,32 26,27" stroke="#eee" stroke-width="2" fill="none"/></svg>`,52),h("div",{},[h("h2",{},[Balance.NPC_GOBLIN_NAME]),h("div",{class:"flavor"},["\"The price you pay for anything is the amount of time you are willing to sacrifice for it.\""])])]));
-  
+
   root.appendChild(h("button",{style:{marginBottom:"8px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
   const t=toastBox(); if(t) root.appendChild(t);
-  root.appendChild(statHeader());
 
   if(!PS.gamblingUnlocked()){
     root.appendChild(h("div",{class:"lore"},["The goblin only deals with travelers who've proven themselves at the Broken Bridge Trial. Come back once you've passed your first trial."]));
@@ -10793,6 +10785,37 @@ function adminPromoteClassTier(){
 
 
 
+// v0.22.2 (#4-5): "Grant items" test panel -- consumable/herb dropdowns are built dynamically
+// from the live ITEMS/HERBS data so any newly-added consumable or herb appears automatically
+// with no code change here.
+function adminGrantItemsPanel(){
+  const consumableIds=Object.keys(ITEMS).filter(id=>ITEMS[id].type==="consumable");
+  const consSelect=h("select",{},consumableIds.map(id=>h("option",{value:id},[ITEMS[id].name])));
+  const consQty=h("input",{type:"number",min:"1",value:"1",style:{width:"70px"}});
+  const herbIds=Object.keys(HERBS);
+  const herbSelect=h("select",{},herbIds.map(id=>h("option",{value:id},[HERBS[id].name])));
+  const herbQty=h("input",{type:"number",min:"1",value:"1",style:{width:"70px"}});
+  return h("div",{class:"col gap",style:{marginTop:"6px",marginBottom:"10px"}},[
+    h("div",{style:{fontWeight:"bold"}},["Grant items"]),
+    h("div",{class:"row gap",style:{alignItems:"center",marginBottom:"6px"}},[
+      h("button",{style:{minWidth:"160px"},onClick:()=>{
+        const n=parseInt(consQty.value,10);
+        PS.addConsumable(consSelect.value, Number.isFinite(n)&&n>0?n:1);
+        PS.saveGame(); render();
+      }},["Give Consumable"]),
+      consSelect, consQty,
+    ]),
+    h("div",{class:"row gap",style:{alignItems:"center"}},[
+      h("button",{style:{minWidth:"160px"},onClick:()=>{
+        const n=parseInt(herbQty.value,10);
+        PS.addHerb(herbSelect.value, Number.isFinite(n)&&n>0?n:1);
+        PS.saveGame(); render();
+      }},["Give Herb"]),
+      herbSelect, herbQty,
+    ]),
+  ]);
+}
+
 function adminSpawnWeaponOfType(){
   const select=h("select",{},IF.WEAPON_TYPE_LIST.map(wt=>h("option",{value:wt},[IF.WEAPON_TYPE_LABELS[wt]||wt])));
   return h("div",{class:"row gap",style:{alignItems:"center",marginBottom:"8px"}},[
@@ -10817,6 +10840,7 @@ function adminSpawnTab(){
   root.appendChild(adminAmountAction("+Levels",10,(n)=>{for(let i=0;i<n;i++)PS.addXp(PS.xp_to_next);PS.saveGame();render();}));
   root.appendChild(adminAmountAction("Spawn Random Gear",1,(n)=>{for(let i=0;i<n;i++)PS.addGear(IF.generate(Balance.itemTierForAreaLevel(PS.level)));PS.saveGame();render();}));
   root.appendChild(adminSpawnWeaponOfType());
+  root.appendChild(adminGrantItemsPanel());
   root.appendChild(h("div",{class:"row gap",style:{marginTop:"6px",flexWrap:"wrap"}},[
     h("button",{onClick:()=>{PS.level=Balance.LEVEL_CAP;PS.xp=0;PS.xp_to_next=Balance.xpRequiredForLevel(PS.level);PS.current_hp=PS.getMaxHp();PS.saveGame();render();}},["Set level to cap"]),
     h("button",{onClick:adminPromoteClassTier},["Promote Class Tier"]),
@@ -11061,6 +11085,16 @@ function legacyGearSection(){
 
 
 const CHANGELOG=[
+  { version:"v0.22.2", notes:[
+    "Monster hits now land with a soft +/-5% damage jitter instead of an identical number every time, keeping the average the same.",
+    "Player tile redesigned: a 3-zone header (identity, Character Sheet, gold/materials) above a 2-column layout with your vitals on the left and Damage/Kill streak/Reputation on the right.",
+    "Elixir of Eyesight now shows a dedicated indicator with a live step countdown next to your HP bar while it's active, plus a confirmation message when you drink one.",
+    "Dev Tools: grant yourself any consumable or herb by name from a dropdown, with a quantity field.",
+    "The 'lies defeated' message on a slain monster now appears right next to its portrait instead of in the page title above your character.",
+    "A one-time 'What's new' popup now appears after an update, summarizing what changed -- shown once per release.",
+    "Character Sheet: consumables and herbs are now a horizontal row of icon chips instead of a vertical list, freeing up the player tile.",
+    "The player tile is now a persistent sub-header shown at the top of every screen, with area/NPC titles rendering below it.",
+  ]},
   { version:"v0.22.1", notes:[
     "Monsters now belong to one of 5 difficulty bands -- Newborn, Young, Mature, Elder, and Ancient -- shown as a colored border and corner label with a star rank in combat, reusing the same rarity colors as gear. Bands gate in as you reach area levels 1, 8, 13, 21, and 34.",
     "Monster damage is now a single fixed number per monster instead of a min-max range.",
