@@ -202,7 +202,10 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 .plank-btn.unsafe{background:#4a2020;color:#e89f9f;border-color:#7a3a3a;}
 .maze-overlay-grid{position:absolute;top:0;left:0;width:100%;height:100%;background:#000;display:flex;align-items:center;justify-content:center;z-index:20;opacity:1;transition:opacity 1.3s ease;text-align:center;}
 .maze-overlay-grid.fade{opacity:0;}
-.maze-overlay-text{color:#e8d24a;font-size:1.8em;font-weight:bold;letter-spacing:1.5px;text-shadow:0 0 18px rgba(232,210,74,.6);padding:0 10px;}
+.maze-overlay-text{color:#e8d24a;font-size:1.8em;font-weight:bold;letter-spacing:1.5px;text-shadow:0 0 18px rgba(232,210,74,.6);padding:0 10px;white-space:pre-line;}
+/* v0.22.3 (#13): shrine announcements carry more text than "Advanced!"/"Trapdoor!" (a name
+   line plus a bonus-description line), so they use a smaller size within the same overlay. */
+.maze-overlay-text.shrine{font-size:1.15em;line-height:1.5;}
 
 .venture-card{padding:18px;display:flex;flex-direction:column;gap:12px;min-height:64px;box-sizing:border-box;}
 .venture-title{font-size:1.25em;font-weight:bold;}
@@ -212,6 +215,33 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 .venture-clickable:hover{background:#28331e;}
 .venture-chevrons{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:6px 10px;box-sizing:border-box;align-self:stretch;}
 .venture-chevrons button{padding:2px 10px;font-size:1em;line-height:1;}
+
+/* v0.22.3 (#6): bonfire kindle button -- fire visuals only while warming, transient (see
+   wandrian_bonfire_kindle_mock_v3.html). The blaze fill width is JS-driven from elapsed time
+   (refreshBonfireBlazeInPlace()), not a CSS @keyframes animation, so it can't "restart" if a
+   full render() happens to occur mid-warm. */
+.kindle{position:relative;overflow:hidden;transition:border-color .3s;}
+.kindle .venture-title,.kindle .muted{position:relative;z-index:5;}
+.kindle.lit .venture-title{color:#fff4e2;text-shadow:0 1px 3px rgba(120,40,0,.8);transition:color .4s;}
+.kindle .blaze{position:absolute;top:0;left:0;height:100%;width:0%;z-index:2;opacity:1;transition:opacity .7s ease;
+  background:linear-gradient(90deg,#3a1c0e 0%,#6e2f12 45%,#a5501c 78%,#c9701f 100%);}
+.kindle.fading .blaze{opacity:0;}
+.kindle .edge{position:absolute;right:-14px;top:0;height:100%;width:34px;z-index:3;pointer-events:none;}
+.kindle:not(.lit) .edge,.kindle.fading .edge{display:none;}
+.kindle .flame{position:absolute;bottom:-2px;width:16px;height:30px;border-radius:50% 50% 48% 52%/62% 62% 40% 40%;
+  background:radial-gradient(50% 60% at 50% 72%, #fff3c4 0%, #ffd166 26%, #ff8b2a 55%, #f0530f 78%, rgba(200,40,0,0) 92%);
+  transform-origin:50% 100%;filter:blur(.4px) drop-shadow(0 0 8px rgba(255,130,40,.75));mix-blend-mode:screen;}
+.kindle .flame.f1{left:4px;height:34px;animation:kindle-lick 320ms ease-in-out infinite;}
+.kindle .flame.f2{left:11px;height:26px;width:13px;animation:kindle-lick 260ms ease-in-out infinite reverse;}
+.kindle .flame.f3{left:-2px;height:22px;width:12px;animation:kindle-lick 380ms ease-in-out infinite;}
+.kindle .flame.core{left:6px;bottom:0;height:44px;width:20px;filter:blur(1.5px);opacity:.9;background:radial-gradient(45% 55% at 50% 70%, #fff7d8, #ffb43c 45%, rgba(240,90,20,0) 78%);animation:kindle-coreflick 180ms steps(2) infinite;}
+@keyframes kindle-lick{0%{transform:translateY(0) scaleY(1) scaleX(1) skewX(0);opacity:.95;}25%{transform:translateY(-3px) scaleY(1.28) scaleX(.86) skewX(6deg);opacity:1;}50%{transform:translateY(-1px) scaleY(1.05) scaleX(1.08) skewX(-5deg);opacity:.9;}75%{transform:translateY(-4px) scaleY(1.34) scaleX(.8) skewX(3deg);opacity:1;}100%{transform:translateY(0) scaleY(1) scaleX(1) skewX(0);opacity:.95;}}
+@keyframes kindle-coreflick{0%{opacity:.7;transform:scaleY(1);}50%{opacity:1;transform:scaleY(1.12);}100%{opacity:.8;transform:scaleY(.96);}}
+.kindle .ember{position:absolute;width:3px;height:3px;border-radius:50%;background:#ffcf6a;box-shadow:0 0 5px 1px rgba(255,160,60,.8);opacity:0;}
+.kindle .e1{left:8px;animation:kindle-rise 900ms linear infinite;}
+.kindle .e2{left:14px;width:2px;height:2px;animation:kindle-rise 1200ms linear infinite .3s;}
+.kindle .e3{left:3px;width:2px;height:2px;animation:kindle-rise 1050ms linear infinite .6s;}
+@keyframes kindle-rise{0%{bottom:8px;opacity:0;}15%{opacity:1;}100%{bottom:46px;opacity:0;transform:translateX(-6px);}}
 .class-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:0 14px;position:relative;}
 .class-grid>*{min-width:0;}
 .class-path-bg{background:var(--panel2);border:1px solid var(--border);border-radius:10px;}
@@ -401,9 +431,12 @@ const ITEMS = {
   
   
   
-  scroll_of_challenge_1:{name:"Scroll of Challenge I",type:"scroll",level_bonus:1,sell_value:18},
-  scroll_of_challenge_2:{name:"Scroll of Challenge II",type:"scroll",level_bonus:2,sell_value:42},
-  scroll_of_challenge_3:{name:"Scroll of Challenge III",type:"scroll",level_bonus:3,sell_value:90},
+  // v0.22.3 (#8): Scroll of Challenge is deprecated (no longer drops from chests; use
+  // mechanic left intact) -- temporary elevated sell price so players can offload any they
+  // still hold.
+  scroll_of_challenge_1:{name:"Scroll of Challenge I",type:"scroll",level_bonus:1,sell_value:100},
+  scroll_of_challenge_2:{name:"Scroll of Challenge II",type:"scroll",level_bonus:2,sell_value:100},
+  scroll_of_challenge_3:{name:"Scroll of Challenge III",type:"scroll",level_bonus:3,sell_value:100},
   
   
   
@@ -437,7 +470,9 @@ const ITEMS = {
   
   
   
-  dry_branch:{name:"Dry Log",type:"consumable",sell_value:5},
+  // v0.22.3 (#6b): Dry Log is fully deprecated (the bonfire no longer consumes them) --
+  // temporary elevated sell price so players can offload any they're still holding.
+  dry_branch:{name:"Dry Log",type:"consumable",sell_value:100},
   
   
   
@@ -547,14 +582,16 @@ const LOOT_TABLES = {
   
   
   
-  common:[{type:"nothing",weight:155},{type:"gear",weight:50},{type:"consumable",weight:66,item_id:"minor_health_potion"},{type:"herb",weight:1,herb_id:"sunpetal"},{type:"consumable",weight:26,item_id:"dry_branch"}],
-  uncommon:[{type:"nothing",weight:139},{type:"gear",weight:66},{type:"consumable",weight:50,item_id:"health_potion"},{type:"herb",weight:1,herb_id:"emberroot"},{type:"consumable",weight:26,item_id:"dry_branch"}],
-  rare:[{type:"nothing",weight:112},{type:"gear",weight:99},{type:"consumable",weight:50,item_id:"medium_health_potion"},{type:"herb",weight:1,herb_id:"frostvine"},{type:"consumable",weight:20,item_id:"dry_branch"}],
-  epic:[{type:"nothing",weight:83},{type:"gear",weight:149},{type:"consumable",weight:50,item_id:"greater_health_potion"},{type:"herb",weight:1,herb_id:"frostvine"},{type:"consumable",weight:17,item_id:"dry_branch"}],
+  // v0.22.3 (#6b): Dry Log entries removed from every loot table -- it's deprecated and no
+  // longer lootable anywhere.
+  common:[{type:"nothing",weight:155},{type:"gear",weight:50},{type:"consumable",weight:66,item_id:"minor_health_potion"},{type:"herb",weight:1,herb_id:"sunpetal"}],
+  uncommon:[{type:"nothing",weight:139},{type:"gear",weight:66},{type:"consumable",weight:50,item_id:"health_potion"},{type:"herb",weight:1,herb_id:"emberroot"}],
+  rare:[{type:"nothing",weight:112},{type:"gear",weight:99},{type:"consumable",weight:50,item_id:"medium_health_potion"},{type:"herb",weight:1,herb_id:"frostvine"}],
+  epic:[{type:"nothing",weight:83},{type:"gear",weight:149},{type:"consumable",weight:50,item_id:"greater_health_potion"},{type:"herb",weight:1,herb_id:"frostvine"}],
   // v0.22.1 (Part A2d): 5th band added for the new "Ancient" monster tier -- continues the
   // same trend as the 4 tables above it (less "nothing", more "gear", a pricier guaranteed
-  // consumable, a rarer herb, less Dry Log filler).
-  legendary:[{type:"nothing",weight:60},{type:"gear",weight:180},{type:"consumable",weight:50,item_id:"supreme_health_potion"},{type:"herb",weight:1,herb_id:"starveil"},{type:"consumable",weight:14,item_id:"dry_branch"}],
+  // consumable, a rarer herb).
+  legendary:[{type:"nothing",weight:60},{type:"gear",weight:180},{type:"consumable",weight:50,item_id:"supreme_health_potion"},{type:"herb",weight:1,herb_id:"starveil"}],
 };
 
 const PORTRAITS = {
@@ -807,7 +844,9 @@ function gearIcon(inst,size=30){
 
 
 const Balance = {
-  LEVEL_CAP:60, KILLS_PER_LEVEL_TARGET:20, MONSTER_BASE_XP:8.0, AREA_XP_GROWTH:0.062,
+  // v0.22.3 (#10): raised 60 -> 100 -- the season win condition moves from "reach tier 5"
+  // to "reach tier 5 AND level 100", so the level cap has to actually allow level 100.
+  LEVEL_CAP:100, KILLS_PER_LEVEL_TARGET:20, MONSTER_BASE_XP:8.0, AREA_XP_GROWTH:0.062,
   
   
   
@@ -1014,7 +1053,8 @@ const Balance = {
   
   
   MONSTER_FIRST_STRIKE_CHANCE:0.5,
-  CHEST_LOOT_MULTIPLIER:2.5, CHEST_SCROLL_CHANCE:0.12, CHEST_HITS_MIN:3, CHEST_HITS_MAX:5,
+  // v0.22.3 (#8): Scroll of Challenge deprecated -- zeroed out so chests never roll one.
+  CHEST_LOOT_MULTIPLIER:2.5, CHEST_SCROLL_CHANCE:0, CHEST_HITS_MIN:3, CHEST_HITS_MAX:5,
   
   
   
@@ -1070,7 +1110,8 @@ const Balance = {
   
   
   
-  MERCHANT_EXCLUDED_ITEMS:["stronghold_key","stronghold_key_t2","stronghold_key_t3","stronghold_key_t4","stronghold_key_t5","dry_branch","potion_of_might","potion_of_swiftness","potion_of_intellect","potion_of_wardveil","potion_of_renewal","antidote","elixir_of_clarity"],
+  // v0.22.3 (#8): scroll_of_challenge_1/2/3 added -- deprecated, no longer merchant buy stock.
+  MERCHANT_EXCLUDED_ITEMS:["stronghold_key","stronghold_key_t2","stronghold_key_t3","stronghold_key_t4","stronghold_key_t5","dry_branch","potion_of_might","potion_of_swiftness","potion_of_intellect","potion_of_wardveil","potion_of_renewal","antidote","elixir_of_clarity","scroll_of_challenge_1","scroll_of_challenge_2","scroll_of_challenge_3"],
   
   
   
@@ -1093,7 +1134,8 @@ const Balance = {
   STRONGHOLD_CHEST_GOLD_MIN:500, STRONGHOLD_CHEST_GOLD_MAX:1500,
   STRONGHOLD_CHEST_HERBS_MIN:3, STRONGHOLD_CHEST_HERBS_MAX:7,
   STRONGHOLD_CHEST_GEAR_COUNT_MIN:2, STRONGHOLD_CHEST_GEAR_COUNT_MAX:4,
-  STRONGHOLD_CHEST_SCROLL_CHANCE:0.25, STRONGHOLD_CHEST_EYESIGHT_CHANCE:0.10, STRONGHOLD_CHEST_BAG_CHANCE:0.30,
+  // v0.22.3 (#8): Scroll of Challenge deprecated -- zeroed out so stronghold chests never roll one.
+  STRONGHOLD_CHEST_SCROLL_CHANCE:0, STRONGHOLD_CHEST_EYESIGHT_CHANCE:0.10, STRONGHOLD_CHEST_BAG_CHANCE:0.30,
   STRONGHOLD_CHEST_POTIONS_MIN:3, STRONGHOLD_CHEST_POTIONS_MAX:9,
   STRONGHOLD_CHEST_ELIXIRS_MIN:1, STRONGHOLD_CHEST_ELIXIRS_MAX:3,
   
@@ -1103,8 +1145,11 @@ const Balance = {
   
   
   
-  CAMPFIRE_REGEN_PER_SECOND:1.0, CAMPFIRE_STAMINA_REGEN_PER_SECOND:5.0,
-  DRY_LOG_REGEN_PER_UNIT:7.0, BONFIRE_KINDLE_DURATION_MS:10*60*1000,
+  // v0.22.3 (#6): the old free town baseline tick (CAMPFIRE_*_PER_SECOND) and the log-fed
+  // temporary bonus (DRY_LOG_REGEN_PER_UNIT/BONFIRE_KINDLE_DURATION_MS) are both gone --
+  // healing in town is now the one-click Kindle the Bonfire action (see kindleBonfirePanel()/
+  // PS.kindleBonfireInstant()), which reuses the same 5s gradual-heal machinery as potions
+  // (Balance.POTION_HEAL_DURATION_MS/POTION_HEAL_TICK_MS below).
   
   
   
@@ -1118,12 +1163,11 @@ const Balance = {
   
   
   
-  TRAPDOOR_DEPTH_PENALTY_MAX_STACK:3,
   CHARACTER_NAME_MAX_LEN:20, ELEMENT_ITEM_CHANCE:0.3,
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.22.2-web",
+  GAME_VERSION:"v0.22.3-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   
@@ -1256,12 +1300,26 @@ const Balance = {
   
   
   AFFIX_POOL:["damage","hp","crit","armor","regen","stamina_regen","gold_find","xp_find","stamina_max","strength","dexterity","vitality","intelligence","poison_resist","magic_find","block_chance","flee_chance","crit_multiplier","attack_speed"],
-  
-  
-  
-  
-  
-  
+  // v0.22.3 (#16): per-slot legal-affix map -- generation/reforge must only ever pick a stat
+  // from the list for that item's slot (fixes nonsense like armor-on-weapon). Eyesight is
+  // handled separately (a fixed rare bonus, not part of this pool) and is gated to head/amulet
+  // only at its roll site. Must stay byte-identical to server.js's ITEM_SLOT_AFFIXES.
+  SLOT_AFFIXES:{
+    weapon:["damage","crit","crit_multiplier","attack_speed","strength","dexterity","intelligence"],
+    head:["armor","hp","xp_find","magic_find","vitality","intelligence"],
+    shoulders:["armor","hp","block_chance","strength"],
+    armor:["armor","hp","block_chance","poison_resist","regen","strength","vitality"],
+    pants:["armor","hp","stamina_regen","stamina_max","flee_chance","vitality"],
+    gloves:["crit","crit_multiplier","attack_speed","armor","hp","block_chance","gold_find","strength","dexterity"],
+    boots:["armor","hp","poison_resist","stamina_regen","stamina_max","flee_chance","dexterity"],
+    belt:["armor","hp","block_chance","poison_resist","regen","stamina_regen","gold_find","strength","dexterity","vitality"],
+    ring:["crit","crit_multiplier","attack_speed","hp","regen","gold_find","xp_find","magic_find","strength","dexterity","vitality","intelligence"],
+    amulet:["crit","crit_multiplier","hp","poison_resist","regen","gold_find","xp_find","magic_find","vitality","intelligence"],
+  },
+
+
+
+
   
   
   
@@ -1924,7 +1982,10 @@ const IF = {
     
     const rarity=forcedRarityName ? (Balance.RARITY_TABLE.find(r=>r.name===forcedRarityName)||Balance.rollRarity()) : Balance.rollRarity(PS.getMagicFind());
     const slotCount=rarity.slots;
-    let pool=[...Balance.AFFIX_POOL];
+    // v0.22.3 (#16): filter to only the affixes legal for this slot BEFORE rolling -- this is
+    // what stops nonsense like armor rolling onto a weapon. Falls back to the full pool if a
+    // slot somehow has no legal-affix entry (defensive; every GENERATION_SLOTS entry has one).
+    let pool=[...(Balance.SLOT_AFFIXES[chosenSlot]||Balance.AFFIX_POOL)];
     shuffle(pool);
     
     
@@ -1952,7 +2013,9 @@ const IF = {
       if(chosenSlot==="weapon" && stat==="damage") value=round2(value*Balance.WEAPON_DAMAGE_AFFIX_MULT);
       affixes.push({stat, value});
     }
-    if(Math.random()<Balance.EYESIGHT_AFFIX_CHANCE){
+    // v0.22.3 (#16): Eyesight ("of Vision") only ever rolls on head/amulet -- it's a vision
+    // buff, nonsensical on a weapon or a belt.
+    if((chosenSlot==="head"||chosenSlot==="amulet") && Math.random()<Balance.EYESIGHT_AFFIX_CHANCE){
       affixes.push({stat:"eyesight", value:2});
     }
     return {instance_id:`${Date.now()}_${randi(999999)}`, slot:chosenSlot, base_name:baseName, tier, rarity:rarity.name, affixes, element};
@@ -2383,6 +2446,33 @@ const Net = {
     if(!res.ok) throw new Error(json.error||"Could not load the account list.");
     return json.entries||[];
   },
+  async fetchAdminResetLadder(adminToken){
+    const res=await fetch(this.apiBase()+"/api/admin/reset-ladder",{headers:this.authHeaders({"X-Admin-Token":adminToken})});
+    const json=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(json.error||"Could not load the character list.");
+    return json;
+  },
+  async adminResetLadder(accountId,slot,adminToken){
+    const res=await fetch(this.apiBase()+`/api/admin/reset-ladder/${accountId}/${slot}`,{
+      method:"POST",
+      headers:this.authHeaders({"X-Admin-Token":adminToken}),
+    });
+    const json=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(json.error||"Could not reset that character.");
+    return json;
+  },
+  // v0.22.3 (#17): pushes a one-off admin system message to every connected player's global
+  // chat -- calls the server's broadcastSystemMessage() via a dedicated admin-only route.
+  async adminBroadcast(message,adminToken){
+    const res=await fetch(this.apiBase()+"/api/admin/broadcast",{
+      method:"POST",
+      headers:this.authHeaders({"X-Admin-Token":adminToken,"Content-Type":"application/json"}),
+      body:JSON.stringify({message}),
+    });
+    const json=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(json.error||"Could not send that broadcast.");
+    return json;
+  },
   
   
   
@@ -2517,6 +2607,28 @@ const Net = {
   async announceCreated(payload){
     if(!this.online) return;
     try{ await fetch(this.apiBase()+"/api/announce/created",{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify(payload)}); }catch(e){}
+  },
+  // v0.22.3 (#1): live "is this name taken" feedback while typing on the create-hero screen.
+  // Fails OPEN (reports available) on a network hiccup -- this is only a UX nicety; the real,
+  // unbypassable enforcement is the 409 the PUT itself returns (see createCharacterOnServer()
+  // below), which this can never substitute for.
+  async checkNameAvailable(name){
+    if(!name) return false;
+    try{
+      const res=await fetch(this.apiBase()+"/api/character-name-available?name="+encodeURIComponent(name),{headers:this.authHeaders()});
+      const json=await res.json().catch(()=>({available:true}));
+      return json.available!==false;
+    }catch(e){ return true; }
+  },
+  // v0.22.3 (#1): character CREATION sends its PUT directly (bypassing the normal fire-and-
+  // forget saveCharacter() queue -- see PS.buildSaveData()) so the caller can await the real
+  // response and react to a 409 (duplicate name) before committing the player to the new slot.
+  async createCharacterOnServer(slot,data){
+    try{
+      const res=await fetch(this.apiBase()+"/api/characters/"+slot,{method:"PUT",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify(data)});
+      let json=null; try{ json=await res.json(); }catch(e){}
+      return {ok:res.ok,status:res.status,json};
+    }catch(e){ return {ok:false,status:0,json:null}; }
   },
   
   
@@ -3122,8 +3234,12 @@ const PS = {
     this.trial_attempts_count=(this.trial_attempts_count||0)+1;
     if(success){
       this.highest_tier_reached=Math.max(this.highest_tier_reached,currentTier+1);
-      if(nextId!=="") this.class_id=nextId; else this.season_won=true;
-      
+      // v0.22.3 (#10): reaching tier 5 no longer ends the season by itself -- the win
+      // condition is now "tier 5 AND Level 100" (checked server-side in combatAddXp()).
+      // This admin-only shortcut (the real trial flow goes through the server endpoint,
+      // which never touched season_won) simply promotes the class and stops there.
+      if(nextId!=="") this.class_id=nextId;
+
       
       
       
@@ -3188,19 +3304,17 @@ const PS = {
   
   
   
-  kindleBonfire(count){
-    const have=this.consumables["dry_branch"]||0;
-    if(!count || count<=0 || count>have) return false;
-    const rem=have-count;
-    if(rem>0) this.consumables["dry_branch"]=rem; else delete this.consumables["dry_branch"];
-    const currentBonus=this.getActiveBonfireBonus();
-    this.bonfire_bonus_regen=currentBonus+count*Balance.DRY_LOG_REGEN_PER_UNIT;
-    this.bonfire_bonus_expires_at=Date.now()+Balance.BONFIRE_KINDLE_DURATION_MS;
-    return true;
-  },
-  getActiveBonfireBonus(){
-    if(this.bonfire_bonus_expires_at && Date.now()<this.bonfire_bonus_expires_at) return this.bonfire_bonus_regen||0;
-    return 0;
+  // v0.22.3 (#6): one-click bonfire -- fully restores HP and Stamina over 5 seconds by
+  // reusing the same gradual-heal machinery as potions (active_heals/active_stamina_heals +
+  // Balance.POTION_HEAL_DURATION_MS/POTION_HEAL_TICK_MS). No Dry Logs involved anymore.
+  kindleBonfireInstant(){
+    const totalTicks=Balance.POTION_HEAL_DURATION_MS/Balance.POTION_HEAL_TICK_MS;
+    if(this.current_hp<this.getMaxHp()){
+      this._queueGradualHeal(this.active_heals,this.getMaxHp()-this.current_hp,this.getMaxHp()-this.current_hp,totalTicks);
+    }
+    if(this.current_stamina<this.getMaxStamina()){
+      this._queueGradualHeal(this.active_stamina_heals,this.getMaxStamina()-this.current_stamina,this.getMaxStamina()-this.current_stamina,totalTicks);
+    }
   },
   
   
@@ -3457,6 +3571,11 @@ const PS = {
     if(used) this._removeConsumableOne(itemId);
     return used;
   },
+  // v0.22.3 (#5): total clairvoyance reveals left across the WHOLE supply -- the currently-
+  // open elixir's remaining charges plus 10 per still-unopened one -- so the maze label can
+  // count down smoothly (e.g. 30->29->...) instead of resetting to 10 each time a fresh
+  // elixir is opened.
+  getTotalClarityChargesRemaining(){ return (this.clarity_charges_left||0) + (this.consumables["elixir_of_clarity"]||0)*10; },
   canUseConsumable(itemId){
     const item=DL.getItem(itemId);
     if(item.reveals_maze){
@@ -3578,33 +3697,34 @@ const PS = {
     for(const bagId of this.equipped_bags) cap+=DL.getItem(bagId).capacity||0;
     return cap;
   },
-  getInventoryUsed(){return this.gear_instances.length;},
+  // v0.22.3 (#7): bags are regular backpack items now -- an unequipped bag sitting in
+  // PS.bags{itemId:count} counts against backpack capacity just like gear_instances does.
+  getInventoryUsed(){return this.gear_instances.length + Object.values(this.bags||{}).reduce((a,b)=>a+b,0);},
   hasInventorySpace(){return this.getInventoryUsed()<this.getInventoryCapacity();},
+  // Adds a newly-acquired bag (loot/buy/craft) into the backpack, NOT auto-equipped, subject
+  // to inventory space like any other item.
+  addBagToBackpack(itemId){
+    if(!this.hasInventorySpace()) return {success:false,reason:"Your backpack is full."};
+    this.bags[itemId]=(this.bags[itemId]||0)+1;
+    return {success:true};
+  },
   equipBag(itemId){
-    if(this.equipped_bags.length>=Balance.MAX_BAG_SLOTS) return {success:false,reason:`Your bag rack is full (${this.equipped_bags.length}/${Balance.MAX_BAG_SLOTS}), unequip a bag first.`};
+    if((this.bags[itemId]||0)<=0) return {success:false,reason:"You don't have that bag in your backpack."};
+    if(this.equipped_bags.length>=Balance.MAX_BAG_SLOTS) return {success:false,reason:`Your bag slots are full (${this.equipped_bags.length}/${Balance.MAX_BAG_SLOTS}), unequip a bag first.`};
+    this.bags[itemId]--; if(this.bags[itemId]<=0) delete this.bags[itemId];
     this.equipped_bags.push(itemId); return {success:true};
   },
-  
-  
-  
-  
   wouldOverflowWithoutBag(itemId){
     if(!this.equipped_bags.includes(itemId)) return false;
     const capacityWithout=this.getInventoryCapacity()-(DL.getItem(itemId).capacity||0);
     return this.getInventoryUsed()>capacityWithout;
   },
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
+  // Unequipping a bag returns it to the backpack -- blocked if there isn't room either for
+  // the existing gear (wouldOverflowWithoutBag, capacity shrinks) or for the bag itself
+  // (hasInventorySpace, it now needs a backpack slot).
   unequipBag(itemId){
     if(this.wouldOverflowWithoutBag(itemId)) return false;
+    if(!this.hasInventorySpace()) return false;
     const idx=this.equipped_bags.indexOf(itemId); if(idx!==-1) this.equipped_bags.splice(idx,1); else return false;
     this.bags[itemId]=(this.bags[itemId]||0)+1;
     return true;
@@ -3613,14 +3733,14 @@ const PS = {
     const item=DL.getItem(itemId); if(!item.name||item.type!=="bag") return {success:false,reason:"Unknown bag."};
     const price=Balance.bagBuyPrice(item.capacity||0);
     if(this.gold<price) return {success:false,reason:"Not enough gold."};
-    const result=this.equipBag(itemId); if(!result.success) return result;
+    const result=this.addBagToBackpack(itemId); if(!result.success) return result;
     this.gold-=price; return {success:true};
   },
   craftBag(itemId){
     const item=DL.getItem(itemId); if(!item.name||item.type!=="bag") return {success:false,reason:"Unknown bag."};
     const cost=Balance.bagCraftCost(item.capacity||0);
     if(this.materials<cost) return {success:false,reason:"Not enough materials."};
-    const result=this.equipBag(itemId); if(!result.success) return result;
+    const result=this.addBagToBackpack(itemId); if(!result.success) return result;
     this.materials-=cost; return {success:true};
   },
   addGear(inst){ if(!this.hasInventorySpace()) return false; this.gear_instances.push(inst); return true; },
@@ -3800,7 +3920,7 @@ const PS = {
     this.herbalism_points=0;
     
     
-    this.trial_progress={}; this.bonfire_bonus_regen=0; this.bonfire_bonus_expires_at=0;
+    this.trial_progress={};
     
     
     this.temp_buffs={};
@@ -3836,11 +3956,18 @@ const PS = {
     
     
     
-    GF.trapdoorStreak=0;
     GF.ventureLockDepth=null;
   },
   saveGame(){
     if(this.current_slot<0) return;
+    Net.saveCharacter(this.current_slot, this.buildSaveData());
+  },
+  // v0.22.3 (#1): extracted out of saveGame() so character CREATION can build the exact same
+  // payload and send it with a directly-awaited PUT (via Net.createCharacterOnServer()) instead
+  // of the normal fire-and-forget autosave queue -- creation needs to see a 409 (duplicate
+  // name) come back before committing the player to the new slot, which the queued/best-effort
+  // saveCharacter() path was never designed to surface.
+  buildSaveData(){
     const data={class_id:this.class_id,class_display_name:this.getClassData().display_name||this.class_id,
       character_name:this.character_name,hardcore:this.hardcore,level:this.level,
       xp:this.xp,xp_to_next:this.xp_to_next,gold:this.gold,materials:this.materials,herbs:this.herbs,
@@ -3895,8 +4022,7 @@ const PS = {
       
       
       trial_progress:this.trial_progress||{},
-      bonfire_bonus_regen:this.bonfire_bonus_regen||0, bonfire_bonus_expires_at:this.bonfire_bonus_expires_at||0,
-      
+
       
       temp_buffs:this.temp_buffs||{},
       
@@ -3912,9 +4038,7 @@ const PS = {
       
       
       _save_seq:this._nextSaveSeq()};
-    
-    
-    Net.saveCharacter(this.current_slot, data);
+    return data;
   },
   _applyLoadedData(slot,parsed){
     this.current_slot=slot; this.class_id=parsed.class_id||""; this.character_name=parsed.character_name||"Hero";
@@ -3972,9 +4096,7 @@ const PS = {
     
     
     this.trial_progress=parsed.trial_progress||{};
-    this.bonfire_bonus_regen=parsed.bonfire_bonus_regen||0;
-    this.bonfire_bonus_expires_at=parsed.bonfire_bonus_expires_at||0;
-    
+
     this.temp_buffs=parsed.temp_buffs||{};
     
     this.poison_expires_at=parsed.poison_expires_at||0;
@@ -4005,7 +4127,6 @@ const PS = {
     
     
     
-    GF.trapdoorStreak=0;
     GF.ventureLockDepth=null;
     return true;
   },
@@ -4071,8 +4192,11 @@ const GF = {
   
   
   
-  ventureLockDepth:null, trapdoorStreak:0,
+  ventureLockDepth:null,
   admin_token:"", admin_leaderboard_cache:null, admin_leaderboard_error:"",
+  admin_reset_ladder_cache:null, admin_reset_ladder_error:"", admin_reset_ladder_season:null,
+  // v0.22.3 (#17): admin global-chat broadcast tool state.
+  admin_broadcast_busy:false, admin_broadcast_error:"",
   
   
   admin_accounts_cache:null, admin_accounts_error:"",
@@ -4084,7 +4208,11 @@ const GF = {
   
   
   admin_legacy_gear_bulk_busy:false,
-  attributesCollapsed:false, leaderboardPage:null, bonfireBranchesToKindle:0,
+  attributesCollapsed:false, leaderboardPage:null,
+  // v0.22.3 (#6): {startedAt,timerStarted} while the one-click bonfire heal/animation is
+  // playing out (5s warm + brief hold + fade); null when idle. See kindleBonfirePanel()/
+  // refreshBonfireBlazeInPlace().
+  bonfireKindle:null, bonfireInterval:null,
   
   
   
@@ -4651,13 +4779,28 @@ function animateXpBarGrowth(oldFraction){
 
 
 
-function refreshBonfireCountdownInPlace(){
-  const el=document.getElementById("bonfire-countdown-text");
-  if(!el || !el.parentNode) return false;
-  const activeBonus=PS.getActiveBonfireBonus();
-  if(activeBonus<=0) return false;
-  const msLeft=Math.max(0,(PS.bonfire_bonus_expires_at||0)-Date.now());
-  el.textContent=`${formatMsAsMinSec(msLeft)} remaining (+${Math.round(activeBonus)} HP/sec and +${Math.round(activeBonus)} Stamina/sec regen).`;
+// v0.22.3 (#6): drives the bonfire's fire-fill animation without a full render() on every
+// tick (same in-place-DOM-patch idiom as refreshStatHeaderInPlace()/refreshGambleBarInPlace()).
+// The blaze width is computed directly from elapsed wall-clock time each call rather than a
+// CSS @keyframes animation, so it can never "restart" even if something else forces a render
+// mid-warm -- a fresh kindleBonfirePanel() render recomputes the same elapsed-based state.
+function refreshBonfireBlazeInPlace(){
+  const kindle=GF.bonfireKindle;
+  if(!kindle) return false;
+  const btn=document.getElementById("kindle-bonfire-btn");
+  const blaze=document.getElementById("kindle-bonfire-blaze");
+  const label=document.getElementById("kindle-bonfire-label");
+  if(!btn || !btn.parentNode || !blaze || !label) return false;
+  const WARM_MS=Balance.POTION_HEAL_DURATION_MS, HOLD_MS=900, FADE_MS=750;
+  const elapsed=Date.now()-kindle.startedAt;
+  const warming=elapsed<WARM_MS;
+  const holding=!warming && elapsed<WARM_MS+HOLD_MS;
+  const fading=!warming && !holding;
+  const pct=warming?clampf(elapsed/WARM_MS*100,0,100):100;
+  blaze.style.width=pct+"%";
+  btn.classList.toggle("lit",!fading);
+  btn.classList.toggle("fading",fading);
+  label.textContent=warming?"Warming...":(holding?"Full HP & Stamina!":"Kindle the Bonfire");
   return true;
 }
 
@@ -4671,6 +4814,25 @@ function refreshGambleBarInPlace(){
   if(!fill || !fill.parentNode || !GF.gambleReveal) return false;
   const elapsed=Date.now()-GF.gambleReveal.startedAt;
   fill.style.width=clampf(elapsed/Balance.GAMBLE_REVEAL_MS*100,0,100)+"%";
+  return true;
+}
+
+// v0.22.3 (#15): same full-render()-per-tick bug already fixed for the stat header/gamble
+// bar -- the Alchemist brew timer and Blacksmith bag-craft timer were both calling render()
+// every 100ms. These patch the progress fill in place instead, only falling back to a full
+// render() if the bar isn't currently mounted (e.g. player navigated away mid-brew/craft).
+function refreshBrewProgressInPlace(){
+  const fill=document.getElementById("brew-progress-fill");
+  if(!fill || !fill.parentNode || !GF.brewing) return false;
+  const elapsed=Date.now()-GF.brewing.startedAt;
+  fill.style.width=clampf(elapsed/GF.brewing.durationMs*100,0,100)+"%";
+  return true;
+}
+function refreshCraftProgressInPlace(){
+  const fill=document.getElementById("craft-progress-fill");
+  if(!fill || !fill.parentNode || !GF.crafting) return false;
+  const elapsed=Date.now()-GF.crafting.startedAt;
+  fill.style.width=clampf(elapsed/BREW_CRAFT_MS*100,0,100)+"%";
   return true;
 }
 
@@ -4859,13 +5021,13 @@ function startBrew(recipe,qty=1){
       const result=DL.getItem(rec.result_item);
       if(PS.brewRecipe(rec,q)){ autosave(); setToast(q>1?`Brewed ${q}x ${result.name}!`:`Brewed ${result.name}!`); }
       render();
-    } else render();
+    } else { if(!refreshBrewProgressInPlace()) render(); }
   },100);
 }
 function startCraftBag(itemId){
   const item=DL.getItem(itemId);
   const cost=Balance.bagCraftCost(item.capacity||0);
-  if(GF.crafting || PS.materials<cost || PS.equipped_bags.length>=Balance.MAX_BAG_SLOTS) return;
+  if(GF.crafting || PS.materials<cost || !PS.hasInventorySpace()) return;
   GF.crafting={itemId, startedAt:Date.now()};
   render();
   GF.craftInterval=setInterval(()=>{
@@ -4876,7 +5038,7 @@ function startCraftBag(itemId){
       const r=PS.craftBag(id);
       if(r.success){ autosave(); setToast(`Crafted ${DL.getItem(id).name}!`); } else setToast(r.reason);
       render();
-    } else render();
+    } else { if(!refreshCraftProgressInPlace()) render(); }
   },100);
 }
 
@@ -5366,7 +5528,7 @@ function screenClassPicker(){
     grid.appendChild(h("div",{class:"tile col gap"},[
       h("div",{class:"row",style:{alignItems:"center",gap:"10px"}},[iconBadge(PORTRAITS[classId],56), h("div",{style:{flex:"1",minWidth:"0"}},[h("div",{style:{fontWeight:"bold"}},[c.display_name]), h("div",{class:"muted"},[CLASS_CREATION_SUBTEXT[classId]||c.role])])]),
       h("div",{class:"muted",style:{flex:"1"}},[c.description]),
-      h("button",{class:"wide",style:{marginTop:"auto"},onClick:()=>{
+      h("button",{class:"wide",style:{marginTop:"auto"},onClick:async ()=>{
         const name=nameInput.value.trim();
         if(!name){
           nameError.textContent="Please enter a character name before you begin.";
@@ -5374,8 +5536,36 @@ function screenClassPicker(){
           nameInput.focus();
           return;
         }
+        // v0.22.3 (#1): character names must be globally unique (case-insensitive). A quick
+        // client-side availability check catches the common case with a friendly inline
+        // error; the awaited create PUT below is the real (server-enforced, unbypassable)
+        // gate -- see Net.checkNameAvailable()/createCharacterOnServer().
+        nameError.textContent="Checking name...";
+        nameInput.style.borderColor="";
+        const available=await Net.checkNameAvailable(name);
+        if(!available){
+          nameError.textContent="That name is already taken -- choose another.";
+          nameInput.style.borderColor="#8a4a3a";
+          nameInput.focus();
+          render();
+          return;
+        }
         PS.startNewCharacter(classId, name, GF.selected_slot, hardcoreBox.checked);
-        PS.saveGame();
+        const saveData=PS.buildSaveData();
+        const result=await Net.createCharacterOnServer(GF.selected_slot, saveData);
+        if(!result.ok){
+          // Keep the slot uncreated rather than leaving a half-created character behind --
+          // reset current_slot so nothing else in the app treats this as a live character.
+          PS.current_slot=-1;
+          nameError.textContent=(result.status===409 && result.json && result.json.error)
+            ? result.json.error
+            : "That name is already taken -- choose another.";
+          nameInput.style.borderColor="#8a4a3a";
+          nameInput.focus();
+          render();
+          return;
+        }
+        if(Net.cache) Net.cache[GF.selected_slot]={slot:GF.selected_slot,data:saveData,updated_at:new Date().toISOString(),empty:false};
         Net.announceCreated({character_name:name, class_name:c.display_name});
         GF.charCreationDraft={name:"",hardcore:false};
         GF.goto("town");
@@ -5959,37 +6149,25 @@ function screenInspectPlayer(){
   
   
   root.appendChild(h("h3",{},["Bridge Progress"]));
-  const bridgeSteps=s.last_bridge_steps||0;
+  // v0.22.3 (#12): the same read-only bridgeTrialView() component town (#11) and the
+  // interactive trial itself use -- real red/green plank-by-plank progress instead of a
+  // plain step bar, sourced from the server's trial_progress_current whitelist field.
+  const bridgeProgress=s.trial_progress_current||{discoveredSides:[],stepFailedPlanks:{}};
+  const failStreak=s.bridge_fail_streak||0;
+  const stepChance=Balance.bridgeStepPassChance(s.highest_tier_reached||1);
   const bridgePanel=h("div",{class:"panel",style:{marginBottom:"12px"}},[
     h("div",{class:"row",style:{justifyContent:"space-between",marginBottom:"6px"}},[
       h("div",{},[`Tier ${tierRomanNumeral(s.highest_tier_reached)}`]),
-      h("div",{class:"muted"},[`Step ${bridgeSteps}/${Balance.BRIDGE_ROWS}`]),
+      h("div",{class:"muted"},[`Step ${bridgeProgress.discoveredSides.length}/${Balance.BRIDGE_ROWS}`]),
     ]),
-    bar(bridgeSteps/Balance.BRIDGE_ROWS*100,"bar-gold"),
+    bridgeTrialView(bridgeProgress, s.highest_tier_reached||1, {interactive:false}),
+    h("div",{class:"muted",style:{marginTop:"8px",fontSize:".9em"}},[
+      `Failed attempts at this tier: ${failStreak}`,
+    ]),
+    h("div",{class:"muted",style:{fontSize:".9em"}},[
+      `Each step here holds ${Math.round(stepChance*100)}% of the time -- how far luck carried them.`,
+    ]),
   ]);
-  
-  
-  
-  
-  
-  
-  
-  
-  const stepPips=h("div",{class:"row gap",style:{marginTop:"8px",flexWrap:"wrap"}},
-    Array.from({length:Balance.BRIDGE_ROWS},(_,i)=>h("div",{title:`Step ${i+1}`,style:{
-      width:"20px",height:"20px",borderRadius:"3px",
-      background:i<bridgeSteps?"#c9a13a":"#2a2a2a",
-      border:"1px solid "+(i<bridgeSteps?"#e0c94a":"#444"),
-    }})));
-  const failStreak=s.bridge_fail_streak||0;
-  const stepChance=Balance.bridgeStepPassChance(s.highest_tier_reached||1);
-  bridgePanel.appendChild(stepPips);
-  bridgePanel.appendChild(h("div",{class:"muted",style:{marginTop:"8px",fontSize:".9em"}},[
-    `Failed attempts at this tier: ${failStreak}`,
-  ]));
-  bridgePanel.appendChild(h("div",{class:"muted",style:{fontSize:".9em"}},[
-    `Each step here holds ${Math.round(stepChance*100)}% of the time -- how far luck carried them.`,
-  ]));
   root.appendChild(bridgePanel);
 
   
@@ -6067,6 +6245,24 @@ function serviceButton(label,icon,onClick){
   return h("button",{class:"wide",onClick},[icon?icon+" ":"",label]);
 }
 
+// v0.22.3 HOTFIX (Gwen): town service entries (Blacksmith/Alchemist/Vault/Merchant/Auction
+// House/Goblin/Broken Bridge Trial) now use the same large clickable "venture-card" container
+// style already used for Venture into the Woods and Kindle the Bonfire, instead of the old
+// plain "wide" buttons -- a consistent, roomier town layout. `disabled` renders it inert with
+// a dimmed, non-clickable look and an explanatory subtext (mirrors the old locked-button text).
+function serviceCard(label,icon,subtext,onClick,disabled){
+  return h("div",{class:"row venture-row"},[
+    h("div",{
+      class:"panel venture-card venture-fill"+(disabled?"":" venture-clickable"),
+      style:disabled?{opacity:"0.6",cursor:"default"}:{},
+      onClick:disabled?null:onClick,
+    },[
+      h("div",{class:"venture-title"},[icon?icon+" ":"",label]),
+      subtext?h("div",{class:"muted",style:{fontSize:".8em",marginTop:"2px"}},[subtext]):null,
+    ]),
+  ]);
+}
+
 function getTownName(){
   const names=Balance.TOWN_NAMES;
   const idx=Math.min(names.length-1,(PS.highest_tier_reached||1)-1);
@@ -6109,36 +6305,64 @@ function getVentureDepth(){
 
 
 
+// v0.22.3 (#6): one-click 5s full HP+Stamina heal with a left-to-right fire-fill on the
+// button itself (wandrian_bonfire_kindle_mock_v3.html), transient -- reverts to the calm
+// resting look once idle/complete. Dry Logs are fully deprecated (see item 6b).
 function kindleBonfirePanel(){
-  const have=PS.consumables["dry_branch"]||0;
-  const activeBonus=PS.getActiveBonfireBonus();
-  const isKindled=activeBonus>0;
-  const msLeft=isKindled?Math.max(0,(PS.bonfire_bonus_expires_at||0)-Date.now()):0;
+  const WARM_MS=Balance.POTION_HEAL_DURATION_MS, HOLD_MS=900, FADE_MS=750;
+  const maxed=PS.current_hp>=PS.getMaxHp() && PS.current_stamina>=PS.getMaxStamina();
+  let warming=false, holding=false, fading=false, pct=0;
 
-  const subtext = isKindled
-    ? `${formatMsAsMinSec(msLeft)} remaining (+${Math.round(activeBonus)} HP/sec and +${Math.round(activeBonus)} Stamina/sec regen).`
-    : "The bonfire grants everyone in town +1 regeneration rate. But, if you throw Dry Logs into the fire, it surges temporarily, granting +7 increased regeneration rate per second, for 10 minutes.";
+  if(GF.bonfireKindle){
+    const elapsed=Date.now()-GF.bonfireKindle.startedAt;
+    if(elapsed>=WARM_MS+HOLD_MS+FADE_MS){
+      GF.bonfireKindle=null;
+    } else {
+      warming=elapsed<WARM_MS;
+      holding=!warming && elapsed<WARM_MS+HOLD_MS;
+      fading=!warming && !holding;
+      pct=warming?clampf(elapsed/WARM_MS*100,0,100):100;
+      if(!GF.bonfireKindle.timerStarted){
+        GF.bonfireKindle.timerStarted=true;
+        GF.bonfireInterval=setInterval(()=>{
+          if(!GF.bonfireKindle){ clearInterval(GF.bonfireInterval); GF.bonfireInterval=null; return; }
+          const e=Date.now()-GF.bonfireKindle.startedAt;
+          if(e>=WARM_MS+HOLD_MS+FADE_MS){
+            clearInterval(GF.bonfireInterval); GF.bonfireInterval=null;
+            GF.bonfireKindle=null;
+            render();
+          } else if(!refreshBonfireBlazeInPlace()){
+            render();
+          }
+        },100);
+      }
+    }
+  }
+
+  const isActive=warming||holding||fading;
+  const label=warming?"Warming...":(holding?"Full HP & Stamina!":"Kindle the Bonfire");
+  const subtext=isActive
+    ? (warming?"Warming yourself by the flames...":(holding?"Fully healed and rested.":""))
+    : (maxed?"You are already fully rested.":"Warm yourself by the bonfire for a full 5-second heal of HP and Stamina.");
 
   return h("div",{class:"row venture-row"},[
-    h("div",{class:"panel venture-card venture-fill"+(isKindled?"":" venture-clickable"),style:isKindled?{opacity:"0.75",cursor:"default"}:{},onClick:isKindled?null:()=>{
-      setToast("Use the log button to feed the fire.");
-      render();
-    }},[
-      h("div",{class:"venture-title"},[inlineIcon(BONFIRE_SVG,18)," ", isKindled?"Kindled Bonfire":"Kindle the Bonfire"]),
-      
-      
-      
-      h("div",{id:isKindled?"bonfire-countdown-text":undefined,class:"muted",style:{fontSize:".8em",marginTop:"2px"}},[subtext]),
-    ]),
-    h("div",{class:"panel venture-chevrons",style:{alignSelf:"stretch",height:"100%",boxSizing:"border-box"}},[
-      h("div",{class:"muted",style:{fontSize:".72em"}},[`Logs (${have})`]),
-      inlineIcon(DRY_LOG_SVG,16),
-      h("button",{disabled:have<=0,onClick:(e)=>{
-        e.stopPropagation();
-        const ok=PS.kindleBonfire(1);
-        if(ok) autosave();
+    h("div",{id:"kindle-bonfire-btn",
+      class:"panel venture-card venture-fill kindle"+(isActive&&!fading?" lit":"")+(fading?" fading":"")+((isActive||maxed)?"":" venture-clickable"),
+      style:(isActive||maxed)?{cursor:"default"}:{},
+      onClick:(isActive||maxed)?null:()=>{
+        PS.kindleBonfireInstant();
+        GF.bonfireKindle={startedAt:Date.now(),timerStarted:false};
+        autosave();
         render();
-      }},["+1"]),
+      }},[
+      h("span",{id:"kindle-bonfire-blaze",class:"blaze",style:{width:pct+"%"}},[
+        h("span",{class:"edge"},[
+          h("span",{class:"flame core"}),h("span",{class:"flame f1"}),h("span",{class:"flame f2"}),h("span",{class:"flame f3"}),
+          h("span",{class:"ember e1"}),h("span",{class:"ember e2"}),h("span",{class:"ember e3"}),
+        ]),
+      ]),
+      h("div",{class:"venture-title"},[inlineIcon(BONFIRE_SVG,18)," ",h("span",{id:"kindle-bonfire-label"},[label])]),
+      h("div",{class:"muted",style:{fontSize:".8em",marginTop:"2px"}},[subtext]),
     ]),
   ]);
 }
@@ -6185,22 +6409,37 @@ function screenTown(){
     ]),
 
     h("div",{class:"col gap"},[
-      serviceButton("Blacksmith","🔨",()=>GF.goto("blacksmith")),
-      serviceButton("Alchemist","⚗",()=>GF.goto("alchemist")),
-      serviceButton("Storage Vault","🗝",()=>{ Net.vaultCache=null; GF.goto("vault"); }),
+      serviceCard("Blacksmith","🔨","Reforge, reroll, refine, or salvage your gear.",()=>GF.goto("blacksmith")),
+      serviceCard("Alchemist","⚗","Brew potions and elixirs from gathered herbs.",()=>GF.goto("alchemist")),
+      serviceCard("Storage Vault","🗝","Stash gear safely away from your backpack.",()=>{ Net.vaultCache=null; GF.goto("vault"); }),
     ]),
-    
+
     h("div",{class:"col gap"},[
-      serviceButton("Merchant","💰",()=>GF.goto("merchant")),
-      serviceButton("Auction House","📜",()=>{ Net.auctionCache=null; GF.goto("auctionHouse"); }),
-      
-      
-      
-      
-      PS.gamblingUnlocked()?serviceButton("Goblin","🎲",()=>GF.goto("gamblingGoblin")):h("button",{disabled:true},[`Goblin (Reach ${Balance.TOWN_NAMES[1]})`]),
-      PS.canAttemptTrial()?serviceButton("Broken Bridge Trial","⭐",()=>GF.goto("masterTrial")):h("button",{disabled:true},[`Broken Bridge Trial (reach Lv ${Balance.trialLevelRequirement(PS.getClassData().tier||1)})`]),
+      serviceCard("Merchant","💰","Buy consumables, gear, and containers, or sell your own.",()=>GF.goto("merchant")),
+      serviceCard("Auction House","📜","Trade gear, consumables, herbs and materials with other travelers.",()=>{ Net.auctionCache=null; GF.goto("auctionHouse"); }),
+      PS.gamblingUnlocked()
+        ?serviceCard("Gambling Goblin","🎲","Pay for a chance at a random item.",()=>GF.goto("gamblingGoblin"))
+        :serviceCard("Gambling Goblin","🎲",`Reach ${Balance.TOWN_NAMES[1]} to unlock.`,null,true),
+      PS.canAttemptTrial()
+        ?serviceCard("Broken Bridge Trial","⭐","Cross the bridge to earn your next class tier.",()=>GF.goto("masterTrial"))
+        :serviceCard("Broken Bridge Trial","⭐",`Reach Lv ${Balance.trialLevelRequirement(PS.getClassData().tier||1)} to attempt.`,null,true),
     ]),
   ]));
+
+  // v0.22.3 (#11): the real bridge-trial plank grid, read-only, always visible in town
+  // (even when under-level for it) so the climb toward the next class tier stays legible
+  // without having to step into the Broken Bridge Trial screen. Reuses bridgeTrialView(),
+  // the exact same component the interactive trial and the Inspect Player screen (#12) use.
+  const townTrialClass=PS.getClassData();
+  const townTrialNextId=DL.getNextClassId(PS.class_id);
+  if(townTrialNextId){
+    const townCanAttempt=PS.canAttemptTrial();
+    root.appendChild(h("div",{class:"panel",style:{marginTop:"14px"}},[
+      h("div",{style:{fontWeight:"bold",marginBottom:"4px"}},["Broken Bridge Trial Progress"]),
+      townCanAttempt?null:h("div",{class:"muted",style:{marginBottom:"8px"}},[`Reach Lv ${Balance.trialLevelRequirement(townTrialClass.tier||1)} to attempt -- your progress on the bridge is remembered either way.`]),
+      bridgeTrialView(getTrialProgress(), townTrialClass.tier||1, {interactive:false}),
+    ]));
+  }
 
   root.appendChild(h("hr"));
   root.appendChild(h("div",{class:"row"},[
@@ -6589,15 +6828,19 @@ function isAdjacent4(x1,y1,x2,y2){
 }
 
 function mazeOverlayScreen(overlay){
-  const div=h("div",{class:"maze-overlay-grid"},[h("div",{class:"maze-overlay-text"},[overlay.text])]);
+  // v0.22.3 (#13): shrine announcements carry a longer two-line message than the terse
+  // "Advanced!"/"Trapdoor!" banners, so they get a smaller text class and a longer hold
+  // (durationMs) so there's time to actually read the bonus before it fades.
+  const durationMs=overlay.durationMs||1650;
+  const div=h("div",{class:"maze-overlay-grid"},[h("div",{class:"maze-overlay-text"+(overlay.shrine?" shrine":"")},[overlay.text])]);
   if(!overlay.timerStarted){
     overlay.timerStarted=true;
-    setTimeout(()=>{ div.classList.add("fade"); },50);
+    setTimeout(()=>{ div.classList.add("fade"); },durationMs-100);
     setTimeout(()=>{
       GF.mazeOverlay=null;
       if(overlay.andThen) overlay.andThen();
       else render();
-    },1650);
+    },durationMs);
   }
   return div;
 }
@@ -6764,7 +7007,7 @@ function screenMaze(){
           PS.useConsumable("elixir_of_clarity");
           maze._clarityReveal=ripple;
           autosave(); render(); animateMazeMovers(null,null);
-        }},[`Use Elixir of Clairvoyance (${PS.clarity_charges_left>0?PS.clarity_charges_left:10} left)`]),
+        }},[`Use Elixir of Clairvoyance (${PS.getTotalClarityChargesRemaining()} left)`]),
       ]),
       
       
@@ -6958,7 +7201,6 @@ function onStepMaze(maze,targetIdx){
     
     
     GF.ventureLockDepth=null;
-    GF.trapdoorStreak=0;
     autosave();
     GF.mazeOverlay={text:`Advanced to area level ${nextDepth}!`, andThen:()=>{ GF.overworld_snapshot=null; GF.goto("maze",{maze_depth:nextDepth}); }};
     render();
@@ -6983,9 +7225,9 @@ function onStepMaze(maze,targetIdx){
       
       const dmg=randRange(Balance.TRAP_DAMAGE_MIN,Balance.TRAP_DAMAGE_MAX);
       PS.current_hp=Math.max(1,PS.current_hp-dmg);
-      GF.trapdoorStreak=Math.min(Balance.TRAPDOOR_DEPTH_PENALTY_MAX_STACK,(GF.trapdoorStreak||0)+1);
-      const penalty=Balance.TRAPDOOR_DEPTH_PENALTY*GF.trapdoorStreak;
-      const fallDepth=Math.max(1,maze.depth-penalty);
+      // v0.22.3 (#18, credit: Gwen): trapdoor always drops exactly -1 area level -- no more
+      // streak-based stacking penalty.
+      const fallDepth=Math.max(1,maze.depth-Balance.TRAPDOOR_DEPTH_PENALTY);
       
       
       
@@ -7046,15 +7288,23 @@ function onStepMaze(maze,targetIdx){
   }
   if(cell.type==="shrine" && !cell.cleared){
     cell.cleared=true;
-    
-    
+
+
     const roll=Math.floor(Math.random()*5);
-    if(roll===0){ PS.addStaminaShrineBuff(Balance.STAMINA_MAX_BASE*Balance.SHRINE_STAMINA_BUFF_PCT); mazeLog("A quiet shrine restores your stamina and grants a lasting reserve!"); }
-    else if(roll===1){ PS.applyXpShrineBuff(); mazeLog("A quiet shrine blesses you, bonus experience for a while!"); }
-    else if(roll===2){ PS.applyInvulnShrineBuff(); mazeLog(`A radiant shrine grants you the Touch of Unicorn -- you are immune to damage/poison from combat or traps for ${Balance.SHRINE_INVULN_ROUNDS} rounds!`); }
-    else if(roll===3){ PS.applyQuadDamageShrineBuff(); mazeLog(`A furious shrine quadruples your damage output for ${Balance.SHRINE_QUAD_DAMAGE_ROUNDS} combat rounds!`); }
-    else { PS.applyMagicFindShrineBuff(); mazeLog(`A glimmering shrine sharpens your eye for treasure -- +${Balance.SHRINE_MAGIC_FIND_PCT}% Magic Find for ${Balance.SHRINE_MAGIC_FIND_ROUNDS} rounds!`); }
-    autosave(); render(); animateMazeMovers(prevPlayerIdx,prevRoamerPositions); return;
+    let shrineOverlayText;
+    if(roll===0){ PS.addStaminaShrineBuff(Balance.STAMINA_MAX_BASE*Balance.SHRINE_STAMINA_BUFF_PCT); mazeLog("A quiet shrine restores your stamina and grants a lasting reserve!"); shrineOverlayText="✨ Quiet Shrine\nStamina restored, plus a lasting reserve!"; }
+    else if(roll===1){ PS.applyXpShrineBuff(); mazeLog("A quiet shrine blesses you, bonus experience for a while!"); shrineOverlayText=`✨ Quiet Shrine\nBonus Experience for the next ${Balance.SHRINE_XP_BUFF_ENCOUNTERS} battles!`; }
+    else if(roll===2){ PS.applyInvulnShrineBuff(); mazeLog(`A radiant shrine grants you the Touch of Unicorn -- you are immune to damage/poison from combat or traps for ${Balance.SHRINE_INVULN_ROUNDS} rounds!`); shrineOverlayText=`🦄 Radiant Shrine\nTouch of Unicorn! Immune to damage & poison for ${Balance.SHRINE_INVULN_ROUNDS} rounds.`; }
+    else if(roll===3){ PS.applyQuadDamageShrineBuff(); mazeLog(`A furious shrine quadruples your damage output for ${Balance.SHRINE_QUAD_DAMAGE_ROUNDS} combat rounds!`); shrineOverlayText=`⚡ Furious Shrine\nQuad Damage for ${Balance.SHRINE_QUAD_DAMAGE_ROUNDS} combat rounds!`; }
+    else { PS.applyMagicFindShrineBuff(); mazeLog(`A glimmering shrine sharpens your eye for treasure -- +${Balance.SHRINE_MAGIC_FIND_PCT}% Magic Find for ${Balance.SHRINE_MAGIC_FIND_ROUNDS} rounds!`); shrineOverlayText=`🔍 Glimmering Shrine\n+${Balance.SHRINE_MAGIC_FIND_PCT}% Magic Find for ${Balance.SHRINE_MAGIC_FIND_ROUNDS} rounds!`; }
+    // v0.22.3 (#13): a shrine pickup is a meaningful buff and deserves more than a quiet log
+    // line -- reuse the same maze-overlay system as the Advanced!/Trapdoor! announcements
+    // for a prominent naming-the-buff banner. No andThen: the default behavior (fade, then
+    // a plain render()) is exactly right here since the player doesn't need to navigate
+    // anywhere afterward, unlike the trapdoor overlay.
+    autosave();
+    GF.mazeOverlay={text:shrineOverlayText, shrine:true, durationMs:2800};
+    render(); animateMazeMovers(prevPlayerIdx,prevRoamerPositions); return;
   }
   if(cell.type==="herb" && !cell.cleared){
     GF.goto("herbEncounter",{maze_depth:maze.depth, herb_cell_idx:targetIdx});
@@ -7577,7 +7827,26 @@ function chestLootEntryNode(entry){
   return null;
 }
 
-
+// v0.22.3 (#2): shared Loot / Loot & Equip / Litter card for an undecided combat gear drop.
+// Litter costs -1 Forest Reputation (same wording/effect as item 3's mid-maze backpack litter).
+function combatPendingLootNode(inst,cb){
+  const removeFromQueue=()=>{ const idx=cb.pendingGearLoot.indexOf(inst); if(idx!==-1) cb.pendingGearLoot.splice(idx,1); };
+  const canEquip=PS.canAutoEquip(inst);
+  const canLoot=PS.hasInventorySpace();
+  return h("div",{class:"panel",style:{margin:"8px 0"}},[
+    h("div",{class:"row gap",style:{alignItems:"center",marginBottom:"8px"}},[
+      gearIcon(inst,36),
+      h("div",{},[
+        h("span",{class:"rarity-"+inst.rarity,style:{fontWeight:"bold"}},[IF.displayName(inst)+` (${tierRomanNumeral(inst.tier)})`]),
+      ]),
+    ]),
+    h("div",{class:"row gap"},[
+      canEquip?h("button",{onClick:()=>{ PS.addGearAutoEquip(inst); removeFromQueue(); PS.saveGame(); setToast(`Equipped ${IF.displayName(inst)}.`); render(); }},["Loot & Equip"]):null,
+      h("button",{disabled:!canLoot,title:canLoot?"":"Your backpack is full.",onClick:()=>{ if(!PS.addGear(inst)) return; removeFromQueue(); PS.saveGame(); setToast(`Added ${IF.displayName(inst)} to your backpack.`); render(); }},["Loot"]),
+      h("button",{class:"danger",onClick:()=>{ removeFromQueue(); PS.adjustForestReputation(-1); PS.saveGame(); setToast(`You discard the ${IF.displayName(inst)}. (-1 Forest Reputation)`); render(); }},["Litter"]),
+    ]),
+  ]);
+}
 
 
 
@@ -7692,10 +7961,11 @@ function screenCombat(){
     return root;
   }
   // v0.22.2 (#9): statHeader() first, encounter title below it.
-  // v0.22.2 (#6): the "lies defeated" wording no longer appears in this page-level title -- it
-  // now renders inside mobPanel next to the slain portrait (see below). Living-mob title unchanged.
+  // v0.22.2 (#6) / v0.22.3 HOTFIX (Gwen): neither the "blocks the path" nor "lies defeated"
+  // wording appears in a page-level title anymore -- both now render inside mobPanel, in the
+  // exact same slot beside the portrait (see below), so the container never jumps position
+  // when a mob is slain.
   root.appendChild(statHeader());
-  if(!cb.defeated) root.appendChild(h("h2",{},[`A wild ${cb.name} blocks the path!`]));
 
   const portraitWrap=h("div",{style:{width:"140px",height:"140px",margin:"0 auto 8px"}});
   portraitWrap.innerHTML=monsterPortrait(cb.monster_id,{slain:cb.defeated});
@@ -7734,6 +8004,13 @@ function screenCombat(){
   
   
   const continueWandering=()=>{
+    // v0.22.3 (#2): don't let a still-undecided gear drop silently vanish -- make the player
+    // resolve every Loot/Loot & Equip/Litter choice before moving on.
+    if(cb.pendingGearLoot && cb.pendingGearLoot.length>0){
+      setToast("Decide what to do with your loot before continuing.");
+      render();
+      return;
+    }
     const maze_depth=GF.maze_depth;
     if(cb.pendingKeyReveal){
       GF.chestReveal={...cb.pendingKeyReveal, returnDepth:maze_depth};
@@ -7825,9 +8102,10 @@ function screenCombat(){
 
     h("div",{style:{position:"relative"}},[bar(Math.max(0,cb.hp)/cb.maxHp*100,"bar-hp"), floatLayer("monster")]),
 
-    // v0.22.2 (#6): the "lies defeated" message now lives here, beside the slain portrait,
-    // instead of the page-level title above the player tile.
-    cb.defeated?h("div",{style:{fontWeight:"bold",textAlign:"center",marginTop:"6px"}},[`The ${cb.name} lies defeated.`]):null,
+    // v0.22.2 (#6) / v0.22.3 HOTFIX (Gwen): both the living "blocks the path" and slain "lies
+    // defeated" announcements share this one slot beside the portrait now, so defeating the
+    // monster swaps the text in place instead of the container jumping/resizing.
+    h("div",{style:{fontWeight:"bold",textAlign:"center",marginTop:"6px"}},[cb.defeated?`The ${cb.name} lies defeated.`:`A wild ${cb.name} blocks the path!`]),
     // v0.22.1 (Part B4): this container is now ALWAYS rendered (never swapped to null), so its
     // reserved height never collapses/reflows the action area when combat is busy mid-round --
     // only the text content toggles, using a non-breaking space as a same-height placeholder.
@@ -7848,6 +8126,9 @@ function screenCombat(){
 
   if(cb.defeated){
     root.appendChild(h("div",{class:"panel",style:{background:"#2a3a20",borderColor:"#5a7a3a",margin:"12px 0"}},[cb.result_text]));
+    // v0.22.3 (#2): gear drops are a deliberate choice now -- render a Loot/Loot & Equip/
+    // Litter card for each undecided item before letting the player continue wandering.
+    (cb.pendingGearLoot||[]).forEach(inst=>{ root.appendChild(combatPendingLootNode(inst,cb)); });
     return root;
   }
 
@@ -7862,14 +8143,13 @@ function screenCombat(){
     if(loot.type==="gear"){
       const inst=loot.item;
       if(!loot.fit) return "Found gear but your bags are full, it was left behind.";
-      const slot=loot.auto_equipped?PS._autoEquipTargetSlot(inst):null;
-      if(slot) PS.equipped[slot]=inst; else PS.gear_instances.push(inst);
-      
-      
-      
-      
+      // v0.22.3 (#2): gear no longer auto-applies -- it's queued for the player to choose
+      // Loot / Loot & Equip / Litter from (see combatPendingLootNode()/screenCombat()'s
+      // defeated branch). Gold/consumables/herbs are unaffected and still auto-collect.
+      cb.pendingGearLoot=cb.pendingGearLoot||[];
+      cb.pendingGearLoot.push(inst);
       spawnFloatItem("monster",inst);
-      return loot.auto_equipped?`Found and equipped ${IF.displayName(inst)}!`:`Found ${IF.displayName(inst)}!`;
+      return `Found ${IF.displayName(inst)}!`;
     }
     if(loot.type==="consumable"){ PS.addConsumable(loot.item_id,1); return `Found a ${DL.getItem(loot.item_id).name}.`; }
     if(loot.type==="herb"){ PS.addHerb(loot.herb_id,1); return `Found ${DL.getHerb(loot.herb_id).name}.`; }
@@ -8333,8 +8613,9 @@ function screenStrongholdChest(){
       if(Math.random()<Balance.STRONGHOLD_CHEST_BAG_CHANCE){
         const bagIds=Object.keys(ITEMS).filter(id=>ITEMS[id].type==="bag");
         const bagId=pick(bagIds);
-        const result=PS.equipBag(bagId);
-        entries.push({kind:"consumable", itemId:bagId, qty:1, note:result.success?null:"Couldn't fit, bag rack full"});
+        // v0.22.3 (#7): bags drop into the backpack now, not auto-equipped.
+        const result=PS.addBagToBackpack(bagId);
+        entries.push({kind:"consumable", itemId:bagId, qty:1, note:result.success?null:"Couldn't fit, backpack full"});
       }
 
       if(maze){
@@ -8868,6 +9149,10 @@ function backpackSwapSlots(idxA,idxB){
 }
 
 function backpackGearGrid(){
+  // v0.22.3 (#3): let the player Litter (-1 Forest Reputation, same as item 2's combat-loot
+  // Litter) a backpack item while still mid-maze -- only shown when the Character Sheet was
+  // reached FROM the maze (GF.inventory_return_to==="maze"), not from town.
+  const litterEnabled=GF.screen==="inventory" && GF.inventory_return_to==="maze";
   const capacity=PS.getInventoryCapacity();
   const grid=h("div",{style:{display:"grid",gridTemplateColumns:"repeat(8,1fr)",gap:"4px",marginBottom:"10px",maxWidth:"360px"}});
   for(let i=0;i<capacity;i++){
@@ -8935,9 +9220,31 @@ function backpackGearGrid(){
         askConfirm(`${label} ${IF.displayName(inst)}?`,()=>{ PS.equipGear(inst.instance_id); autosave(); render(); },{confirmLabel:label,danger:false});
       },
     },[gearIcon(inst,26)]);
-    
-    
-    grid.appendChild(gearCompareWrap(tile, inst));
+
+
+    let cell=gearCompareWrap(tile, inst);
+    if(litterEnabled){
+      cell=h("div",{style:{position:"relative"}},[
+        cell,
+        h("button",{
+          class:"danger",
+          title:"Litter this item (-1 Forest Reputation)",
+          style:{position:"absolute",top:"-6px",right:"-6px",width:"16px",height:"16px",padding:"0",fontSize:"9px",lineHeight:"14px",borderRadius:"50%"},
+          onClick:(e)=>{
+            if(e&&e.stopPropagation) e.stopPropagation();
+            askConfirm(`Litter ${IF.displayName(inst)}? (-1 Forest Reputation)`,()=>{
+              const idx=PS.gear_instances.indexOf(inst);
+              if(idx!==-1) PS.gear_instances.splice(idx,1);
+              PS.adjustForestReputation(-1);
+              PS.saveGame();
+              setToast(`You discard the ${IF.displayName(inst)}. (-1 Forest Reputation)`);
+              render();
+            },{confirmLabel:"Litter",danger:true});
+          },
+        },["🗑"]),
+      ]);
+    }
+    grid.appendChild(cell);
   }
   return grid;
 }
@@ -8952,6 +9259,50 @@ function backpackGearGrid(){
 
 
 
+
+
+// v0.22.3 (#7): bags are folded into normal Character Sheet gear management -- no more
+// standalone bag-rack panel. Equipped bags and backpack-stored bags both render as chips
+// (same tile style as consumables/herbs below), click to unequip/equip respectively.
+function bagManagementRow(){
+  const wrap=h("div",{});
+  const equipped=PS.equipped_bags, stored=Object.keys(PS.bags||{}).filter(id=>(PS.bags[id]||0)>0);
+  if(equipped.length===0 && stored.length===0) return wrap;
+  wrap.appendChild(h("div",{class:"muted",style:{fontSize:".8em",margin:"2px 0 4px"}},[`Bags (${equipped.length}/${Balance.MAX_BAG_SLOTS} equipped) -- click to equip/unequip.`]));
+  const chips=[];
+  for(const bagId of equipped){
+    const item=DL.getItem(bagId);
+    const wouldOverflow=PS.wouldOverflowWithoutBag(bagId);
+    const full=!PS.hasInventorySpace();
+    const disabled=wouldOverflow||full;
+    const reason=wouldOverflow?"Unequipping this would leave you carrying more gear than your remaining capacity allows.":(full?"Your backpack is full -- make room first.":"Click to unequip.");
+    chips.push(h("div",{
+      class:"tile row gap tooltip",
+      "data-tip":`${item.name}\n+${item.capacity} capacity (equipped)\n${reason}`,
+      style:{alignItems:"center",gap:"6px",padding:"4px 8px",cursor:disabled?"default":"pointer",opacity:disabled?"0.6":"1",border:"2px solid #4ac67a"},
+      onClick:disabled?null:()=>{
+        if(!PS.unequipBag(bagId)){ setToast("Can't unequip that bag right now."); render(); return; }
+        PS.saveGame(); render();
+      },
+    },[itemIcon(bagId,22), h("span",{},[item.name])]));
+  }
+  for(const bagId of stored){
+    const item=DL.getItem(bagId);
+    const rackFull=PS.equipped_bags.length>=Balance.MAX_BAG_SLOTS;
+    chips.push(h("div",{
+      class:"tile row gap tooltip",
+      "data-tip":`${item.name} x${PS.bags[bagId]}\n+${item.capacity} capacity while equipped\n${rackFull?`Bag slots full (${PS.equipped_bags.length}/${Balance.MAX_BAG_SLOTS}).`:"Click to equip."}`,
+      style:{alignItems:"center",gap:"6px",padding:"4px 8px",cursor:rackFull?"default":"pointer",opacity:rackFull?"0.6":"1"},
+      onClick:rackFull?null:()=>{
+        const result=PS.equipBag(bagId);
+        if(!result.success){ setToast(result.reason); render(); return; }
+        PS.saveGame(); render();
+      },
+    },[itemIcon(bagId,22), h("span",{},[`${item.name} x${PS.bags[bagId]}`])]));
+  }
+  wrap.appendChild(h("div",{class:"row gap",style:{flexWrap:"wrap",marginBottom:"10px"}},chips));
+  return wrap;
+}
 
 
 const CHARACTER_SHEET_TABS=[
@@ -9091,47 +9442,7 @@ function screenInventory(){
         ]));
         if(GF._bagReorderMode) bpWrap.appendChild(h("div",{class:"muted",style:{marginBottom:"6px"}},[GF._bagReorderSrcIdx!=null?"Now click the slot you want to move it to (or click it again to cancel)." : "Click an item to pick it up, then click a slot to place it there."]));
         bpWrap.appendChild(backpackGearGrid());
-
-        bpWrap.appendChild(h("h3",{},["Bags"]));
-        bpWrap.appendChild(h("div",{class:"muted"},[`Equipped bags: ${PS.equipped_bags.length}/${Balance.MAX_BAG_SLOTS}`]));
-        for(const bagId of [...PS.equipped_bags]){
-          const wouldOverflow=PS.wouldOverflowWithoutBag(bagId);
-          bpWrap.appendChild(h("div",{class:"row",style:{marginBottom:"4px"}},[
-            DL.getItem(bagId).name,
-            h("button",{
-              disabled:wouldOverflow,
-              title:wouldOverflow?`Unequipping this would leave you carrying more gear than your remaining capacity allows -- salvage, sell, or store some gear first.`:"",
-              onClick:()=>{
-                if(!PS.unequipBag(bagId)){ setToast("Can't unequip that bag -- you're carrying more gear than the remaining capacity would allow."); render(); return; }
-                PS.saveGame(); render();
-              },
-            },["Unequip"]),
-          ]));
-        }
-        
-        
-        
-        
-        const storedBagIds=Object.keys(PS.bags||{}).filter(id=>(PS.bags[id]||0)>0);
-        if(storedBagIds.length>0){
-          bpWrap.appendChild(h("div",{class:"muted",style:{marginTop:"6px"}},["In storage (unequipped):"]));
-          for(const bagId of storedBagIds){
-            const rackFull=PS.equipped_bags.length>=Balance.MAX_BAG_SLOTS;
-            bpWrap.appendChild(h("div",{class:"row",style:{marginBottom:"4px"}},[
-              `${DL.getItem(bagId).name} x${PS.bags[bagId]}`,
-              h("button",{
-                disabled:rackFull,
-                title:rackFull?`Your bag rack is full (${PS.equipped_bags.length}/${Balance.MAX_BAG_SLOTS}), unequip a bag first.`:"",
-                onClick:()=>{
-                  const result=PS.equipBag(bagId);
-                  if(!result.success){ setToast(result.reason); render(); return; }
-                  PS.bags[bagId]--; if(PS.bags[bagId]<=0) delete PS.bags[bagId];
-                  PS.saveGame(); render();
-                },
-              },["Equip"]),
-            ]));
-          }
-        }
+        bpWrap.appendChild(bagManagementRow());
         return bpWrap;
       })()]),
     ]));
@@ -9464,9 +9775,9 @@ function screenBlacksmith(){
     ];
     if(craftingThis){
       const elapsed=Date.now()-GF.crafting.startedAt;
-      tileKids.push(h("div",{style:{marginTop:"6px"}},[bar(Math.min(100,elapsed/BREW_CRAFT_MS*100),"bar-brew")]));
+      tileKids.push(h("div",{style:{marginTop:"6px"}},[bar(Math.min(100,elapsed/BREW_CRAFT_MS*100),"bar-brew",false,"craft-progress-fill")]));
     } else {
-      tileKids.push(h("button",{style:{marginTop:"6px"},disabled:PS.materials<cost||PS.equipped_bags.length>=Balance.MAX_BAG_SLOTS||!!GF.crafting,onClick:()=>startCraftBag(itemId)},[`Craft (${cost} mat)`]));
+      tileKids.push(h("button",{style:{marginTop:"6px"},disabled:PS.materials<cost||!PS.hasInventorySpace()||!!GF.crafting,onClick:()=>startCraftBag(itemId)},[`Craft (${cost} mat)`]));
     }
     bagGrid.appendChild(h("div",{class:"tile"},tileKids));
   }
@@ -9555,7 +9866,7 @@ function screenAlchemist(){
     ];
     if(brewingThis){
       const elapsed=Date.now()-GF.brewing.startedAt;
-      rowKids.push(h("div",{style:{minWidth:"120px"}},[bar(Math.min(100,elapsed/GF.brewing.durationMs*100),"bar-brew")]));
+      rowKids.push(h("div",{style:{minWidth:"120px"}},[bar(Math.min(100,elapsed/GF.brewing.durationMs*100),"bar-brew",false,"brew-progress-fill")]));
     } else {
       rowKids.push(alchemistAmountPicker(recipe.result_item,maxQty));
       rowKids.push(h("button",{disabled:!can||!!GF.brewing,onClick:()=>startBrew(recipe,qty)},["Brew"]));
@@ -10110,11 +10421,11 @@ function merchantContainersTab(){
       itemIcon(itemId),
       h("div",{class:"col",style:{flex:"1",minWidth:"0",gap:"2px"}},[
         h("div",{style:{fontWeight:"bold"}},[item.name]),
-        h("div",{class:"muted",style:{fontSize:".85em"}},[`+${item.capacity} inventory capacity while equipped.`]),
+        h("div",{class:"muted",style:{fontSize:".85em"}},[`+${item.capacity} inventory capacity once equipped. Goes to your backpack first.`]),
       ]),
       h("div",{class:"gold-text",style:{fontWeight:"bold",minWidth:"64px",textAlign:"right"}},[`${price}g`]),
-      h("button",{disabled:PS.gold<price||PS.equipped_bags.length>=Balance.MAX_BAG_SLOTS,onClick:()=>{
-        const r=PS.buyBag(itemId); if(r.success){autosave(); setToast(`Bought ${item.name}!`);} else setToast(r.reason); render();
+      h("button",{disabled:PS.gold<price||!PS.hasInventorySpace(),title:!PS.hasInventorySpace()?"Your backpack is full.":"",onClick:()=>{
+        const r=PS.buyBag(itemId); if(r.success){autosave(); setToast(`Bought ${item.name}! It's in your backpack.`);} else setToast(r.reason); render();
       }},["Buy"]),
     ]));
   }
@@ -10160,6 +10471,10 @@ function screenMerchant(){
 }
 
 
+
+// v0.22.3 (#4): mirrors server.js's CHARGE_BEARING_CONSUMABLES exactly -- see that file's
+// comment for why a listing can never carry less than a full charge count.
+const CHARGE_BEARING_CONSUMABLES={elixir_of_clarity:10};
 
 function screenAuctionHouse(){
   const root=h("div",{});
@@ -10261,6 +10576,30 @@ function screenAuctionHouse(){
     }},["List"]),
   ]));
 
+  // v0.22.3 (#14): Salvage Materials are now a listable AH type -- a flat quantity for a
+  // gold price, deducted/credited server-side against THIS character's own data.materials
+  // (materials are per-character, not account-bound like gold; see server.js's #14 comment).
+  const materialQtyInput=h("input",{type:"number",min:"1",max:String(Math.max(1,PS.materials||0)),value:"1",style:{width:"70px"}});
+  const materialPriceInput=h("input",{type:"number",min:"1",value:"5",style:{width:"90px"}});
+  root.appendChild(h("div",{class:"row gap",style:{marginBottom:"14px",alignItems:"center"}},[
+    h("span",{},[`Salvage Materials (have ${PS.materials||0}):`]), h("span",{},["Qty:"]), materialQtyInput, h("span",{},["Price (total):"]), materialPriceInput,
+    h("button",{disabled:(PS.materials||0)<=0,onClick:async ()=>{
+      const qty=parseInt(materialQtyInput.value,10), price=parseInt(materialPriceInput.value,10);
+      if(!qty||qty<1||qty>(PS.materials||0)){ setToast("Enter a valid quantity you actually have."); render(); return; }
+      if(!price||price<1){ setToast("Enter a valid price."); render(); return; }
+      const fee=Balance.auctionListingFee(price);
+      if(PS.gold<fee){ askConfirm(`Not enough gold for the ${fee}g listing fee.`,null,{cancelLabel:"OK",buttons:[]}); return; }
+      try{
+        const result=await Net.createAuctionListing({type:"material", quantity:qty, price, character_name:PS.character_name, seller_slot:PS.current_slot, display_name:"Salvage Materials"});
+        PS.materials-=qty;
+        if(typeof result.account_gold==="number") Net.setAuthoritativeGold(result.account_gold); else PS.gold-=(result.fee||fee);
+        PS.saveGame(); Net.auctionCache=null;
+        setToast(`Listed ${qty} Salvage Materials for ${price} gold (${result.fee||fee}g listing fee charged).`);
+      }catch(e){ setToast(e.message); }
+      render();
+    }},["List Materials"]),
+  ]));
+
   root.appendChild(h("h3",{},["Current Listings"]));
   
   
@@ -10305,24 +10644,33 @@ function screenAuctionHouse(){
     }
     for(const listing of visibleListings){
       const isMine=listing.seller_username===Net.username;
-      const label=listing.quantity>1?`${listing.display_name} x${listing.quantity}`:listing.display_name;
-      
-      
+      // v0.22.3 (#4): reassure buyers a charge-bearing consumable (e.g. Elixir of Clairvoyance)
+      // arrives full -- the server also refuses to list one below full charges (see #4's
+      // CHARGE_BEARING_CONSUMABLES guard in server.js).
+      const chargeLabel=(listing.type==="consumable" && CHARGE_BEARING_CONSUMABLES[listing.item_key])
+        ? ` (full -- ${CHARGE_BEARING_CONSUMABLES[listing.item_key]} charges)` : "";
+      // v0.22.3 (#14): materials are a flat quantity-for-gold listing with no item_key/item --
+      // give them their own label/category/icon path instead of falling through to the
+      // consumable/herb item-lookup helpers, which would choke on an empty item_key.
+      const label=listing.type==="material" ? `${listing.quantity} Salvage Materials`
+        : (listing.quantity>1?`${listing.display_name} x${listing.quantity}`:listing.display_name)+chargeLabel;
+
+
       const isGear=listing.type==="gear" && listing.item;
-      
-      
+
+
       const labelEl=isGear
         ? gearCompareWrap(h("span",{class:"tooltip rarity-"+listing.item.rarity,style:{fontWeight:"bold"},"data-tip":IF.tooltipText(listing.item)},[label]), listing.item)
         : h("span",{style:{fontWeight:"bold"}},[label]);
-      
-      
-      
-      const categoryLabel=isGear?IF.categoryLabel(listing.item):(listing.type==="herb"?"Herb":DL.itemCategoryLabel(listing.item_key));
-      
-      
-      
-      
-      const listingIcon=isGear?gearIcon(listing.item,26):(listing.type==="herb"?herbIcon(listing.item_key,24):itemIcon(listing.item_key,24));
+
+
+
+      const categoryLabel=isGear?IF.categoryLabel(listing.item):(listing.type==="herb"?"Herb":(listing.type==="material"?"Material":DL.itemCategoryLabel(listing.item_key)));
+
+
+
+
+      const listingIcon=isGear?gearIcon(listing.item,26):(listing.type==="herb"?herbIcon(listing.item_key,24):(listing.type==="material"?iconBadge(`<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><rect x="9" y="18" width="11" height="11" fill="#8a8f7a" stroke="#3a3f2e" stroke-width="1.5" transform="rotate(-10 14 24)"/><rect x="19" y="10" width="13" height="13" fill="#a3a893" stroke="#3a3f2e" stroke-width="1.5" transform="rotate(12 26 17)"/><rect x="13" y="24" width="9" height="9" fill="#6f7461" stroke="#3a3f2e" stroke-width="1.2" transform="rotate(6 18 29)"/></svg>`,24):itemIcon(listing.item_key,24)));
       root.appendChild(h("div",{class:"tile row",style:{marginBottom:"6px",justifyContent:"space-between",alignItems:"center"}},[
         h("div",{class:"row gap",style:{alignItems:"center"}},[listingIcon, h("div",{},[labelEl, categoryLabel?h("span",{class:"muted",style:{fontSize:".85em"}},[` (${categoryLabel})`]):null, h("span",{class:"muted"},[`, listed by ${listing.seller_character_name} (${listing.seller_username})`])])]),
         h("div",{class:"row gap"},[
@@ -10334,6 +10682,7 @@ function screenAuctionHouse(){
                 if(r.refund.type==="gear" && r.refund.item) PS.addGear(r.refund.item);
                 else if(r.refund.type==="consumable") PS.addConsumable(r.refund.item_key,r.refund.quantity);
                 else if(r.refund.type==="herb") PS.addHerb(r.refund.item_key,r.refund.quantity);
+                else if(r.refund.type==="material") PS.materials+=r.refund.quantity;
                 PS.saveGame();
               }
               setToast("Listing cancelled, item returned to your bags.");
@@ -10351,6 +10700,7 @@ function screenAuctionHouse(){
               if(listing.type==="gear") PS.addGearAutoEquip(listing.item);
               else if(listing.type==="consumable") PS.addConsumable(listing.item_key,listing.quantity);
               else if(listing.type==="herb") PS.addHerb(listing.item_key,listing.quantity);
+              else if(listing.type==="material") PS.materials+=listing.quantity;
               PS.saveGame();
               setToast(`Bought ${label} for ${listing.price} gold.`);
             }catch(e){ setToast(e.message+" (refreshing listings...)"); }
@@ -10504,6 +10854,40 @@ function showTrialFailureConsolation(failStreak){
   ]));
 }
 
+// v0.22.3 (#11-12): reusable red/green plank-progress grid, extracted out of
+// screenMasterTrial() so the exact same view can render read-only in three places: the
+// interactive trial itself, a preview on the Town screen (#11), and the Inspect Player
+// screen (#12). `progress` is a {discoveredSides, stepFailedPlanks} object (either the
+// live PS.trial_progress[classId] shape, or a read-only copy from the inspect endpoint).
+// `tier` picks the plank-per-step count via Balance.bridgePlankCount(tier). `opts.interactive`
+// (default false) is the only thing that turns on click handling -- town/inspect always pass
+// it false (or omit it) and get a plain colored grid with disabled buttons.
+function bridgeTrialView(progress, tier, opts={}){
+  const interactive=!!opts.interactive;
+  const plankCount=Balance.bridgePlankCount(tier||1);
+  const rows=Balance.BRIDGE_ROWS;
+  const resolving=!!opts.resolving;
+  const failed=!!opts.failed;
+  const onStep=opts.onStep||(()=>{});
+  const plankCols=h("div",{class:"row gap",style:{overflowX:"auto",paddingBottom:"6px"}});
+  for(let i=0;i<rows;i++){
+    const discoveredPlank=progress.discoveredSides[i];
+    const isCurrent=interactive && i===progress.discoveredSides.length && !failed;
+    const knownFailedHere=progress.stepFailedPlanks[i]||[];
+    const col=h("div",{class:"col gap",style:{alignItems:"center"}});
+    for(let p=0;p<plankCount;p++){
+      const isSafe=discoveredPlank===p;
+      const isUnsafe=knownFailedHere.includes(p);
+      col.appendChild(h("button",{class:"plank-btn"+(isSafe?" safe":(isUnsafe?" unsafe":"")),
+        disabled:!interactive || !isCurrent || isUnsafe || resolving,
+        title:isUnsafe?"You already know this plank breaks.":(interactive && resolving?"Waiting for the trial's outcome...":""),
+        onClick:interactive?()=>onStep(p):undefined},[inlineIcon(FOOTSTEP_SVG,16)]));
+    }
+    plankCols.appendChild(col);
+  }
+  return plankCols;
+}
+
 function screenMasterTrial(){
   const root=h("div",{});
   const c=PS.getClassData();
@@ -10629,7 +11013,7 @@ function screenMasterTrial(){
       PS.max_maze_depth_reached=result.max_maze_depth_reached;
       
       
-      GF.ventureLockDepth=null; GF.trapdoorStreak=0;
+      GF.ventureLockDepth=null;
       GF.ventureDepth=1;
       
       
@@ -10641,32 +11025,10 @@ function screenMasterTrial(){
 
   
   
-  const plankCols=h("div",{class:"row gap",style:{overflowX:"auto",paddingBottom:"6px"}});
-  for(let i=0;i<rows;i++){
-    const discoveredPlank=progress.discoveredSides[i];
-    const isCurrent=i===progress.discoveredSides.length && !failed;
-    
-    
-    
-    const knownFailedHere=progress.stepFailedPlanks[i]||[];
-    const col=h("div",{class:"col gap",style:{alignItems:"center"}});
-    for(let p=0;p<plankCount;p++){
-      const isSafe=discoveredPlank===p;
-      const isUnsafe=knownFailedHere.includes(p);
-      
-      
-      
-      col.appendChild(h("button",{class:"plank-btn"+(isSafe?" safe":(isUnsafe?" unsafe":"")),
-        disabled:!isCurrent || isUnsafe || !!GF.trialResolving,
-        title:isUnsafe?"You already know this plank breaks.":(GF.trialResolving?"Waiting for the trial's outcome...":""),
-        onClick:()=>attemptStep(p)},[inlineIcon(FOOTSTEP_SVG,16)]));
-    }
-    plankCols.appendChild(col);
-  }
-  root.appendChild(plankCols);
+  root.appendChild(bridgeTrialView(progress, currentTier, {interactive:true, resolving:!!GF.trialResolving, failed, onStep:attemptStep}));
 
   root.appendChild(h("div",{class:"row",style:{marginTop:"10px"}},[
-    h("button",{onClick:()=>{ GF.trialJustFailed=false; GF.trialFailedPlankIndex=null; if(failed){ GF.ventureDepth=1; GF.ventureLockDepth=null; GF.trapdoorStreak=0; } GF.goto("town"); }},[failed?"Return to Town":"← Retreat to Town"]),
+    h("button",{onClick:()=>{ GF.trialJustFailed=false; GF.trialFailedPlankIndex=null; if(failed){ GF.ventureDepth=1; GF.ventureLockDepth=null; } GF.goto("town"); }},[failed?"Return to Town":"← Retreat to Town"]),
   ]));
   return root;
 }
@@ -10944,6 +11306,105 @@ function adminAccountsTab(){
 
 
 
+// v0.22.3 (#10 section C): human-in-the-loop per-character ladder reset. Deliberately no
+// bulk "reset everyone" action -- every row gets its own confirm and its own button press,
+// so an admin resetting a real season has to consciously do it character by character (and
+// can safely test the reset on their own characters first).
+function adminResetLadderTab(){
+  const root=h("div",{});
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},[
+    "Resets a single character's class rank, level, and current XP back to Class I / Level 1 -- gear, gold, stash, materials, consumables, herbs, and skills are all kept untouched. No bulk action; reset each character one at a time.",
+  ]));
+  root.appendChild(h("div",{class:"row gap",style:{marginBottom:"8px"}},[
+    h("button",{onClick:async ()=>{
+      GF.admin_reset_ladder_error="";
+      try{
+        const data=await Net.fetchAdminResetLadder(GF.admin_token||"");
+        GF.admin_reset_ladder_cache=data.entries||[];
+        GF.admin_reset_ladder_season=data.season||null;
+      }catch(e){
+        GF.admin_reset_ladder_error=e.message||"Could not load the character list.";
+        GF.admin_reset_ladder_cache=null;
+      }
+      render();
+    }},["Load Characters"]),
+  ]));
+  if(GF.admin_reset_ladder_error) root.appendChild(h("div",{class:"muted",style:{color:"#e07a7a",marginBottom:"8px"}},[GF.admin_reset_ladder_error]));
+  const season=GF.admin_reset_ladder_season;
+  if(season){
+    root.appendChild(h("div",{class:"panel",style:{marginBottom:"10px"}},[
+      season.winner_declared
+        ?h("div",{},[`🏆 Season champion: `,h("b",{},[season.winner_character_name]),` the ${season.winner_class_name} (won ${new Date(season.won_at).toLocaleString()}).`])
+        :h("div",{class:"muted"},["No season champion yet -- the season continues until a tier-5 character reaches Level 100."]),
+    ]));
+  }
+  if(GF.admin_reset_ladder_cache){
+    if(GF.admin_reset_ladder_cache.length===0){
+      root.appendChild(h("div",{class:"muted"},["No characters found."]));
+    } else {
+      for(const entry of GF.admin_reset_ladder_cache){
+        root.appendChild(h("div",{class:"tile row",style:{justifyContent:"space-between",alignItems:"center",marginBottom:"6px",gap:"10px"}},[
+          h("div",{},[
+            h("div",{},[
+              h("span",{style:{fontWeight:"bold"}},[entry.character_name]),
+              h("span",{class:"muted"},[` (${entry.username}, acct #${entry.account_id}, slot ${entry.slot})`]),
+            ]),
+            h("div",{class:"muted"},[`Lv ${entry.level} ${entry.class_display_name} (${tierRomanNumeral(entry.highest_tier_reached)})`]),
+          ]),
+          h("button",{class:"danger",onClick:()=>{
+            askConfirm(`Reset "${entry.character_name}" to Class I, Level 1? Gear, gold, stash, materials, consumables, herbs, and skills are kept.`,async ()=>{
+              try{
+                const result=await Net.adminResetLadder(entry.account_id,entry.slot,GF.admin_token||"");
+                entry.class_display_name=result.class_display_name;
+                entry.level=result.level;
+                entry.highest_tier_reached=result.highest_tier_reached;
+                setToast(`Reset ${result.character_name} to ${result.class_display_name}.`);
+              }catch(err){
+                GF.admin_reset_ladder_error=err.message||"Could not reset that character.";
+              }
+              render();
+            },{confirmLabel:"Reset"});
+          }},["Reset"]),
+        ]));
+      }
+    }
+  }
+  return root;
+}
+
+// v0.22.3 (#17): admin tool to push a one-off system message into every connected player's
+// global chat -- handy for maintenance/reset announcements. Server-side, this just calls
+// the same broadcastSystemMessage() every other system line (login, trial, death, season win)
+// already goes through, so it renders identically in the chat panel.
+function adminBroadcastTab(){
+  const root=h("div",{});
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},[
+    "Sends a one-off system message to every player currently connected to global chat. Use it for maintenance windows, server resets, or season announcements.",
+  ]));
+  const messageInput=h("textarea",{rows:"3",style:{width:"100%",maxWidth:"480px",resize:"vertical"},placeholder:"Message to broadcast..."});
+  root.appendChild(h("div",{style:{marginBottom:"8px"}},[messageInput]));
+  root.appendChild(h("div",{class:"row gap"},[
+    h("button",{disabled:GF.admin_broadcast_busy,onClick:()=>{
+      const message=(messageInput.value||"").trim();
+      if(!message){ setToast("Enter a message first."); render(); return; }
+      askConfirm("Send this to every player's global chat?",async ()=>{
+        GF.admin_broadcast_busy=true; GF.admin_broadcast_error=""; render();
+        try{
+          await Net.adminBroadcast(message,GF.admin_token||"");
+          messageInput.value="";
+          setToast("Broadcast sent.");
+        }catch(e){
+          GF.admin_broadcast_error=e.message||"Could not send that broadcast.";
+        }
+        GF.admin_broadcast_busy=false;
+        render();
+      },{confirmLabel:"Send"});
+    }},[GF.admin_broadcast_busy?"Sending...":"Broadcast"]),
+  ]));
+  if(GF.admin_broadcast_error) root.appendChild(h("div",{class:"muted",style:{color:"#e07a7a",marginTop:"8px"}},[GF.admin_broadcast_error]));
+  return root;
+}
+
 function adminTabButton(key,label){
   const selected=GF.adminTab===key;
   return h("button",{style:{background:selected?"var(--accent,#3a6a2a)":undefined,fontWeight:selected?"bold":undefined},onClick:()=>{GF.adminTab=key;render();}},[label]);
@@ -10982,10 +11443,14 @@ function screenAdminPanel(){
     adminTabButton("leaderboard","Leaderboard Moderation"),
     adminTabButton("accounts","Account List"),
     adminTabButton("legacy","Legacy Gear"),
+    adminTabButton("reset","Reset Ladder"),
+    adminTabButton("broadcast","Broadcast"),
   ]));
   if(GF.adminTab==="leaderboard") root.appendChild(adminLeaderboardTab());
   else if(GF.adminTab==="accounts") root.appendChild(adminAccountsTab());
   else if(GF.adminTab==="legacy") root.appendChild(legacyGearSection());
+  else if(GF.adminTab==="reset") root.appendChild(adminResetLadderTab());
+  else if(GF.adminTab==="broadcast") root.appendChild(adminBroadcastTab());
   else root.appendChild(adminSpawnTab());
 
   return root;
@@ -11085,6 +11550,27 @@ function legacyGearSection(){
 
 
 const CHANGELOG=[
+  { version:"v0.22.3", notes:[
+    "Character names are now globally unique (case-insensitive) -- a taken name is rejected at creation.",
+    "Gear drops from combat now offer a choice: Loot, Loot & Equip, or Litter (discard for -1 Forest Reputation) -- gold, consumables, and herbs still collect automatically.",
+    "Backpack items can now be littered mid-maze too, for the same -1 Forest Reputation.",
+    "Partially-used charge-based consumables (like Elixir of Clairvoyance) can no longer be listed on the Auction House -- only full, unopened ones can, labeled '(full -- 10 charges)'.",
+    "The maze view now shows your total remaining Clairvoyance reveals across every elixir you're carrying, counting down smoothly as you use them.",
+    "The Bonfire is now a single click: warm yourself by the fire for 5 seconds and rise at full Health and Stamina. Dry Logs are deprecated -- no longer looted or sold (sellable for 100g as a legacy item) -- and the old kindling log/ticker and free town regen tick are gone.",
+    "Bags are now ordinary lootable/equippable backpack items -- pick one up, equip it from your backpack for extra capacity, and unequip it back into your backpack. No more 'rack full' loot blocks.",
+    "Scroll of Challenge is deprecated -- no longer found or sold anywhere (sellable for 100g as a legacy item, still usable if you have one).",
+    "The Gameplay Guide now notes both deprecated items and their temporary sell price.",
+    "The level cap is now 100. The first Tier 5 character to also reach Level 100 wins the season and is announced -- reaching Tier 5 alone no longer ends it. Admins can reset an individual character's ladder progress (class, level, XP, trial steps) from a new Dev Tools tab, keeping their gear, gold, skills, and stash intact.",
+    "The Broken Bridge Trial's plank progress is now shown for real in both the Town screen and Inspect Player, instead of a placeholder.",
+    "Stepping on a shrine now shows a banner announcing which buff you picked up and what it does, instead of just a log line.",
+    "Salvage Materials can now be listed and bought on the Auction House.",
+    "Fixed a bug where the brewing/crafting countdown bar would fully re-render every tick, swallowing hovers and clicks. (Reported by dcfroggert)",
+    "Every gear affix now only rolls on the item slots it makes sense for (no more Armor on a ring, or Poison Resistance on a weapon) -- enforced on generation, Reforge, and server-side validation. Existing out-of-spec gear can be corrected via the Admin Legacy Gear tool.",
+    "Admins can now broadcast a system message to global chat from Dev Tools.",
+    "A trapdoor now always drops you exactly 1 area level -- no more escalating streak penalties for repeated trapdoors.",
+    "Leaderboards now return up to 1000 ranked entries instead of capping at 50, still paged client-side.",
+    "Fixed a bug where attacking with a weapon you no longer meet the requirements for could still grant weapon-skill XP.",
+  ]},
   { version:"v0.22.2", notes:[
     "Monster hits now land with a soft +/-5% damage jitter instead of an identical number every time, keeping the average the same.",
     "Player tile redesigned: a 3-zone header (identity, Character Sheet, gold/materials) above a 2-column layout with your vitals on the left and Damage/Kill streak/Reputation on the right.",
@@ -11696,6 +12182,11 @@ function screenGameplayGuide(){
     h("div",{style:{color:"#5ac67a"}},[`A failed attempt CANNOT kill your character, even in Hardcore mode -- falling only resets you to Level 1 at your current tier, it never sends you to the Graveyard.`]),
   ]));
 
+  root.appendChild(h("h3",{},["Deprecated Items"]));
+  root.appendChild(h("div",{class:"panel",style:{marginBottom:"16px"}},[
+    h("div",{style:{marginBottom:"8px"}},[`Two items have been retired and no longer serve any purpose: the Dry Log (the bonfire now gives a full one-click heal instead of consuming logs) and the Scroll of Challenge (no longer drops from chests). If you're still holding either, they carry a temporary sell price of 100 gold each at the Merchant so you're not stuck with dead weight.`]),
+  ]));
+
   root.appendChild(h("h3",{},["Kill Streak"]));
   root.appendChild(h("div",{class:"panel",style:{marginBottom:"16px"}},[
     h("div",{style:{marginBottom:"8px"}},[`Every monster you defeat without returning to Town extends your Kill Streak by 1, shown right on your Character Sheet stat panel. Its only effect is +${Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL}% Magic Find per kill in the streak -- better odds at higher-rarity gear drops, AND (as of v0.18.2) better odds of getting a drop at all on a kill that would otherwise have come up empty. It does NOT make monsters tougher or change how much gold or XP you get per kill. You'll see the current bonus tick up next to the streak count after every kill, for as long as you keep venturing without heading back to Town.`]),
@@ -12072,47 +12563,25 @@ setInterval(()=>{
   
   
   
-  // v0.22.1 (Part B3): the free town baseline (CAMPFIRE_*_PER_SECOND + bonfire bonus) must
-  // NOT leak into the maze -- it's a town-only amenity. Earned regen (class+gear regen stat,
-  // via PS.getRegen()/getStaminaRegen(), plus any active Potion of Renewal buff) still applies
-  // in the maze on top of that, unchanged. This interval is never active during combat
+  // v0.22.3 (#6): the free town baseline tick (old CAMPFIRE_*_PER_SECOND) and the Dry-Log-fed
+  // bonfire bonus are both gone entirely -- healing in town is now the one-click bonfire
+  // (kindleBonfirePanel()/PS.kindleBonfireInstant()). Only earned regen (class+gear regen
+  // stat via PS.getRegen()/getStaminaRegen(), plus any active Potion of Renewal buff) ticks
+  // here, unchanged from before. This interval is never active during combat
   // (isRegenActiveNow()/REGEN_ACTIVE_SCREENS above already exclude it) -- earned regen ticks
   // there instead via the server's own combatTickCombatRoundBuffs() (server.js), which mirrors
   // PS.getRegen()/getStaminaRegen() exactly, so HP/Stamina never desync from server-authoritative
   // combat state.
-  const inFreeTownZone=GF.screen!=="maze";
-  const freeBonus=inFreeTownZone?PS.getActiveBonfireBonus():0;
-  const freeBaselineHp=inFreeTownZone?Balance.CAMPFIRE_REGEN_PER_SECOND:0;
-  const freeBaselineStamina=inFreeTownZone?Balance.CAMPFIRE_STAMINA_REGEN_PER_SECOND:0;
-  const hpBonus=freeBonus+PS.getActiveTempBuff("regen")+PS.getRegen();
-  const staminaBonus=freeBonus+PS.getStaminaRegen();
+  const hpBonus=PS.getActiveTempBuff("regen")+PS.getRegen();
+  const staminaBonus=PS.getStaminaRegen();
   let changed=false;
-  if(PS.current_hp<PS.getMaxHp()){ PS.current_hp=Math.min(PS.getMaxHp(),PS.current_hp+freeBaselineHp+hpBonus); changed=true; }
-  if(PS.current_stamina<PS.getMaxStamina()){ PS.current_stamina=Math.min(PS.getMaxStamina(),PS.current_stamina+freeBaselineStamina+staminaBonus); changed=true; }
+  if(PS.current_hp<PS.getMaxHp() && hpBonus>0){ PS.current_hp=Math.min(PS.getMaxHp(),PS.current_hp+hpBonus); changed=true; }
+  if(PS.current_stamina<PS.getMaxStamina() && staminaBonus>0){ PS.current_stamina=Math.min(PS.getMaxStamina(),PS.current_stamina+staminaBonus); changed=true; }
   if(changed) PS.saveGame();
 
-  
-  
-  
-  
-  
-  const bonfireJustExpired = GF.screen==="town" && PS.getActiveBonfireBonus()<=0 && !!document.getElementById("bonfire-countdown-text");
-  if(bonfireJustExpired){
-    render();
-    return;
-  }
-
   if(changed){
-    
-    
-    
-    
-    
-    
-    
     if(!refreshStatHeaderInPlace(true)){ render(); return; }
   }
-  if(GF.screen==="town") refreshBonfireCountdownInPlace();
 },1000);
 
 
