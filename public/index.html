@@ -72,6 +72,12 @@ input[type=checkbox]:checked::after{content:"✓";position:absolute;top:-3px;lef
 .modal-backdrop{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:200;padding:16px;}
 .modal-box{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:20px 22px;max-width:420px;box-shadow:0 8px 30px rgba(0,0,0,.6);}
 .modal-box .row{justify-content:flex-end;margin-top:16px;}
+/* v0.22.4 (#3): the "What's New" popup got a lot more crowded as changelog entries grew --
+   widen just this one modal (not every modal-box on the site) to ~80% of the viewport,
+   capped so it doesn't sprawl on ultrawide screens, with its own scrollable note list so a
+   long entry doesn't push the "Got it" button off-screen. */
+.whats-new-box{width:min(80vw,900px);max-width:min(80vw,900px);max-height:80vh;display:flex;flex-direction:column;}
+.whats-new-box ul{overflow-y:auto;flex:1;min-height:0;}
 .social-login-btn{display:flex;align-items:center;justify-content:center;gap:8px;}
 
 .bar-bg{background:#000;border-radius:4px;overflow:hidden;height:16px;border:1px solid rgba(255,255,255,.08);position:relative;}
@@ -1167,7 +1173,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.22.3-web",
+  GAME_VERSION:"v0.22.4-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   
@@ -1254,12 +1260,20 @@ const Balance = {
     
     
     crit_multiplier:10,
-    
-    
-    
-    
-    
+
+
+
+
+
     attack_speed:5,
+    // v0.22.4 (#1): 9 new affixes registered to fill out the per-slot legal lists below so
+    // every slot has >=8 legal stats (needed for an 8-affix Legendary to actually roll 8
+    // distinct affixes per v0.22.3's slot-legality rules). Each one's gameplay EFFECT is
+    // deferred -- it rolls, displays, and validates like any other affix, but does nothing
+    // until its system ships (mana, spell damage/CDR, attack rating, thorns, etc. have no
+    // consumer yet). attack_rating's curve is a placeholder to retune once hit/accuracy exists.
+    life_on_hit:2, thorns:4, max_health_pct:3, trap_ward:10, spell_cdr:3,
+    mana:15, mana_regen:1, attack_rating:25, spell_damage:5,
   },
   
   
@@ -1299,22 +1313,27 @@ const Balance = {
   
   
   
-  AFFIX_POOL:["damage","hp","crit","armor","regen","stamina_regen","gold_find","xp_find","stamina_max","strength","dexterity","vitality","intelligence","poison_resist","magic_find","block_chance","flee_chance","crit_multiplier","attack_speed"],
+  AFFIX_POOL:["damage","hp","crit","armor","regen","stamina_regen","gold_find","xp_find","stamina_max","strength","dexterity","vitality","intelligence","poison_resist","magic_find","block_chance","flee_chance","crit_multiplier","attack_speed","life_on_hit","thorns","max_health_pct","trap_ward","spell_cdr","mana","mana_regen","attack_rating","spell_damage"],
   // v0.22.3 (#16): per-slot legal-affix map -- generation/reforge must only ever pick a stat
   // from the list for that item's slot (fixes nonsense like armor-on-weapon). Eyesight is
   // handled separately (a fixed rare bonus, not part of this pool) and is gated to head/amulet
   // only at its roll site. Must stay byte-identical to server.js's ITEM_SLOT_AFFIXES.
+  // v0.22.4 (#2): expanded from v0.22.3's map -- that version only guaranteed enough legal
+  // stats for the SMALLEST rarity tier, and several slots came up short of the 8 distinct
+  // affixes an 8-slot Legendary needs. The new stats added in v0.22.4 (#1) exist specifically
+  // to fill these lists out; every slot below now has >=8 legal entries. Same enforcement
+  // sites as before (generation/reforge/validateGearItem, client+server) -- only the map grew.
   SLOT_AFFIXES:{
-    weapon:["damage","crit","crit_multiplier","attack_speed","strength","dexterity","intelligence"],
-    head:["armor","hp","xp_find","magic_find","vitality","intelligence"],
-    shoulders:["armor","hp","block_chance","strength"],
-    armor:["armor","hp","block_chance","poison_resist","regen","strength","vitality"],
-    pants:["armor","hp","stamina_regen","stamina_max","flee_chance","vitality"],
-    gloves:["crit","crit_multiplier","attack_speed","armor","hp","block_chance","gold_find","strength","dexterity"],
-    boots:["armor","hp","poison_resist","stamina_regen","stamina_max","flee_chance","dexterity"],
-    belt:["armor","hp","block_chance","poison_resist","regen","stamina_regen","gold_find","strength","dexterity","vitality"],
-    ring:["crit","crit_multiplier","attack_speed","hp","regen","gold_find","xp_find","magic_find","strength","dexterity","vitality","intelligence"],
-    amulet:["crit","crit_multiplier","hp","poison_resist","regen","gold_find","xp_find","magic_find","vitality","intelligence"],
+    weapon:["damage","crit","crit_multiplier","attack_speed","strength","dexterity","intelligence","attack_rating","spell_damage","life_on_hit"],
+    head:["armor","hp","xp_find","magic_find","vitality","intelligence","mana","spell_damage","spell_cdr","max_health_pct"],
+    shoulders:["armor","hp","block_chance","strength","poison_resist","vitality","thorns","max_health_pct"],
+    armor:["armor","hp","block_chance","poison_resist","regen","strength","vitality","thorns","max_health_pct","mana"],
+    pants:["armor","hp","stamina_regen","stamina_max","flee_chance","vitality","max_health_pct","trap_ward"],
+    gloves:["crit","crit_multiplier","attack_speed","armor","hp","block_chance","gold_find","strength","dexterity","attack_rating","life_on_hit"],
+    boots:["armor","hp","poison_resist","stamina_regen","stamina_max","flee_chance","dexterity","trap_ward"],
+    belt:["armor","hp","block_chance","poison_resist","regen","stamina_regen","gold_find","strength","dexterity","vitality","thorns","max_health_pct","mana_regen","trap_ward"],
+    ring:["crit","crit_multiplier","attack_speed","hp","regen","gold_find","xp_find","magic_find","strength","dexterity","vitality","intelligence","mana","mana_regen","attack_rating","spell_damage","life_on_hit","spell_cdr"],
+    amulet:["crit","crit_multiplier","hp","poison_resist","regen","gold_find","xp_find","magic_find","vitality","intelligence","mana","mana_regen","spell_damage","life_on_hit","spell_cdr","max_health_pct"],
   },
 
 
@@ -2072,7 +2091,7 @@ const IF = {
     return a.value>=effectiveMax;
   },
   
-  affixIsPercent(stat){return ["crit","gold_find","xp_find","poison_resist","magic_find","block_chance","flee_chance","attack_speed"].includes(stat);},
+  affixIsPercent(stat){return ["crit","gold_find","xp_find","poison_resist","magic_find","block_chance","flee_chance","attack_speed","thorns","max_health_pct","trap_ward","spell_cdr"].includes(stat);},
   affixLabel(stat){
     switch(stat){
       case "damage": return "Damage"; case "hp": return "Hit Points";
@@ -2093,6 +2112,11 @@ const IF = {
       case "crit_multiplier": return "Critical Strike Multiplier";
       
       case "attack_speed": return "Increased Attack Speed";
+      case "life_on_hit": return "Life on Hit"; case "thorns": return "Thorns";
+      case "max_health_pct": return "Max Health %"; case "trap_ward": return "Trap Ward";
+      case "spell_cdr": return "Spell Cooldown Reduction"; case "mana": return "Mana";
+      case "mana_regen": return "Mana Regeneration"; case "attack_rating": return "Attack Rating";
+      case "spell_damage": return "Spell Damage";
       default: return stat;
     }
   },
@@ -4878,7 +4902,7 @@ function maybeShowWhatsNewPopup(){
   const dismiss=()=>{ markSeen(); closeConfirmModal(); };
   modalRoot.innerHTML="";
   modalRoot.appendChild(h("div",{class:"modal-backdrop",onClick:(e)=>{ if(e.target===e.currentTarget) dismiss(); }},[
-    h("div",{class:"modal-box"},[
+    h("div",{class:"modal-box whats-new-box"},[
       h("h3",{style:{marginTop:"0"}},[`What's new in ${latest.version}`]),
       h("ul",{style:{paddingLeft:"20px",margin:"0 0 10px"}},latest.notes.map(n=>h("li",{style:{marginBottom:"6px"}},[n]))),
       h("div",{class:"row gap"},[
@@ -11550,6 +11574,11 @@ function legacyGearSection(){
 
 
 const CHANGELOG=[
+  { version:"v0.22.4", notes:[
+    "Expanded the itemization affix pool with 9 new stats (Life on Hit, Thorns, Max Health %, Trap Ward, Spell Cooldown Reduction, Mana, Mana Regeneration, Attack Rating, Spell Damage) so every gear slot -- including Shoulders, which was coming up short -- now has enough legal stats to fill a full 8-affix Legendary. These stats roll, display, and validate normally; their gameplay effects are coming in a future update.",
+    "Rebuilt the per-slot affix legality list so every slot has at least 8 legal stats.",
+    "Widened the 'What's New' popup so longer changelog entries have room to breathe, with its own scrollbar for the note list.",
+  ]},
   { version:"v0.22.3", notes:[
     "Character names are now globally unique (case-insensitive) -- a taken name is rejected at creation.",
     "Gear drops from combat now offer a choice: Loot, Loot & Equip, or Litter (discard for -1 Forest Reputation) -- gold, consumables, and herbs still collect automatically.",
