@@ -332,27 +332,55 @@ const CLASSES = {
   galeshaper:{display_name:"Galeshaper",chain:"windrider",tier:5,next_class:null,role:"hybrid",description:"Windrider chain's endgame form, moves as one with the wind itself.",base_hp:195,hp_per_level:25,base_damage_min:30,base_damage_max:44,damage_per_level:3.8,base_crit:0.28,regen:2.4,base_str:10,base_dex:40,base_vit:40,base_int:10},
 };
 
+// v0.22.1 (Part A2): each monster now carries a difficulty BAND instead of the old flat
+// common/uncommon/rare/epic tier. The band's internal key (Common/Uncommon/Rare/Epic/
+// Legendary) reuses the SAME 5-rung item-rarity ladder (RARITY_BORDER_COLORS/
+// RARITY_DISPLAY_NAMES), so a monster's border color and the rarity of gear it favors speak
+// one language. `star`/MONSTER_BAND_INFO[tier].size give the 1..N strength rank shown as
+// filled stars within the band (see monsterStarString()). Bands were assigned by sorting all
+// 19 monsters by base_damage (tiebreak base_hp) into 4/4/4/4/3 groups -- see
+// wandrian_prompt_v0.22_consolidated.md Part A2a for the full worked table. Per Gwen's
+// decision, band membership ALSO now drives maze spawn-availability (MONSTER_BAND_INFO's
+// minAreaLevel), replacing the old tier-based gating in pickRandomMonsterForArea() -- the
+// thresholds (1/8/13/21/34) are a Fibonacci sequence by design.
 const MONSTERS = [
-  {id:"sprout",name:"Sprout",tier:"common",base_hp:20,base_damage_min:2,base_damage_max:4,base_xp:8,gold_min:1,gold_max:4,loot_table:"common"},
-  {id:"mosshide",name:"Mosshide",tier:"common",base_hp:22,base_damage_min:3,base_damage_max:6,base_xp:8,gold_min:2,gold_max:5,loot_table:"common"},
-  {id:"windwisp",name:"Windwisp",tier:"common",base_hp:16,base_damage_min:2,base_damage_max:5,base_xp:7,gold_min:1,gold_max:3,loot_table:"common"},
-  {id:"pebblekin",name:"Pebblekin",tier:"common",base_hp:26,base_damage_min:3,base_damage_max:6,base_xp:9,gold_min:2,gold_max:5,loot_table:"common"},
-  {id:"cinderling",name:"Cinderling",tier:"common",base_hp:24,base_damage_min:4,base_damage_max:7,base_xp:9,gold_min:2,gold_max:6,loot_table:"common"},
-  {id:"bramble_knight",name:"Bramble Knight",tier:"uncommon",base_hp:38,base_damage_min:6,base_damage_max:10,base_xp:12,gold_min:4,gold_max:10,loot_table:"uncommon"},
-  {id:"thornling",name:"Thornling",tier:"uncommon",base_hp:32,base_damage_min:6,base_damage_max:10,base_xp:12,gold_min:3,gold_max:9,loot_table:"uncommon"},
-  {id:"boglurker",name:"Boglurker",tier:"uncommon",base_hp:42,base_damage_min:5,base_damage_max:9,base_xp:12,gold_min:3,gold_max:8,loot_table:"uncommon"},
-  {id:"emberkin",name:"Emberkin",tier:"uncommon",base_hp:28,base_damage_min:7,base_damage_max:12,base_xp:13,gold_min:4,gold_max:9,loot_table:"uncommon"},
-  {id:"fernstalker",name:"Fernstalker",tier:"uncommon",base_hp:30,base_damage_min:8,base_damage_max:13,base_xp:13,gold_min:4,gold_max:10,loot_table:"uncommon"},
-  {id:"vinewraith",name:"Vinewraith",tier:"rare",base_hp:65,base_damage_min:10,base_damage_max:16,base_xp:18,gold_min:8,gold_max:16,loot_table:"rare"},
-  {id:"stumplurker",name:"Stumplurker",tier:"rare",base_hp:58,base_damage_min:9,base_damage_max:15,base_xp:17,gold_min:7,gold_max:15,loot_table:"rare"},
-  {id:"ashwalker",name:"Ashwalker",tier:"rare",base_hp:60,base_damage_min:8,base_damage_max:14,base_xp:18,gold_min:8,gold_max:18,loot_table:"rare"},
-  {id:"stormroot",name:"Stormroot",tier:"rare",base_hp:50,base_damage_min:11,base_damage_max:18,base_xp:19,gold_min:8,gold_max:17,loot_table:"rare"},
-  {id:"bark_golem",name:"Bark Golem",tier:"rare",base_hp:90,base_damage_min:9,base_damage_max:14,base_xp:20,gold_min:10,gold_max:20,loot_table:"rare"},
-  {id:"ancient_treant",name:"Ancient Treant",tier:"epic",base_hp:95,base_damage_min:16,base_damage_max:24,base_xp:30,gold_min:16,gold_max:28,loot_table:"epic"},
-  {id:"wildfire",name:"Wildfire",tier:"epic",base_hp:100,base_damage_min:18,base_damage_max:28,base_xp:34,gold_min:18,gold_max:32,loot_table:"epic"},
-  {id:"stonewaker",name:"Stonewaker",tier:"epic",base_hp:110,base_damage_min:17,base_damage_max:26,base_xp:32,gold_min:17,gold_max:30,loot_table:"epic"},
-  {id:"tempest_elm",name:"Tempest Elm",tier:"epic",base_hp:105,base_damage_min:19,base_damage_max:29,base_xp:36,gold_min:19,gold_max:34,loot_table:"epic"},
+  // Newborn (grey border, Common rarity) -- the 4 weakest monsters in the roster.
+  {id:"sprout",name:"Sprout",tier:"Common",star:1,base_hp:20,base_damage:3,base_xp:8,gold_min:1,gold_max:4,loot_table:"common"},
+  {id:"windwisp",name:"Windwisp",tier:"Common",star:2,base_hp:16,base_damage:3.5,base_xp:7,gold_min:1,gold_max:3,loot_table:"common"},
+  {id:"mosshide",name:"Mosshide",tier:"Common",star:3,base_hp:22,base_damage:4.5,base_xp:8,gold_min:2,gold_max:5,loot_table:"common"},
+  {id:"pebblekin",name:"Pebblekin",tier:"Common",star:4,base_hp:26,base_damage:4.5,base_xp:9,gold_min:2,gold_max:5,loot_table:"common"},
+  // Young (white border, Uncommon rarity).
+  {id:"cinderling",name:"Cinderling",tier:"Uncommon",star:1,base_hp:24,base_damage:5.5,base_xp:9,gold_min:2,gold_max:6,loot_table:"uncommon"},
+  {id:"boglurker",name:"Boglurker",tier:"Uncommon",star:2,base_hp:42,base_damage:7,base_xp:12,gold_min:3,gold_max:8,loot_table:"uncommon"},
+  {id:"thornling",name:"Thornling",tier:"Uncommon",star:3,base_hp:32,base_damage:8,base_xp:12,gold_min:3,gold_max:9,loot_table:"uncommon"},
+  {id:"bramble_knight",name:"Bramble Knight",tier:"Uncommon",star:4,base_hp:38,base_damage:8,base_xp:12,gold_min:4,gold_max:10,loot_table:"uncommon"},
+  // Mature (blue border, Rare rarity).
+  {id:"emberkin",name:"Emberkin",tier:"Rare",star:1,base_hp:28,base_damage:9.5,base_xp:13,gold_min:4,gold_max:9,loot_table:"rare"},
+  {id:"fernstalker",name:"Fernstalker",tier:"Rare",star:2,base_hp:30,base_damage:10.5,base_xp:13,gold_min:4,gold_max:10,loot_table:"rare"},
+  {id:"ashwalker",name:"Ashwalker",tier:"Rare",star:3,base_hp:60,base_damage:11,base_xp:18,gold_min:8,gold_max:18,loot_table:"rare"},
+  {id:"bark_golem",name:"Bark Golem",tier:"Rare",star:4,base_hp:90,base_damage:11.5,base_xp:20,gold_min:10,gold_max:20,loot_table:"rare"},
+  // Elder (yellow border, Epic rarity).
+  {id:"stumplurker",name:"Stumplurker",tier:"Epic",star:1,base_hp:58,base_damage:12,base_xp:17,gold_min:7,gold_max:15,loot_table:"epic"},
+  {id:"vinewraith",name:"Vinewraith",tier:"Epic",star:2,base_hp:65,base_damage:13,base_xp:18,gold_min:8,gold_max:16,loot_table:"epic"},
+  {id:"stormroot",name:"Stormroot",tier:"Epic",star:3,base_hp:50,base_damage:14.5,base_xp:19,gold_min:8,gold_max:17,loot_table:"epic"},
+  {id:"ancient_treant",name:"Ancient Treant",tier:"Epic",star:4,base_hp:95,base_damage:20,base_xp:30,gold_min:16,gold_max:28,loot_table:"epic"},
+  // Ancient (gold border, Legendary rarity) -- only 3 members, the toughest in the game.
+  {id:"stonewaker",name:"Stonewaker",tier:"Legendary",star:1,base_hp:110,base_damage:21.5,base_xp:32,gold_min:17,gold_max:30,loot_table:"legendary"},
+  {id:"wildfire",name:"Wildfire",tier:"Legendary",star:2,base_hp:100,base_damage:23,base_xp:34,gold_min:18,gold_max:32,loot_table:"legendary"},
+  {id:"tempest_elm",name:"Tempest Elm",tier:"Legendary",star:3,base_hp:105,base_damage:24,base_xp:36,gold_min:19,gold_max:34,loot_table:"legendary"},
 ];
+// Newborn->Young->Mature->Elder->Ancient: display label, spawn-gate area level, and band size
+// (for the star-rank denominator). Fibonacci thresholds per Gwen: 1/8/13/21/34.
+const MONSTER_BAND_INFO = {
+  Common:    {label:"Newborn", minAreaLevel:1,  size:4},
+  Uncommon:  {label:"Young",   minAreaLevel:8,  size:4},
+  Rare:      {label:"Mature",  minAreaLevel:13, size:4},
+  Epic:      {label:"Elder",   minAreaLevel:21, size:4},
+  Legendary: {label:"Ancient", minAreaLevel:34, size:3},
+};
+function monsterStarString(star,size){
+  return "★".repeat(star)+"☆".repeat(Math.max(0,size-star));
+}
 
 const ITEMS = {
   
@@ -523,6 +551,10 @@ const LOOT_TABLES = {
   uncommon:[{type:"nothing",weight:139},{type:"gear",weight:66},{type:"consumable",weight:50,item_id:"health_potion"},{type:"herb",weight:1,herb_id:"emberroot"},{type:"consumable",weight:26,item_id:"dry_branch"}],
   rare:[{type:"nothing",weight:112},{type:"gear",weight:99},{type:"consumable",weight:50,item_id:"medium_health_potion"},{type:"herb",weight:1,herb_id:"frostvine"},{type:"consumable",weight:20,item_id:"dry_branch"}],
   epic:[{type:"nothing",weight:83},{type:"gear",weight:149},{type:"consumable",weight:50,item_id:"greater_health_potion"},{type:"herb",weight:1,herb_id:"frostvine"},{type:"consumable",weight:17,item_id:"dry_branch"}],
+  // v0.22.1 (Part A2d): 5th band added for the new "Ancient" monster tier -- continues the
+  // same trend as the 4 tables above it (less "nothing", more "gear", a pricier guaranteed
+  // consumable, a rarer herb, less Dry Log filler).
+  legendary:[{type:"nothing",weight:60},{type:"gear",weight:180},{type:"consumable",weight:50,item_id:"supreme_health_potion"},{type:"herb",weight:1,herb_id:"starveil"},{type:"consumable",weight:14,item_id:"dry_branch"}],
 };
 
 const PORTRAITS = {
@@ -683,7 +715,11 @@ function inlineIcon(svg,size=18){ const d=h("span",{style:{display:"inline-flex"
 
 
 
+// v0.22.1 (Part B5): bespoke consumable/herb icon art lifted verbatim from the item_icons_gallery.html reference sheet, keyed by internal item/herb id (matched to the gallery's display-name labels -- ids are never renamed). itemIconSvg()/herbIconSvg() check these maps first and only fall back to the older procedural/generic art for any id the gallery doesn't cover (e.g. gear, which the gallery doesn't include).
+const GALLERY_ITEM_ICONS = {"minor_health_potion":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"4\" width=\"8\" height=\"6\" rx=\"2\" fill=\"#8a6a4a\"/><rect x=\"16.5\" y=\"4\" width=\"7\" height=\"2\" rx=\"1\" fill=\"#a5865f\"/><rect x=\"17\" y=\"9\" width=\"6\" height=\"6\" fill=\"#cde0e6\"/><circle cx=\"20\" cy=\"25\" r=\"12\" fill=\"#e8eef2\" stroke=\"#6f8a96\" stroke-width=\"1.3\"/><path d=\"M9,25 Q20,21 31,25 Q31,33 20,36 Q9,33 9,25 Z\" fill=\"#e07a7a\"/><path d=\"M9,25 Q20,21 31,25 Q26,27 20,27 Q13,27 9,25 Z\" fill=\"#b84a4a\" opacity=\"0.55\"/><circle cx=\"20\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><path d=\"M13,17 Q10,22 12,28\" stroke=\"#fff\" stroke-width=\"1.6\" fill=\"none\" opacity=\"0.6\" stroke-linecap=\"round\"/></svg>","health_potion":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"4\" width=\"8\" height=\"6\" rx=\"2\" fill=\"#8a6a4a\"/><rect x=\"16.5\" y=\"4\" width=\"7\" height=\"2\" rx=\"1\" fill=\"#a5865f\"/><rect x=\"17\" y=\"9\" width=\"6\" height=\"6\" fill=\"#cde0e6\"/><circle cx=\"20\" cy=\"25\" r=\"12\" fill=\"#e8eef2\" stroke=\"#6f8a96\" stroke-width=\"1.3\"/><path d=\"M9,25 Q20,21 31,25 Q31,33 20,36 Q9,33 9,25 Z\" fill=\"#db5a5a\"/><path d=\"M9,25 Q20,21 31,25 Q26,27 20,27 Q13,27 9,25 Z\" fill=\"#a83a3a\" opacity=\"0.55\"/><circle cx=\"17\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><circle cx=\"23\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><path d=\"M13,17 Q10,22 12,28\" stroke=\"#fff\" stroke-width=\"1.6\" fill=\"none\" opacity=\"0.6\" stroke-linecap=\"round\"/></svg>","medium_health_potion":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"4\" width=\"8\" height=\"6\" rx=\"2\" fill=\"#8a6a4a\"/><rect x=\"16.5\" y=\"4\" width=\"7\" height=\"2\" rx=\"1\" fill=\"#a5865f\"/><rect x=\"17\" y=\"9\" width=\"6\" height=\"6\" fill=\"#cde0e6\"/><circle cx=\"20\" cy=\"25\" r=\"12\" fill=\"#e8eef2\" stroke=\"#6f8a96\" stroke-width=\"1.3\"/><path d=\"M9,25 Q20,21 31,25 Q31,33 20,36 Q9,33 9,25 Z\" fill=\"#d24a4a\"/><path d=\"M9,25 Q20,21 31,25 Q26,27 20,27 Q13,27 9,25 Z\" fill=\"#9a3030\" opacity=\"0.55\"/><circle cx=\"14\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><circle cx=\"20\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><circle cx=\"26\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><path d=\"M13,17 Q10,22 12,28\" stroke=\"#fff\" stroke-width=\"1.6\" fill=\"none\" opacity=\"0.6\" stroke-linecap=\"round\"/></svg>","greater_health_potion":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"4\" width=\"8\" height=\"6\" rx=\"2\" fill=\"#8a6a4a\"/><rect x=\"16.5\" y=\"4\" width=\"7\" height=\"2\" rx=\"1\" fill=\"#a5865f\"/><rect x=\"17\" y=\"9\" width=\"6\" height=\"6\" fill=\"#cde0e6\"/><circle cx=\"20\" cy=\"25\" r=\"12\" fill=\"#e8eef2\" stroke=\"#6f8a96\" stroke-width=\"1.3\"/><path d=\"M9,25 Q20,21 31,25 Q31,33 20,36 Q9,33 9,25 Z\" fill=\"#c53a3a\"/><path d=\"M9,25 Q20,21 31,25 Q26,27 20,27 Q13,27 9,25 Z\" fill=\"#8a2626\" opacity=\"0.55\"/><circle cx=\"11\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><circle cx=\"17\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><circle cx=\"23\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><circle cx=\"29\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><path d=\"M13,17 Q10,22 12,28\" stroke=\"#fff\" stroke-width=\"1.6\" fill=\"none\" opacity=\"0.6\" stroke-linecap=\"round\"/></svg>","supreme_health_potion":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"4\" width=\"8\" height=\"6\" rx=\"2\" fill=\"#e0b23d\"/><rect x=\"16.5\" y=\"4\" width=\"7\" height=\"2\" rx=\"1\" fill=\"#f2d485\"/><rect x=\"17\" y=\"9\" width=\"6\" height=\"6\" fill=\"#cde0e6\"/><circle cx=\"20\" cy=\"25\" r=\"12\" fill=\"#e8eef2\" stroke=\"#6f8a96\" stroke-width=\"1.3\"/><path d=\"M9,25 Q20,21 31,25 Q31,33 20,36 Q9,33 9,25 Z\" fill=\"#b02f2f\"/><path d=\"M9,25 Q20,21 31,25 Q26,27 20,27 Q13,27 9,25 Z\" fill=\"#7a1e1e\" opacity=\"0.55\"/><circle cx=\"8\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><circle cx=\"14\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><circle cx=\"20\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><circle cx=\"26\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><circle cx=\"32\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><path d=\"M13,17 Q10,22 12,28\" stroke=\"#fff\" stroke-width=\"1.6\" fill=\"none\" opacity=\"0.6\" stroke-linecap=\"round\"/></svg>","minor_stamina_potion":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"4\" width=\"8\" height=\"6\" rx=\"2\" fill=\"#8a6a4a\"/><rect x=\"16.5\" y=\"4\" width=\"7\" height=\"2\" rx=\"1\" fill=\"#a5865f\"/><rect x=\"17\" y=\"9\" width=\"6\" height=\"6\" fill=\"#cde0e6\"/><circle cx=\"20\" cy=\"25\" r=\"12\" fill=\"#e8eef2\" stroke=\"#6f8a96\" stroke-width=\"1.3\"/><path d=\"M9,25 Q20,21 31,25 Q31,33 20,36 Q9,33 9,25 Z\" fill=\"#6bbfd0\"/><path d=\"M9,25 Q20,21 31,25 Q26,27 20,27 Q13,27 9,25 Z\" fill=\"#3f8a9a\" opacity=\"0.55\"/><circle cx=\"20\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><path d=\"M13,17 Q10,22 12,28\" stroke=\"#fff\" stroke-width=\"1.6\" fill=\"none\" opacity=\"0.6\" stroke-linecap=\"round\"/></svg>","stamina_potion":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"4\" width=\"8\" height=\"6\" rx=\"2\" fill=\"#8a6a4a\"/><rect x=\"16.5\" y=\"4\" width=\"7\" height=\"2\" rx=\"1\" fill=\"#a5865f\"/><rect x=\"17\" y=\"9\" width=\"6\" height=\"6\" fill=\"#cde0e6\"/><circle cx=\"20\" cy=\"25\" r=\"12\" fill=\"#e8eef2\" stroke=\"#6f8a96\" stroke-width=\"1.3\"/><path d=\"M9,25 Q20,21 31,25 Q31,33 20,36 Q9,33 9,25 Z\" fill=\"#4fa9bf\"/><path d=\"M9,25 Q20,21 31,25 Q26,27 20,27 Q13,27 9,25 Z\" fill=\"#2f7a90\" opacity=\"0.55\"/><circle cx=\"17\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><circle cx=\"23\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><path d=\"M13,17 Q10,22 12,28\" stroke=\"#fff\" stroke-width=\"1.6\" fill=\"none\" opacity=\"0.6\" stroke-linecap=\"round\"/></svg>","medium_stamina_potion":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"4\" width=\"8\" height=\"6\" rx=\"2\" fill=\"#8a6a4a\"/><rect x=\"16.5\" y=\"4\" width=\"7\" height=\"2\" rx=\"1\" fill=\"#a5865f\"/><rect x=\"17\" y=\"9\" width=\"6\" height=\"6\" fill=\"#cde0e6\"/><circle cx=\"20\" cy=\"25\" r=\"12\" fill=\"#e8eef2\" stroke=\"#6f8a96\" stroke-width=\"1.3\"/><path d=\"M9,25 Q20,21 31,25 Q31,33 20,36 Q9,33 9,25 Z\" fill=\"#3f97b0\"/><path d=\"M9,25 Q20,21 31,25 Q26,27 20,27 Q13,27 9,25 Z\" fill=\"#256a82\" opacity=\"0.55\"/><circle cx=\"14\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><circle cx=\"20\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><circle cx=\"26\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><path d=\"M13,17 Q10,22 12,28\" stroke=\"#fff\" stroke-width=\"1.6\" fill=\"none\" opacity=\"0.6\" stroke-linecap=\"round\"/></svg>","greater_stamina_potion":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"4\" width=\"8\" height=\"6\" rx=\"2\" fill=\"#8a6a4a\"/><rect x=\"16.5\" y=\"4\" width=\"7\" height=\"2\" rx=\"1\" fill=\"#a5865f\"/><rect x=\"17\" y=\"9\" width=\"6\" height=\"6\" fill=\"#cde0e6\"/><circle cx=\"20\" cy=\"25\" r=\"12\" fill=\"#e8eef2\" stroke=\"#6f8a96\" stroke-width=\"1.3\"/><path d=\"M9,25 Q20,21 31,25 Q31,33 20,36 Q9,33 9,25 Z\" fill=\"#2f86a0\"/><path d=\"M9,25 Q20,21 31,25 Q26,27 20,27 Q13,27 9,25 Z\" fill=\"#1c5a72\" opacity=\"0.55\"/><circle cx=\"11\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><circle cx=\"17\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><circle cx=\"23\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><circle cx=\"29\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><path d=\"M13,17 Q10,22 12,28\" stroke=\"#fff\" stroke-width=\"1.6\" fill=\"none\" opacity=\"0.6\" stroke-linecap=\"round\"/></svg>","supreme_stamina_potion":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"4\" width=\"8\" height=\"6\" rx=\"2\" fill=\"#e0b23d\"/><rect x=\"16.5\" y=\"4\" width=\"7\" height=\"2\" rx=\"1\" fill=\"#f2d485\"/><rect x=\"17\" y=\"9\" width=\"6\" height=\"6\" fill=\"#cde0e6\"/><circle cx=\"20\" cy=\"25\" r=\"12\" fill=\"#e8eef2\" stroke=\"#6f8a96\" stroke-width=\"1.3\"/><path d=\"M9,25 Q20,21 31,25 Q31,33 20,36 Q9,33 9,25 Z\" fill=\"#216f8a\"/><path d=\"M9,25 Q20,21 31,25 Q26,27 20,27 Q13,27 9,25 Z\" fill=\"#124a60\" opacity=\"0.55\"/><circle cx=\"8\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><circle cx=\"14\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><circle cx=\"20\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><circle cx=\"26\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><circle cx=\"32\" cy=\"18\" r=\"1.3\" fill=\"#b8862f\"/><path d=\"M13,17 Q10,22 12,28\" stroke=\"#fff\" stroke-width=\"1.6\" fill=\"none\" opacity=\"0.6\" stroke-linecap=\"round\"/></svg>","potion_of_might":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><circle cx=\"20\" cy=\"24\" r=\"15\" fill=\"#e8895a\" opacity=\"0.16\"/><rect x=\"17.5\" y=\"7\" width=\"5\" height=\"6\" fill=\"#cde0e6\"/><path d=\"M20,2 l4.5,4.5 -4.5,4.5 -4.5,-4.5 Z\" fill=\"#e8895a\" stroke=\"#fff\" stroke-width=\"0.8\" stroke-opacity=\"0.5\"/><circle cx=\"20\" cy=\"25\" r=\"11.5\" fill=\"#e8eef2\" stroke=\"#6f8a96\" stroke-width=\"1.3\"/><circle cx=\"20\" cy=\"25.5\" r=\"8.5\" fill=\"#c0603a\"/><path d=\"M20,20 l3,3 -3,3 -3,-3 Z\" fill=\"#ffd9a8\" opacity=\"0.9\"/><circle cx=\"16\" cy=\"21\" r=\"2.4\" fill=\"#fff\" opacity=\"0.4\"/><circle cx=\"24.5\" cy=\"30\" r=\"1.5\" fill=\"#fff\" opacity=\"0.3\"/></svg>","potion_of_swiftness":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><circle cx=\"20\" cy=\"24\" r=\"15\" fill=\"#7fce8a\" opacity=\"0.16\"/><rect x=\"17.5\" y=\"7\" width=\"5\" height=\"6\" fill=\"#cde0e6\"/><path d=\"M20,2 l4.5,4.5 -4.5,4.5 -4.5,-4.5 Z\" fill=\"#7fce8a\" stroke=\"#fff\" stroke-width=\"0.8\" stroke-opacity=\"0.5\"/><circle cx=\"20\" cy=\"25\" r=\"11.5\" fill=\"#e8eef2\" stroke=\"#6f8a96\" stroke-width=\"1.3\"/><circle cx=\"20\" cy=\"25.5\" r=\"8.5\" fill=\"#4f9a5e\"/><path d=\"M16,28 l6,-8 -3,0 3,-6\" stroke=\"#eafbe4\" stroke-width=\"1.6\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"16\" cy=\"21\" r=\"2.4\" fill=\"#fff\" opacity=\"0.4\"/><circle cx=\"24.5\" cy=\"30\" r=\"1.5\" fill=\"#fff\" opacity=\"0.3\"/></svg>","potion_of_intellect":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><circle cx=\"20\" cy=\"24\" r=\"15\" fill=\"#8fa4ff\" opacity=\"0.16\"/><rect x=\"17.5\" y=\"7\" width=\"5\" height=\"6\" fill=\"#cde0e6\"/><path d=\"M20,2 l4.5,4.5 -4.5,4.5 -4.5,-4.5 Z\" fill=\"#8fa4ff\" stroke=\"#fff\" stroke-width=\"0.8\" stroke-opacity=\"0.5\"/><circle cx=\"20\" cy=\"25\" r=\"11.5\" fill=\"#e8eef2\" stroke=\"#6f8a96\" stroke-width=\"1.3\"/><circle cx=\"20\" cy=\"25.5\" r=\"8.5\" fill=\"#5a6fd0\"/><circle cx=\"20\" cy=\"25\" r=\"3.4\" fill=\"none\" stroke=\"#eaf0ff\" stroke-width=\"1.4\"/><circle cx=\"20\" cy=\"25\" r=\"1\" fill=\"#eaf0ff\"/><circle cx=\"16\" cy=\"21\" r=\"2.4\" fill=\"#fff\" opacity=\"0.4\"/><circle cx=\"24.5\" cy=\"30\" r=\"1.5\" fill=\"#fff\" opacity=\"0.3\"/></svg>","potion_of_wardveil":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><circle cx=\"20\" cy=\"24\" r=\"15\" fill=\"#a9bccc\" opacity=\"0.16\"/><rect x=\"17.5\" y=\"7\" width=\"5\" height=\"6\" fill=\"#cde0e6\"/><path d=\"M20,2 l4.5,4.5 -4.5,4.5 -4.5,-4.5 Z\" fill=\"#a9bccc\" stroke=\"#fff\" stroke-width=\"0.8\" stroke-opacity=\"0.5\"/><circle cx=\"20\" cy=\"25\" r=\"11.5\" fill=\"#e8eef2\" stroke=\"#6f8a96\" stroke-width=\"1.3\"/><circle cx=\"20\" cy=\"25.5\" r=\"8.5\" fill=\"#6f8090\"/><path d=\"M20,20 l5,2 v3 q0,4 -5,6 q-5,-2 -5,-6 v-3 Z\" fill=\"#e6eef4\" opacity=\"0.9\"/><circle cx=\"16\" cy=\"21\" r=\"2.4\" fill=\"#fff\" opacity=\"0.4\"/><circle cx=\"24.5\" cy=\"30\" r=\"1.5\" fill=\"#fff\" opacity=\"0.3\"/></svg>","potion_of_renewal":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><circle cx=\"20\" cy=\"24\" r=\"15\" fill=\"#f0a0c4\" opacity=\"0.16\"/><rect x=\"17.5\" y=\"7\" width=\"5\" height=\"6\" fill=\"#cde0e6\"/><path d=\"M20,2 l4.5,4.5 -4.5,4.5 -4.5,-4.5 Z\" fill=\"#f0a0c4\" stroke=\"#fff\" stroke-width=\"0.8\" stroke-opacity=\"0.5\"/><circle cx=\"20\" cy=\"25\" r=\"11.5\" fill=\"#e8eef2\" stroke=\"#6f8a96\" stroke-width=\"1.3\"/><circle cx=\"20\" cy=\"25.5\" r=\"8.5\" fill=\"#cf6a9a\"/><path d=\"M24,23 a4,4 0 1 1 -1,-3\" stroke=\"#ffe4f0\" stroke-width=\"1.6\" fill=\"none\" stroke-linecap=\"round\"/><path d=\"M23,17 l1,3 -3,0 Z\" fill=\"#ffe4f0\"/><circle cx=\"16\" cy=\"21\" r=\"2.4\" fill=\"#fff\" opacity=\"0.4\"/><circle cx=\"24.5\" cy=\"30\" r=\"1.5\" fill=\"#fff\" opacity=\"0.3\"/></svg>","antidote":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"4\" width=\"8\" height=\"6\" rx=\"2\" fill=\"#8a6a4a\"/><rect x=\"16.5\" y=\"4\" width=\"7\" height=\"2\" rx=\"1\" fill=\"#a5865f\"/><rect x=\"17\" y=\"9\" width=\"6\" height=\"6\" fill=\"#cde0e6\"/><circle cx=\"20\" cy=\"25\" r=\"12\" fill=\"#e8eef2\" stroke=\"#6f8a96\" stroke-width=\"1.3\"/><path d=\"M9,25 Q20,21 31,25 Q31,33 20,36 Q9,33 9,25 Z\" fill=\"#5aa84f\"/><path d=\"M9,25 Q20,21 31,25 Q26,27 20,27 Q13,27 9,25 Z\" fill=\"#3a7a34\" opacity=\"0.55\"/><path d=\"M13,17 Q10,22 12,28\" stroke=\"#fff\" stroke-width=\"1.6\" fill=\"none\" opacity=\"0.6\" stroke-linecap=\"round\"/><path d=\"M20,22 Q14,25 15,31 Q21,30 20,22 Z\" fill=\"#bde8a8\"/><path d=\"M20,22 Q26,25 25,31 Q19,30 20,22 Z\" fill=\"#a8dc90\"/></svg>","elixir_of_eyesight":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"4\" width=\"8\" height=\"6\" rx=\"2\" fill=\"#8a6a4a\"/><rect x=\"17\" y=\"9\" width=\"6\" height=\"6\" fill=\"#cde0e6\"/><circle cx=\"20\" cy=\"25\" r=\"12\" fill=\"#e8eef2\" stroke=\"#6f8a96\" stroke-width=\"1.3\"/><path d=\"M9,25 Q20,21 31,25 Q31,33 20,36 Q9,33 9,25 Z\" fill=\"#7a5fd0\"/><path d=\"M11,26 Q20,22 29,26 Q29,24 20,24 Q11,24 11,26 Z\" fill=\"#a08fe6\" opacity=\"0.6\"/><path d=\"M13,28 Q20,23 27,28 Q20,33 13,28 Z\" fill=\"#f4f0ff\"/><circle cx=\"20\" cy=\"28\" r=\"2.8\" fill=\"#5a3fa0\"/><circle cx=\"20\" cy=\"28\" r=\"1\" fill=\"#1a1030\"/><path d=\"M13,16 Q10,21 12,27\" stroke=\"#fff\" stroke-width=\"1.5\" fill=\"none\" opacity=\"0.5\" stroke-linecap=\"round\"/></svg>","elixir_of_clarity":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><circle cx=\"20\" cy=\"23\" r=\"15\" fill=\"#a9e6ee\" opacity=\"0.14\"/><rect x=\"17.5\" y=\"5\" width=\"5\" height=\"6\" fill=\"#cde0e6\"/><rect x=\"16.5\" y=\"3\" width=\"7\" height=\"3\" rx=\"1\" fill=\"#cfae5e\"/><path d=\"M20,12 L31,22 L26,35 L14,35 L9,22 Z\" fill=\"#cdeef4\" stroke=\"#6fa6b2\" stroke-width=\"1.3\"/><path d=\"M20,12 L20,35 M9,22 L31,22 M14,35 L20,22 L26,35\" stroke=\"#8fc9d4\" stroke-width=\"1\" opacity=\"0.7\" fill=\"none\"/><path d=\"M20,15 L26,22 L20,26 L14,22 Z\" fill=\"#eafaff\" opacity=\"0.7\"/><path d=\"M31,12 l1,3 3,1 -3,1 -1,3 -1,-3 -3,-1 3,-1 Z\" fill=\"#eafaff\" opacity=\"0.9\"/></svg>","scroll_of_challenge_1":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"10\" y=\"10\" width=\"20\" height=\"20\" rx=\"2\" fill=\"#efe2bf\" stroke=\"#c2a978\" stroke-width=\"1.3\"/><path d=\"M14,15 h12 M14,25 h12\" stroke=\"#c2ab7a\" stroke-width=\"1\" opacity=\"0.7\"/><rect x=\"7\" y=\"6\" width=\"26\" height=\"6\" rx=\"3\" fill=\"#d8c090\" stroke=\"#a8946a\" stroke-width=\"1\"/><rect x=\"7\" y=\"28\" width=\"26\" height=\"6\" rx=\"3\" fill=\"#d8c090\" stroke=\"#a8946a\" stroke-width=\"1\"/><circle cx=\"20\" cy=\"20\" r=\"6\" fill=\"#7a9a4a\" stroke=\"#00000033\" stroke-width=\"1\"/><rect x=\"19.3\" y=\"17\" width=\"1.4\" height=\"6\" rx=\"0.6\" fill=\"#fff\" opacity=\"0.9\"/></svg>","scroll_of_challenge_2":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"10\" y=\"10\" width=\"20\" height=\"20\" rx=\"2\" fill=\"#efe2bf\" stroke=\"#c2a978\" stroke-width=\"1.3\"/><path d=\"M14,15 h12 M14,25 h12\" stroke=\"#c2ab7a\" stroke-width=\"1\" opacity=\"0.7\"/><rect x=\"7\" y=\"6\" width=\"26\" height=\"6\" rx=\"3\" fill=\"#d8c090\" stroke=\"#a8946a\" stroke-width=\"1\"/><rect x=\"7\" y=\"28\" width=\"26\" height=\"6\" rx=\"3\" fill=\"#d8c090\" stroke=\"#a8946a\" stroke-width=\"1\"/><circle cx=\"20\" cy=\"20\" r=\"6\" fill=\"#c99a3a\" stroke=\"#00000033\" stroke-width=\"1\"/><rect x=\"17.1\" y=\"17\" width=\"1.4\" height=\"6\" rx=\"0.6\" fill=\"#fff\" opacity=\"0.9\"/><rect x=\"21.500000000000004\" y=\"17\" width=\"1.4\" height=\"6\" rx=\"0.6\" fill=\"#fff\" opacity=\"0.9\"/></svg>","scroll_of_challenge_3":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"10\" y=\"10\" width=\"20\" height=\"20\" rx=\"2\" fill=\"#efe2bf\" stroke=\"#c2a978\" stroke-width=\"1.3\"/><path d=\"M14,15 h12 M14,25 h12\" stroke=\"#c2ab7a\" stroke-width=\"1\" opacity=\"0.7\"/><rect x=\"7\" y=\"6\" width=\"26\" height=\"6\" rx=\"3\" fill=\"#d8c090\" stroke=\"#a8946a\" stroke-width=\"1\"/><rect x=\"7\" y=\"28\" width=\"26\" height=\"6\" rx=\"3\" fill=\"#d8c090\" stroke=\"#a8946a\" stroke-width=\"1\"/><circle cx=\"20\" cy=\"20\" r=\"6\" fill=\"#b5484a\" stroke=\"#00000033\" stroke-width=\"1\"/><rect x=\"14.9\" y=\"17\" width=\"1.4\" height=\"6\" rx=\"0.6\" fill=\"#fff\" opacity=\"0.9\"/><rect x=\"19.3\" y=\"17\" width=\"1.4\" height=\"6\" rx=\"0.6\" fill=\"#fff\" opacity=\"0.9\"/><rect x=\"23.7\" y=\"17\" width=\"1.4\" height=\"6\" rx=\"0.6\" fill=\"#fff\" opacity=\"0.9\"/></svg>","stronghold_key":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><g transform=\"rotate(45 20 20)\"><circle cx=\"20\" cy=\"9\" r=\"7.5\" fill=\"none\" stroke=\"#b5793f\" stroke-width=\"4\"/><circle cx=\"20\" cy=\"9\" r=\"3\" fill=\"#e8c07a\"/><rect x=\"18\" y=\"15\" width=\"4\" height=\"20\" rx=\"1.5\" fill=\"#b5793f\"/><rect x=\"22\" y=\"28\" width=\"6\" height=\"3.4\" rx=\"1\" fill=\"#b5793f\"/><rect x=\"22\" y=\"33\" width=\"8\" height=\"3.4\" rx=\"1\" fill=\"#b5793f\"/></g></svg>","stronghold_key_t2":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><g transform=\"rotate(45 20 20)\"><circle cx=\"20\" cy=\"9\" r=\"7.5\" fill=\"none\" stroke=\"#b8bcc4\" stroke-width=\"4\"/><circle cx=\"20\" cy=\"9\" r=\"3\" fill=\"#eef2f8\"/><rect x=\"18\" y=\"15\" width=\"4\" height=\"20\" rx=\"1.5\" fill=\"#b8bcc4\"/><rect x=\"22\" y=\"28\" width=\"6\" height=\"3.4\" rx=\"1\" fill=\"#b8bcc4\"/><rect x=\"22\" y=\"33\" width=\"8\" height=\"3.4\" rx=\"1\" fill=\"#b8bcc4\"/></g></svg>","stronghold_key_t3":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><g transform=\"rotate(45 20 20)\"><circle cx=\"20\" cy=\"9\" r=\"7.5\" fill=\"none\" stroke=\"#d9a83f\" stroke-width=\"4\"/><circle cx=\"20\" cy=\"9\" r=\"3\" fill=\"#f4dc8a\"/><rect x=\"18\" y=\"15\" width=\"4\" height=\"20\" rx=\"1.5\" fill=\"#d9a83f\"/><rect x=\"22\" y=\"28\" width=\"6\" height=\"3.4\" rx=\"1\" fill=\"#d9a83f\"/><rect x=\"22\" y=\"33\" width=\"8\" height=\"3.4\" rx=\"1\" fill=\"#d9a83f\"/></g></svg>","stronghold_key_t4":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><g transform=\"rotate(45 20 20)\"><circle cx=\"20\" cy=\"9\" r=\"7.5\" fill=\"none\" stroke=\"#3f9a9a\" stroke-width=\"4\"/><circle cx=\"20\" cy=\"9\" r=\"3\" fill=\"#8fe0e0\"/><rect x=\"18\" y=\"15\" width=\"4\" height=\"20\" rx=\"1.5\" fill=\"#3f9a9a\"/><rect x=\"22\" y=\"28\" width=\"6\" height=\"3.4\" rx=\"1\" fill=\"#3f9a9a\"/><rect x=\"22\" y=\"33\" width=\"8\" height=\"3.4\" rx=\"1\" fill=\"#3f9a9a\"/></g></svg>","stronghold_key_t5":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><g transform=\"rotate(45 20 20)\"><circle cx=\"20\" cy=\"9\" r=\"7.5\" fill=\"none\" stroke=\"#8a6fd0\" stroke-width=\"4\"/><circle cx=\"20\" cy=\"9\" r=\"3\" fill=\"#c9b3ff\"/><rect x=\"18\" y=\"15\" width=\"4\" height=\"20\" rx=\"1.5\" fill=\"#8a6fd0\"/><rect x=\"22\" y=\"28\" width=\"6\" height=\"3.4\" rx=\"1\" fill=\"#8a6fd0\"/><rect x=\"22\" y=\"33\" width=\"8\" height=\"3.4\" rx=\"1\" fill=\"#8a6fd0\"/></g></svg>","dry_branch":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><g transform=\"rotate(-18 20 20)\"><rect x=\"6\" y=\"15\" width=\"28\" height=\"11\" rx=\"5.5\" fill=\"#8a5a34\" stroke=\"#5a3a1f\" stroke-width=\"1.6\"/><ellipse cx=\"8\" cy=\"20.5\" rx=\"3.6\" ry=\"5\" fill=\"#c99a68\" stroke=\"#5a3a1f\" stroke-width=\"1.3\"/><ellipse cx=\"8\" cy=\"20.5\" rx=\"1.7\" ry=\"2.6\" fill=\"#8a5a34\"/><path d=\"M14,18 Q22,20 30,17 M13,24 Q22,26 31,23\" stroke=\"#5a3a1f\" stroke-width=\"1\" fill=\"none\" opacity=\"0.55\"/><path d=\"M20,15 l2,-5 M26,15 l3,-4\" stroke=\"#4a7a3a\" stroke-width=\"1.6\" stroke-linecap=\"round\"/></g></svg>","traveler_pouch":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M10,18 Q20,9 30,18 L33,32 Q20,38 7,32 Z\" fill=\"#c2a06a\" stroke=\"#8a6a3a\" stroke-width=\"1.6\"/><path d=\"M12,18 Q20,14 28,18\" stroke=\"#8a6a3a\" stroke-width=\"1.4\" fill=\"none\" opacity=\"0.6\"/><rect x=\"14\" y=\"10\" width=\"12\" height=\"5\" rx=\"2.5\" fill=\"none\" stroke=\"#c9a04a\" stroke-width=\"1.6\"/></svg>","woven_bag":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M10,18 Q20,9 30,18 L33,32 Q20,38 7,32 Z\" fill=\"#6f9a52\" stroke=\"#3f6b38\" stroke-width=\"1.6\"/><path d=\"M12,18 Q20,14 28,18\" stroke=\"#3f6b38\" stroke-width=\"1.4\" fill=\"none\" opacity=\"0.6\"/><rect x=\"14\" y=\"10\" width=\"12\" height=\"5\" rx=\"2.5\" fill=\"none\" stroke=\"#c9a04a\" stroke-width=\"1.6\"/></svg>","bramble_sack":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M10,18 Q20,9 30,18 L33,32 Q20,38 7,32 Z\" fill=\"#8a6a4a\" stroke=\"#4a3524\" stroke-width=\"1.6\"/><path d=\"M12,18 Q20,14 28,18\" stroke=\"#4a3524\" stroke-width=\"1.4\" fill=\"none\" opacity=\"0.6\"/><rect x=\"14\" y=\"10\" width=\"12\" height=\"5\" rx=\"2.5\" fill=\"none\" stroke=\"#c9a04a\" stroke-width=\"1.6\"/><path d=\"M10,22 l-3,-2 M30,22 l3,-2 M9,28 l-3,1 M31,28 l3,1\" stroke=\"#4a3524\" stroke-width=\"1.4\" stroke-linecap=\"round\"/></svg>","rootpack_ancient":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M10,18 Q20,9 30,18 L33,32 Q20,38 7,32 Z\" fill=\"#6a5a8a\" stroke=\"#3a2e5a\" stroke-width=\"1.6\"/><path d=\"M12,18 Q20,14 28,18\" stroke=\"#3a2e5a\" stroke-width=\"1.4\" fill=\"none\" opacity=\"0.6\"/><rect x=\"14\" y=\"10\" width=\"12\" height=\"5\" rx=\"2.5\" fill=\"none\" stroke=\"#c9a04a\" stroke-width=\"1.6\"/><rect x=\"16\" y=\"24\" width=\"8\" height=\"6\" rx=\"1\" fill=\"#3a2e5a\"/><rect x=\"18\" y=\"26\" width=\"4\" height=\"2\" fill=\"#6a5a8a\"/><circle cx=\"20\" cy=\"27\" r=\"4\" fill=\"none\" stroke=\"#c9a04a\" stroke-width=\"1.2\" opacity=\"0.8\"/><path d=\"M20,24 v6 M17,27 h6\" stroke=\"#c9a04a\" stroke-width=\"1\" opacity=\"0.8\"/></svg>"};
+const GALLERY_HERB_ICONS = {"sunpetal":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><g fill=\"#f2c84a\" stroke=\"#c99a2a\" stroke-width=\"1\"><ellipse cx=\"20\" cy=\"9\" rx=\"4\" ry=\"7\"/><ellipse cx=\"20\" cy=\"31\" rx=\"4\" ry=\"7\"/><ellipse cx=\"9\" cy=\"20\" rx=\"7\" ry=\"4\"/><ellipse cx=\"31\" cy=\"20\" rx=\"7\" ry=\"4\"/><ellipse cx=\"12\" cy=\"12\" rx=\"5.5\" ry=\"4\" transform=\"rotate(45 12 12)\"/><ellipse cx=\"28\" cy=\"12\" rx=\"5.5\" ry=\"4\" transform=\"rotate(-45 28 12)\"/><ellipse cx=\"12\" cy=\"28\" rx=\"5.5\" ry=\"4\" transform=\"rotate(-45 12 28)\"/><ellipse cx=\"28\" cy=\"28\" rx=\"5.5\" ry=\"4\" transform=\"rotate(45 28 28)\"/></g><circle cx=\"20\" cy=\"20\" r=\"6\" fill=\"#e0912f\"/><circle cx=\"20\" cy=\"20\" r=\"3\" fill=\"#a8631f\"/></svg>","moonleaf":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M28,8 Q14,10 12,24 Q11,34 22,34 Q16,26 20,18 Q24,11 28,8 Z\" fill=\"#acd2e6\" stroke=\"#6f9ac0\" stroke-width=\"1.3\"/><path d=\"M22,14 Q18,22 19,31\" stroke=\"#6f9ac0\" stroke-width=\"1\" fill=\"none\" opacity=\"0.7\"/><circle cx=\"29\" cy=\"10\" r=\"3.4\" fill=\"#e8f2fb\"/><path d=\"M29,7 a3.2,3.2 0 1 0 0.1,6 a4,4 0 1 1 -0.1,-6 Z\" fill=\"#cfe2f0\"/></svg>","emberroot":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M20,6 Q16,14 20,20 Q24,14 20,6 Z\" fill=\"#d9662f\"/><path d=\"M20,18 Q10,22 8,34 Q16,30 20,22 Q24,30 32,34 Q30,22 20,18 Z\" fill=\"#b5482a\" stroke=\"#7a2e18\" stroke-width=\"1.3\"/><path d=\"M14,26 l-4,4 M26,26 l4,4 M20,24 l0,8\" stroke=\"#7a2e18\" stroke-width=\"1\" opacity=\"0.6\"/><circle cx=\"20\" cy=\"12\" r=\"2.5\" fill=\"#f0a05a\" opacity=\"0.8\"/></svg>","frostvine":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M12,34 Q14,20 24,10 Q28,6 30,6\" stroke=\"#6aa6c4\" stroke-width=\"2.4\" fill=\"none\" stroke-linecap=\"round\"/><g fill=\"#bfe6f2\" stroke=\"#7ab4cc\" stroke-width=\"1\"><path d=\"M16,26 l-6,-1 6,-3 Z\"/><path d=\"M20,18 l-6,-2 6,-2 Z\"/><path d=\"M24,12 l-5,-2 5,-2 Z\"/></g><g fill=\"#e8f6fb\"><path d=\"M30,10 l1.5,3 3,1 -3,1 -1.5,3 -1.5,-3 -3,-1 3,-1 Z\"/></g></svg>","starveil":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><g opacity=\"0.25\" fill=\"#c9a0f0\"><circle cx=\"20\" cy=\"20\" r=\"16\"/></g><path d=\"M20,5 L24,15 L35,16 L26,23 L29,34 L20,27 L11,34 L14,23 L5,16 L16,15 Z\" fill=\"#b57fe0\" stroke=\"#8a5fc0\" stroke-width=\"1.2\"/><circle cx=\"20\" cy=\"20\" r=\"3.4\" fill=\"#efe0ff\"/><circle cx=\"20\" cy=\"20\" r=\"1.4\" fill=\"#8a5fc0\"/></svg>","ironbark_sap":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"6\" y=\"6\" width=\"10\" height=\"28\" rx=\"3\" fill=\"#6a4a2e\" stroke=\"#3f2c18\" stroke-width=\"1.4\"/><path d=\"M9,10 v24 M13,10 v24\" stroke=\"#3f2c18\" stroke-width=\"0.8\" opacity=\"0.5\"/><path d=\"M16,16 q8,0 8,8 q0,9 -8,11 q-4,-6 0,-19 Z\" fill=\"#e0a94a\" stroke=\"#b57f2a\" stroke-width=\"1.2\"/><ellipse cx=\"20\" cy=\"24\" rx=\"2.6\" ry=\"4\" fill=\"#f6d79a\" opacity=\"0.8\"/></svg>","swiftfern":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M20,36 Q20,18 30,6\" stroke=\"#4a8a44\" stroke-width=\"2.2\" fill=\"none\" stroke-linecap=\"round\"/><g stroke=\"#5f9a52\" stroke-width=\"1.6\" stroke-linecap=\"round\"><path d=\"M22,30 l-8,-2 M24,25 l-8,-2 M26,20 l-7,-2 M28,14 l-6,-2 M22,30 l6,-4 M24,25 l6,-4 M26,20 l5,-4 M28,14 l4,-3\"/></g></svg>","mindroot":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M14,6 Q20,14 26,6\" stroke=\"#6f5a3a\" stroke-width=\"2\" fill=\"none\" stroke-linecap=\"round\"/><path d=\"M20,10 Q10,14 10,24 Q10,34 20,34 Q30,34 30,24 Q30,14 20,10 Z\" fill=\"#8a5fb0\" stroke=\"#5f3f8a\" stroke-width=\"1.4\"/><path d=\"M14,30 l-3,5 M20,34 l0,4 M26,30 l3,5\" stroke=\"#5f3f8a\" stroke-width=\"1.4\" stroke-linecap=\"round\"/><path d=\"M15,20 q5,3 10,0\" stroke=\"#c9a0e6\" stroke-width=\"1.2\" fill=\"none\" opacity=\"0.7\"/></svg>","stoneshell_moss":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M8,28 Q6,18 18,16 Q32,14 33,26 Q34,32 24,33 Q12,34 8,28 Z\" fill=\"#8f948c\" stroke=\"#5f645c\" stroke-width=\"1.4\"/><path d=\"M10,22 Q16,14 24,17 Q18,18 14,24 Q11,24 10,22 Z\" fill=\"#6f9a52\"/><path d=\"M26,18 Q32,17 33,23 Q28,21 24,23 Q24,19 26,18 Z\" fill=\"#6f9a52\"/><circle cx=\"16\" cy=\"20\" r=\"1.5\" fill=\"#8fbf6a\"/><circle cx=\"28\" cy=\"21\" r=\"1.3\" fill=\"#8fbf6a\"/></svg>","vitalbloom":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M20,34 Q20,26 20,20\" stroke=\"#4a8a44\" stroke-width=\"2\" stroke-linecap=\"round\"/><path d=\"M20,30 l-6,-2 M20,27 l6,-2\" stroke=\"#4a8a44\" stroke-width=\"1.6\" stroke-linecap=\"round\"/><g fill=\"#e88fb4\" stroke=\"#c96a94\" stroke-width=\"1\"><ellipse cx=\"20\" cy=\"10\" rx=\"4.5\" ry=\"6\"/><ellipse cx=\"12\" cy=\"16\" rx=\"6\" ry=\"4.5\" transform=\"rotate(40 12 16)\"/><ellipse cx=\"28\" cy=\"16\" rx=\"6\" ry=\"4.5\" transform=\"rotate(-40 28 16)\"/><ellipse cx=\"15\" cy=\"22\" rx=\"5.5\" ry=\"4\" transform=\"rotate(-20 15 22)\"/><ellipse cx=\"25\" cy=\"22\" rx=\"5.5\" ry=\"4\" transform=\"rotate(20 25 22)\"/></g><circle cx=\"20\" cy=\"17\" r=\"4\" fill=\"#f6d24a\"/></svg>","cleanwort":"<svg viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M20,36 L20,22\" stroke=\"#4a8a44\" stroke-width=\"2\" stroke-linecap=\"round\"/><g fill=\"#6fbf5a\" stroke=\"#4a8a44\" stroke-width=\"1\"><path d=\"M20,22 Q10,20 9,10 Q19,11 20,22 Z\"/><path d=\"M20,22 Q30,20 31,10 Q21,11 20,22 Z\"/><path d=\"M20,20 Q20,8 20,5 Q26,10 20,20 Z\"/></g><path d=\"M20,22 q-6,-6 -9,-11 M20,22 q6,-6 9,-11\" stroke=\"#3f7a38\" stroke-width=\"0.8\" fill=\"none\" opacity=\"0.6\"/></svg>"};
 function itemIconSvg(itemId){
+  if(GALLERY_ITEM_ICONS[itemId]) return GALLERY_ITEM_ICONS[itemId];
   const item=DL.getItem(itemId);
   const hue=hashHue(itemId);
   
@@ -725,6 +761,7 @@ function itemIconSvg(itemId){
 function itemIcon(itemId,size=26){ return iconBadge(itemIconSvg(itemId),size); }
 
 function herbIconSvg(herbId){
+  if(GALLERY_HERB_ICONS[herbId]) return GALLERY_HERB_ICONS[herbId];
   const hue=hashHue(herbId);
   const leaf=`hsl(${hue},55%,42%)`;
   return `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><path d="M20,6 Q32,14 32,26 Q20,34 8,26 Q8,14 20,6 Z" fill="${leaf}" stroke="#2a2a2a" stroke-width="1.2"/><path d="M20,9 L20,31" stroke="#1a1a1a" stroke-width="1" opacity="0.45"/></svg>`;
@@ -1086,7 +1123,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.22-web",
+  GAME_VERSION:"v0.22.1-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   
@@ -1748,13 +1785,9 @@ const DL = {
   },
   allRecipes(){return RECIPES;},
   pickRandomMonsterForArea(areaLevel){
-    let pool=MONSTERS.filter(m=>{
-      if(m.tier==="common") return true;
-      if(m.tier==="uncommon") return areaLevel>=8;
-      if(m.tier==="rare") return areaLevel>=20;
-      if(m.tier==="epic") return areaLevel>=35;
-      return false;
-    });
+    // v0.22.1 (Part A2a): spawn gating now follows the new band system (MONSTER_BAND_INFO)
+    // instead of the old flat tier -- see that constant's comment for the Fibonacci thresholds.
+    let pool=MONSTERS.filter(m=>areaLevel>=(MONSTER_BAND_INFO[m.tier]||{minAreaLevel:1}).minAreaLevel);
     if(pool.length===0) pool=MONSTERS;
     return pick(pool);
   },
@@ -2089,6 +2122,21 @@ const Net = {
   
   
   accountGold:0,
+  // v0.22.1 (Part B2, credit: Gwen's cross-tab dupe report): the account_gold value most
+  // recently CONFIRMED by the server (via login, a save response, or any of the atomic
+  // reroll/reforge/refine/auction/trial endpoints). PS.saveGame()'s autosave payload no
+  // longer reports its absolute local gold total -- it reports the DELTA between the
+  // current local total and this baseline, and the server ADDS that delta to whatever its
+  // own current balance actually is (see setAuthoritativeGold() and _sendCharacterSave()
+  // below). This is what stops a second, stale browser tab's full-character autosave from
+  // ever re-adding gold this tab already knows was spent: an absolute "here's my total"
+  // report can silently clobber a fresher server value, but a relative "I spent X since we
+  // last agreed" report can only ever be applied on top of the truth, never replace it.
+  goldSyncBaseline:0,
+  setAuthoritativeGold(v){
+    this.accountGold=v;
+    this.goldSyncBaseline=v;
+  },
   graveyardCache:null,
   leaderboardCache:null, leaderboardCacheHardcore:null,
   
@@ -2156,11 +2204,11 @@ const Net = {
     if(!res.ok) throw new Error("Could not load your characters from the server.");
     const json=await res.json();
     this.cache=json.slots;
-    
-    
-    
-    
-    this.accountGold=json.account_gold||0;
+
+
+
+
+    this.setAuthoritativeGold(json.account_gold||0);
   },
   logout(){
     this.online=false; this.token=null; this.username=null; this.cache=null;
@@ -2198,21 +2246,19 @@ const Net = {
     this._sendCharacterSave(slot,data,state);
   },
   _sendCharacterSave(slot,data,state){
-    const body=JSON.stringify(data);
-    
-    
-    
-    
-    
+    // v0.22.1 (Part B2): gold_delta is computed HERE, right before the actual network send,
+    // not back when saveGame() first built `data` -- this matters for coalesced saves (see
+    // saveCharacter() above): if a second local save gets queued while the first is still
+    // in flight, this recompute picks up whatever goldSyncBaseline the FIRST save's response
+    // already advanced it to, so the second save's delta only ever covers gold spent SINCE
+    // that response, instead of double-reporting gold the first request already applied.
+    // Sent alongside (not replacing) the pre-existing `data.gold` field for backward-
+    // compatible logging only -- the server now ignores `gold` entirely and applies
+    // `gold_delta` atomically against its OWN current balance (see server.js).
+    const body=JSON.stringify(Object.assign({},data,{gold_delta:Math.round((PS.gold||0)-(this.goldSyncBaseline||0))}));
     const attempt=(useKeepalive)=>fetch(this.apiBase()+"/api/characters/"+slot,{method:"PUT",keepalive:useKeepalive,headers:this.authHeaders({"Content-Type":"application/json"}),body})
       .then(res=>{
-        
-        
-        
-        
-        
-        
-        try{ if(res && typeof res.json==="function") res.json().then(json=>{ if(json && typeof json.account_gold==="number") this.accountGold=json.account_gold; }).catch(()=>{}); }catch(e){}
+        try{ if(res && typeof res.json==="function") res.json().then(json=>{ if(json && typeof json.account_gold==="number") this.setAuthoritativeGold(json.account_gold); }).catch(()=>{}); }catch(e){}
         return res;
       })
       .catch(e=>{
@@ -3228,19 +3274,16 @@ const PS = {
   
   
   applyDeathPenalty(){
-    const pct=Balance.DEATH_GOLD_LOSS_MIN_PCT+Math.random()*(Balance.DEATH_GOLD_LOSS_MAX_PCT-Balance.DEATH_GOLD_LOSS_MIN_PCT);
-    const goldLost=Math.round(this.gold*pct);
-    this.gold=Math.max(0,this.gold-goldLost);
-    
-    
-    
+    // v0.22.1 (Part B1, credit: Gwen): softcore death is now XP-penalty-only -- no gold loss,
+    // no item loss. Balance.DEATH_GOLD_LOSS_MIN_PCT/MAX_PCT and the item-loss constants/helpers
+    // below (_rollDeathItemLosses/_loseOneRandomItem) are kept in place but no longer called
+    // from here, so existing tests asserting on those constants' VALUES still pass unchanged.
     const targetXpLoss=Math.round((this.xp_to_next||0)*Balance.DEATH_XP_LOSS_PCT);
     const xpLost=Math.min(this.xp,targetXpLoss);
     this.xp=Math.max(0,this.xp-targetXpLoss);
-    const itemsLost=this._rollDeathItemLosses();
     this.current_hp=Balance.DEATH_WAKE_HP;
     this.resetKillStreak();
-    return {goldLost,itemsLost,xpLost};
+    return {goldLost:0,itemsLost:[],xpLost};
   },
   
   
@@ -7594,25 +7637,11 @@ function applyDeathAndRedirect(cause, defeatedLine){
     
     
     
+    // v0.22.1 (Part B1, credit: Gwen): softcore death is XP-penalty-only now -- no gold or
+    // item loss ever happens here, so the wake-up message no longer mentions either.
     const p=result.penalty;
-    const intro=`${defeatedLine} and wake up back at camp with ${Balance.DEATH_WAKE_HP} HP, having lost ${p.goldLost} gold and ${p.xpLost} experience.`;
-    if(p.itemsLost.length>0){
-      
-      
-      
-      
-      
-      
-      const nodes=[intro+" You also lost: "];
-      p.itemsLost.forEach((item,i)=>{
-        if(i>0) nodes.push(", ");
-        nodes.push(item.rarity ? h("span",{class:"rarity-"+item.rarity,style:{fontWeight:"bold"}},[item.text]) : item.text);
-      });
-      nodes.push(".");
-      setToastNodes(nodes);
-    } else {
-      setToast(intro);
-    }
+    const intro=`${defeatedLine} and wake up back at camp with ${Balance.DEATH_WAKE_HP} HP, having lost ${p.xpLost} experience.`;
+    setToast(intro);
     resetMazePositionToStart();
     PS.saveGame();
     GF.goto("town");
@@ -7806,24 +7835,42 @@ function screenCombat(){
   
   
   
+  // v0.22.1 (Part A2c): band-colored border + corner band label/stars on the combat mob
+  // panel, sourced from the same MONSTERS/MONSTER_BAND_INFO/RARITY_BORDER_COLORS data the
+  // Monster Guide uses -- scoped to this panel only (maze roamer/guardian markers untouched).
+  const mobMonsterDef=MONSTERS.find(mm=>mm.id===cb.monster_id);
+  const mobBandInfo=mobMonsterDef?MONSTER_BAND_INFO[mobMonsterDef.tier]:null;
+  const mobBorderColor=mobMonsterDef?RARITY_BORDER_COLORS[mobMonsterDef.tier]:null;
   const mobPanel=h("div",{
     class:"panel",
-    style:{flex:"0 0 50%",maxWidth:"50%",cursor:busy?"default":"pointer"},
+    style:{
+      flex:"0 0 50%",maxWidth:"50%",cursor:busy?"default":"pointer",position:"relative",
+      border:mobBorderColor?`2px solid ${mobBorderColor}`:undefined,
+    },
     onMouseDown:busy?undefined:onMobMouseDown,
     onMouseLeave:busy?undefined:stopAutoAttack,
   },[
+    mobBandInfo?h("div",{style:{position:"absolute",top:"8px",right:"10px",textAlign:"right"}},[
+      h("div",{style:{color:mobBorderColor,fontWeight:"bold",fontSize:".85em"}},[mobBandInfo.label]),
+      h("div",{style:{color:mobBorderColor,fontSize:".8em"}},[monsterStarString(mobMonsterDef.star,mobBandInfo.size)]),
+    ]):null,
     portraitWrap,
     h("div",{style:{fontWeight:"bold",textAlign:"center"}},[cb.name]),
     h("div",{style:{textAlign:"center"}},[`HP ${Math.round(Math.max(0,cb.hp))}/${Math.round(cb.maxHp)}`]),
-    
-    
-    
+
+
+
     h("div",{style:{position:"relative"}},[bar(Math.max(0,cb.hp)/cb.maxHp*100,"bar-hp"), floatLayer("monster")]),
-    
-    
-    
-    
-    cb.defeated?h("div",{class:"muted",style:{textAlign:"center",marginTop:"8px",fontSize:".9em"}},["click to continue wandering"]):(!busy?h("div",{class:"muted",style:{textAlign:"center",marginTop:"8px",fontSize:".9em"}},["click or hold to attack"]):null),
+
+
+
+
+    // v0.22.1 (Part B4): this container is now ALWAYS rendered (never swapped to null), so its
+    // reserved height never collapses/reflows the action area when combat is busy mid-round --
+    // only the text content toggles, using a non-breaking space as a same-height placeholder.
+    h("div",{class:"muted",style:{textAlign:"center",marginTop:"8px",fontSize:".9em",minHeight:"1.3em"}},[
+      cb.defeated?"click to continue wandering":(busy?" ":"click or hold to attack"),
+    ]),
   ]);
   
   
@@ -9167,10 +9214,10 @@ async function rerollBlacksmithItem(instanceId){
     
     
     
-    if(typeof result.account_gold==="number") PS.gold=result.account_gold;
+    if(typeof result.account_gold==="number") Net.setAuthoritativeGold(result.account_gold);
     autosave();
-    
-    
+
+
     showCraftResultOverlay("Rerolled", result.item);
   }catch(e){
     setToast("Could not reroll: "+e.message);
@@ -9192,7 +9239,7 @@ async function reforgeBlacksmithItem(instanceId, affixIndex){
     const idx=PS.findGearIndex(instanceId);
     if(idx!==-1) PS.gear_instances[idx]=result.item;
     PS.materials=result.materials;
-    if(typeof result.account_gold==="number") PS.gold=result.account_gold;
+    if(typeof result.account_gold==="number") Net.setAuthoritativeGold(result.account_gold);
     autosave();
     showCraftResultOverlay("Reforged", result.item);
   }catch(e){
@@ -9214,7 +9261,7 @@ async function refineBlacksmithItem(instanceId, affixIndex){
     const idx=PS.findGearIndex(instanceId);
     if(idx!==-1) PS.gear_instances[idx]=result.item;
     PS.materials=result.materials;
-    if(typeof result.account_gold==="number") PS.gold=result.account_gold;
+    if(typeof result.account_gold==="number") Net.setAuthoritativeGold(result.account_gold);
     autosave();
     showCraftResultOverlay("Refined", result.item);
   }catch(e){
@@ -10175,7 +10222,7 @@ function screenAuctionHouse(){
         
         
         
-        if(typeof result.account_gold==="number") PS.gold=result.account_gold; else PS.gold-=(result.fee||fee);
+        if(typeof result.account_gold==="number") Net.setAuthoritativeGold(result.account_gold); else PS.gold-=(result.fee||fee);
         PS.saveGame();
         Net.auctionCache=null; setToast(`Listed ${IF.displayName(inst)} for ${price} gold (${result.fee||fee}g listing fee charged).`);
       }catch(e){ setToast(e.message); }
@@ -10215,7 +10262,7 @@ function screenAuctionHouse(){
         const result=await Net.createAuctionListing({type:kind, item_key:id, quantity:qty, price, character_name:PS.character_name, seller_slot:PS.current_slot, display_name:displayName});
         if(kind==="consumable") PS.consumables[id]-=qty; else PS.herbs[id]-=qty;
         
-        if(typeof result.account_gold==="number") PS.gold=result.account_gold; else PS.gold-=(result.fee||fee);
+        if(typeof result.account_gold==="number") Net.setAuthoritativeGold(result.account_gold); else PS.gold-=(result.fee||fee);
         PS.saveGame(); Net.auctionCache=null;
         setToast(`Listed ${displayName} x${qty} for ${price} gold (${result.fee||fee}g listing fee charged).`);
       }catch(e){ setToast(e.message); }
@@ -10308,7 +10355,7 @@ function screenAuctionHouse(){
             try{
               const buyResult=await Net.buyAuctionListing(listing.id,{character_name:PS.character_name, buyer_slot:PS.current_slot});
               
-              if(typeof buyResult.account_gold==="number") PS.gold=buyResult.account_gold; else PS.gold-=listing.price;
+              if(typeof buyResult.account_gold==="number") Net.setAuthoritativeGold(buyResult.account_gold); else PS.gold-=listing.price;
               
               if(listing.type==="gear") PS.addGearAutoEquip(listing.item);
               else if(listing.type==="consumable") PS.addConsumable(listing.item_key,listing.quantity);
@@ -11014,6 +11061,16 @@ function legacyGearSection(){
 
 
 const CHANGELOG=[
+  { version:"v0.22.1", notes:[
+    "Monsters now belong to one of 5 difficulty bands -- Newborn, Young, Mature, Elder, and Ancient -- shown as a colored border and corner label with a star rank in combat, reusing the same rarity colors as gear. Bands gate in as you reach area levels 1, 8, 13, 21, and 34.",
+    "Monster damage is now a single fixed number per monster instead of a min-max range.",
+    "Monster Guide updated to show each monster's difficulty band, stars, and portrait alongside its stats.",
+    "Softcore death no longer costs gold or items -- only Experience is lost on death now.",
+    "Fixed a bug where gold earned on one browser tab could be silently overwritten and lost if another tab (or window) saved shortly after. (Reported and reproduced by Gwen)",
+    "Reworked HP/Stamina regeneration: the free baseline tick from resting no longer follows you into the maze, but Regeneration from gear and other earned bonuses now applies everywhere -- town, maze, and combat alike.",
+    "Fixed a bug where drinking a potion mid-combat would make the monster panel's hint text disappear and its buttons shift position.",
+    "Replaced most potion and herb icons with new bespoke art.",
+  ]},
   { version:"v0.22", notes:[
     "In combat, a living monster now shows a \"click or hold to attack\" hint, mirroring the existing \"click to continue wandering\" hint shown once it's defeated.",
     "Elixir of Clarity renamed to Elixir of Clairvoyance.",
@@ -11735,15 +11792,53 @@ function screenExperienceGuide(){
 
 
 
+function monsterGuideBandExamplePanel(monsterId){
+  const m=MONSTERS.find(mm=>mm.id===monsterId);
+  if(!m) return null;
+  const info=MONSTER_BAND_INFO[m.tier];
+  const borderColor=RARITY_BORDER_COLORS[m.tier];
+  return h("div",{class:"row gap",style:{alignItems:"center",padding:"6px 0",borderBottom:"1px solid var(--border)"}},[
+    (()=>{ const d=h("div",{style:{width:"46px",height:"46px",borderRadius:"6px",border:`2px solid ${borderColor}`,overflow:"hidden",flexShrink:"0"}}); d.innerHTML=monsterPortrait(m.id); return d; })(),
+    h("div",{style:{flex:"1"}},[
+      h("div",{style:{fontWeight:"bold"}},[m.name]),
+      h("div",{class:"muted",style:{fontSize:".85em"}},[`Base HP ${m.base_hp}, Damage ${m.base_damage}`]),
+    ]),
+    h("div",{style:{textAlign:"right"}},[
+      h("div",{style:{fontWeight:"bold",color:borderColor}},[info.label]),
+      h("div",{class:"muted",style:{fontSize:".85em"}},[monsterStarString(m.star,info.size)]),
+    ]),
+  ]);
+}
+function monsterGuideBandInfoPanel(){
+  const root=h("div",{class:"panel"});
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},[
+    "Every monster belongs to one of 5 difficulty bands, from weakest to strongest: ", h("b",{},["Newborn"]), ", ",
+    h("b",{},["Young"]), ", ", h("b",{},["Mature"]), ", ", h("b",{},["Elder"]), ", and ", h("b",{},["Ancient"]),
+    ". A band's border color is the SAME color used for that rarity's gear border, so at a glance you know both how tough the fight is and roughly what quality of loot it favors. Within a band, monsters are further ranked by strength with filled stars (",
+    h("b",{},["★"]), ") out of that band's size -- more filled stars means a harder hit and a tankier target among its own band-mates.",
+  ]));
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},[
+    "Bands also gate where a monster can spawn: Newborn monsters appear from area level 1, Young from level 8, Mature from level 13, Elder from level 21, and Ancient from level 34 -- so a few levels before each new band unlocks, you'll already be sharing the maze with its weakest members as a preview of what's coming.",
+  ]));
+  [MONSTERS[0].id, MONSTERS[MONSTERS.length-9]?.id, MONSTERS[MONSTERS.length-1].id].filter(Boolean).forEach(id=>{
+    const row=monsterGuideBandExamplePanel(id);
+    if(row) root.appendChild(row);
+  });
+  return root;
+}
 function monsterGuideBaseStatsTable(){
   const root=h("div",{class:"panel",style:{maxHeight:"420px",overflowY:"auto"}});
-  const cols="1.3fr .8fr .7fr 1fr .7fr 1fr .9fr";
-  root.appendChild(gridRow(["Monster","Tier","HP","Damage","XP","Gold","Loot Table"],{cols,header:true}));
+  const cols=".6fr 1.1fr .9fr .7fr .7fr .7fr 1fr .9fr";
+  root.appendChild(gridRow(["","Monster","Band","Stars","HP","Damage","Gold","Loot Table"],{cols,header:true}));
   MONSTERS.forEach((m,i)=>{
-    const tierLabel=m.tier.charAt(0).toUpperCase()+m.tier.slice(1);
+    const info=MONSTER_BAND_INFO[m.tier];
+    const borderColor=RARITY_BORDER_COLORS[m.tier];
+    const portrait=h("div",{style:{width:"32px",height:"32px",borderRadius:"5px",border:`2px solid ${borderColor}`,overflow:"hidden"}});
+    portrait.innerHTML=monsterPortrait(m.id);
+    const bandCell=h("span",{style:{color:borderColor,fontWeight:"bold"}},[info.label]);
     root.appendChild(gridRow([
-      m.name, tierLabel, `${m.base_hp}`, `${m.base_damage_min}-${m.base_damage_max}`,
-      `${m.base_xp}`, `${m.gold_min}-${m.gold_max}`, m.loot_table.charAt(0).toUpperCase()+m.loot_table.slice(1),
+      portrait, m.name, bandCell, monsterStarString(m.star,info.size), `${m.base_hp}`, `${m.base_damage}`,
+      `${m.gold_min}-${m.gold_max}`, m.loot_table.charAt(0).toUpperCase()+m.loot_table.slice(1),
     ],{cols,noBorder:i===MONSTERS.length-1}));
   });
   return root;
@@ -11872,6 +11967,9 @@ function screenMonsterGuide(){
   root.appendChild(h("div",{class:"lore"},["Every monster's base stats, exactly how much tougher (and more rewarding) they get per area level, and how the special spawn types (Stronghold Guardians, Roaming Mobs) compare to an ordinary grass-tile encounter."]));
   root.appendChild(h("button",{style:{marginBottom:"10px"},onClick:()=>{ GF.goto(GF._preMonsterGuideScreen||"mainMenuSlots"); }},["← Back"]));
 
+  root.appendChild(h("h3",{},["Difficulty Bands"]));
+  root.appendChild(monsterGuideBandInfoPanel());
+
   root.appendChild(h("h3",{},["Monster Roster"]));
   root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},["Base stats as authored at area level 1 -- see the next section for how these actually scale once you venture deeper."]));
   root.appendChild(monsterGuideBaseStatsTable());
@@ -11940,12 +12038,23 @@ setInterval(()=>{
   
   
   
-  const sharedBonus=PS.getActiveBonfireBonus()+PS.getActiveTempBuff("regen");
-  const hpBonus=sharedBonus+PS.getRegen();
-  const staminaBonus=sharedBonus+PS.getStaminaRegen();
+  // v0.22.1 (Part B3): the free town baseline (CAMPFIRE_*_PER_SECOND + bonfire bonus) must
+  // NOT leak into the maze -- it's a town-only amenity. Earned regen (class+gear regen stat,
+  // via PS.getRegen()/getStaminaRegen(), plus any active Potion of Renewal buff) still applies
+  // in the maze on top of that, unchanged. This interval is never active during combat
+  // (isRegenActiveNow()/REGEN_ACTIVE_SCREENS above already exclude it) -- earned regen ticks
+  // there instead via the server's own combatTickCombatRoundBuffs() (server.js), which mirrors
+  // PS.getRegen()/getStaminaRegen() exactly, so HP/Stamina never desync from server-authoritative
+  // combat state.
+  const inFreeTownZone=GF.screen!=="maze";
+  const freeBonus=inFreeTownZone?PS.getActiveBonfireBonus():0;
+  const freeBaselineHp=inFreeTownZone?Balance.CAMPFIRE_REGEN_PER_SECOND:0;
+  const freeBaselineStamina=inFreeTownZone?Balance.CAMPFIRE_STAMINA_REGEN_PER_SECOND:0;
+  const hpBonus=freeBonus+PS.getActiveTempBuff("regen")+PS.getRegen();
+  const staminaBonus=freeBonus+PS.getStaminaRegen();
   let changed=false;
-  if(PS.current_hp<PS.getMaxHp()){ PS.current_hp=Math.min(PS.getMaxHp(),PS.current_hp+Balance.CAMPFIRE_REGEN_PER_SECOND+hpBonus); changed=true; }
-  if(PS.current_stamina<PS.getMaxStamina()){ PS.current_stamina=Math.min(PS.getMaxStamina(),PS.current_stamina+Balance.CAMPFIRE_STAMINA_REGEN_PER_SECOND+staminaBonus); changed=true; }
+  if(PS.current_hp<PS.getMaxHp()){ PS.current_hp=Math.min(PS.getMaxHp(),PS.current_hp+freeBaselineHp+hpBonus); changed=true; }
+  if(PS.current_stamina<PS.getMaxStamina()){ PS.current_stamina=Math.min(PS.getMaxStamina(),PS.current_stamina+freeBaselineStamina+staminaBonus); changed=true; }
   if(changed) PS.saveGame();
 
   
