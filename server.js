@@ -139,7 +139,21 @@ db.exec(`
     updated_at TEXT NOT NULL,
     version INTEGER NOT NULL DEFAULT 0
   );
+  -- v0.22.3 (#10): single-row table recording whether this ladder season's champion (first
+  -- tier-5 character to reach Level 100) has already been declared -- guards against a
+  -- second "winner" being announced by a race between two players leveling up at once, and
+  -- lets the admin's manual ladder reset (see /api/admin/reset-ladder) clear it back to 0 to
+  -- start a fresh season.
+  CREATE TABLE IF NOT EXISTS season_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    winner_declared INTEGER NOT NULL DEFAULT 0,
+    winner_account_id INTEGER,
+    winner_character_name TEXT,
+    winner_class_name TEXT,
+    won_at TEXT
+  );
 `);
+db.prepare("INSERT OR IGNORE INTO season_state (id, winner_declared) VALUES (1, 0)").run();
 
 // Migrations for columns added after the table already existed on a live deployment --
 // SQLite's ALTER TABLE ADD COLUMN fails if the column is already there, so these are
@@ -173,6 +187,10 @@ for (const stmt of [
   // brand new leaderboard_bests row from scratch, not a stale MAX()'d one).
   "ALTER TABLE leaderboard_bests ADD COLUMN weapon_skills TEXT NOT NULL DEFAULT '{}'",
   "ALTER TABLE leaderboard_bests ADD COLUMN herbalism_points INTEGER NOT NULL DEFAULT 0",
+  // v0.23.0 (Part B9): Spellcasting proficiency's raw hit counter, ridden along on the same
+  // upsert as weapon_skills/herbalism_points -- feeds the Leaderboard's "Skill Progression"
+  // tab alongside the weapon-type skills.
+  "ALTER TABLE leaderboard_bests ADD COLUMN spellcasting_hits INTEGER NOT NULL DEFAULT 0",
   // v0.18 (#18): guard column for the one-time stale-bridge-steps cleanup below -- see
   // migrateStaleBridgeSteps() for what it's cleaning up and why a blanket reset (rather than
   // trying to guess which rows are actually corrupt) is the safe choice here.
@@ -462,6 +480,20 @@ app.get("/api/characters", requireAuth, (req, res) => {
   res.json({ slots, account_gold: accountGold });
 });
 
+// v0.22.3 (#1): lightweight live-feedback endpoint for the character-creation name field --
+// same case-insensitive "does any OTHER live character already have this name" rule the real
+// enforcement (the PUT route below) applies, just read-only and with no slot to exclude (a
+// brand-new character has no slot of its own yet). This is purely a UX nicety; the PUT route's
+// 409 is what actually stops a duplicate name from being saved even if this check is bypassed.
+app.get("/api/character-name-available", requireAuth, (req, res) => {
+  const name = (req.query.name || "").toString().trim();
+  if (!name) return res.json({ available: false });
+  const conflict = db
+    .prepare(`SELECT 1 FROM characters WHERE LOWER(json_extract(data,'$.character_name')) = LOWER(?)`)
+    .get(name);
+  res.json({ available: !conflict });
+});
+
 app.put("/api/characters/:slot", requireAuth, (req, res) => {
   const slot = Number(req.params.slot);
   if (!Number.isInteger(slot) || slot < 0 || slot >= MAX_CHARACTER_SLOTS) {
@@ -469,6 +501,32 @@ app.put("/api/characters/:slot", requireAuth, (req, res) => {
   }
   const data = req.body;
   if (!data || typeof data !== "object") return res.status(400).json({ error: "Invalid character data." });
+
+  // v0.22.3 (#1): character names must be globally unique (case-insensitive) across every
+  // LIVE character on every account -- names show up on the leaderboard, graveyard, global
+  // chat and Auction House, so duplicates are confusing. A client-side check alone is
+  // bypassable, so this is the real enforcement point. Ordinary autosaves (the name hasn't
+  // changed since what's already stored for this slot) always pass -- this only bites when
+  // the incoming name is actually NEW for this (account, slot), i.e. character creation or
+  // an explicit rename. Existing duplicate names already sitting in the DB are grandfathered
+  // (nothing retroactively breaks); a name freed up by a DELETEd character is fair game again
+  // since this only ever looks at the live `characters` table, never `graveyard`.
+  const incomingName = (data.character_name || "").toString().trim();
+  if (incomingName) {
+    const existingRow = db.prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?").get(req.account.id, slot);
+    const existingName = existingRow ? (JSON.parse(existingRow.data).character_name || "").toString().trim() : null;
+    if (existingName === null || existingName.toLowerCase() !== incomingName.toLowerCase()) {
+      const conflict = db
+        .prepare(
+          `SELECT 1 FROM characters WHERE LOWER(json_extract(data,'$.character_name')) = LOWER(?) AND NOT (account_id = ? AND slot = ?)`
+        )
+        .get(incomingName, req.account.id, slot);
+      if (conflict) {
+        return res.status(409).json({ error: "That name is already taken -- choose another." });
+      }
+    }
+  }
+
   const json = JSON.stringify(data);
 
   // v0.15.1 BUG FIX (progression/loot/trial setbacks on browser close, etc.): autosave
@@ -507,17 +565,23 @@ app.put("/api/characters/:slot", requireAuth, (req, res) => {
     return res.json({ ok: true, ignored: true, account_gold: getAccountGold(req.account.id) });
   }
 
-  // v0.17 (#29): gold is account-bound now -- mirror whatever this (accepted, non-stale)
-  // save reports as the account's shared total. Same last-write-wins trust model this
-  // route already uses for level/xp/tier/etc. (see the top-of-file note on server-side
-  // validation being future work, tracked separately), just repointed at a shared column
-  // instead of a per-character one. Known limitation: two DIFFERENT character slots on the
-  // same account, actively played in two different tabs/sessions at once, could still race
-  // each other here (there's no per-account sequence number the way _save_seq guards a
-  // single slot) -- an accepted, low-likelihood gap for now, not a silent-loss guarantee
-  // like the bug this feature fixes (a sale crediting a deleted hardcore character's row).
-  if (typeof data.gold === "number" && Number.isFinite(data.gold)) {
-    setAccountGold(req.account.id, data.gold);
+  // v0.22.1 (Part B2, credit: Gwen's cross-tab dupe report): this USED to mirror whatever
+  // absolute `data.gold` figure the save reported straight onto the account's shared
+  // column -- the exact bug Gwen reproduced: open the same account in two tabs, spend gold
+  // in tab A (correctly deducted via the atomic reroll/reforge/refine/auction routes), then
+  // ANY autosave from tab B (which never saw that spend, so its own local total is still
+  // the old, higher figure) would silently overwrite the correct post-spend balance right
+  // back up -- effectively un-spending it, and letting the same gold be spent again.
+  // The fix: this route no longer trusts an ABSOLUTE client-reported total at all. The
+  // client instead reports a DELTA (`gold_delta`, see Net._sendCharacterSave() in
+  // index.html) -- how much ITS OWN local total has moved since it last heard back from
+  // the server -- and that delta is applied ATOMICALLY on top of whatever the account's
+  // CURRENT balance actually is (creditAccountGold() reads-then-writes in one synchronous,
+  // uninterruptible step). Two tabs each reporting a real, distinct delta now both land
+  // correctly instead of one clobbering the other -- there is no longer any absolute figure
+  // for a stale tab to overwrite the truth with.
+  if (typeof data.gold_delta === "number" && Number.isFinite(data.gold_delta) && data.gold_delta !== 0) {
+    creditAccountGold(req.account.id, Math.round(data.gold_delta));
   }
 
   // Track this character on the leaderboard. `level` and `gold` reflect the character's
@@ -617,14 +681,17 @@ function upsertLeaderboardBests(accountId, data) {
   // everything else here, stored as excluded.value (current snapshot, not MAX()'d) --
   // see the ALTER TABLE comment (search "weapon_skills TEXT") for why that's correct.
   const weaponSkillsJson = JSON.stringify(data.weapon_skills || {});
+  // v0.23.0 (Part B9): rides along the same upsert, current-snapshot (not MAX()'d), exactly
+  // like weapon_skills/herbalism_points above.
+  const spellcastingHits = (data.spellcasting_skill && data.spellcasting_skill.hits) || 0;
   // v0.18.2 (#8): max_kill_streak is a genuine lifetime record (only ever grows for a
   // given character, exactly like highest_tier_reached/lifetime_xp above) -- MAX()'d
   // against the existing row rather than overwritten with excluded.value, so an
   // out-of-order/retried save can never stomp a higher previously-recorded streak back
   // down to a smaller one.
   db.prepare(
-    `INSERT INTO leaderboard_bests (account_id, character_name, class_name, level, highest_tier_reached, gold, updated_at, hardcore, lifetime_xp, is_dead, last_bridge_steps, xp, weapon_skills, herbalism_points, max_kill_streak, total_kills)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO leaderboard_bests (account_id, character_name, class_name, level, highest_tier_reached, gold, updated_at, hardcore, lifetime_xp, is_dead, last_bridge_steps, xp, weapon_skills, herbalism_points, max_kill_streak, total_kills, spellcasting_hits)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(account_id, character_name) DO UPDATE SET
        class_name=excluded.class_name,
        level=excluded.level,
@@ -639,7 +706,8 @@ function upsertLeaderboardBests(accountId, data) {
        weapon_skills=excluded.weapon_skills,
        herbalism_points=excluded.herbalism_points,
        max_kill_streak=MAX(leaderboard_bests.max_kill_streak, excluded.max_kill_streak),
-       total_kills=MAX(leaderboard_bests.total_kills, excluded.total_kills)`
+       total_kills=MAX(leaderboard_bests.total_kills, excluded.total_kills),
+       spellcasting_hits=excluded.spellcasting_hits`
   ).run(
     accountId,
     data.character_name,
@@ -655,7 +723,8 @@ function upsertLeaderboardBests(accountId, data) {
     weaponSkillsJson,
     data.herbalism_points || 0,
     data.max_kill_streak || 0,
-    data.total_kills || 0
+    data.total_kills || 0,
+    spellcastingHits
   );
 }
 
@@ -690,23 +759,29 @@ function upsertLeaderboardBests(accountId, data) {
 
 // Tier / next-class / base-attribute subset of index.html's CLASSES table -- only what
 // a trial resolution needs (nothing about role/description/damage/crit/armor/regen).
+// v0.22.3 (#10): each entry now also carries `chain` (mirroring index.html's CLASSES table)
+// so a ladder reset can look up "what is this character's chain's tier-1 class" without a
+// separate table -- see CHAIN_TIER1_CLASS / applyLadderReset() below.
 const TRIAL_CLASSES = {
-  wizard:      { tier: 1, next_class: "sorcerer",    display_name: "Wizard",      base_hp: 60,  hp_per_level: 8,  base_str: 2,  base_dex: 6,  base_vit: 16, base_int: 16 },
-  thornguard:  { tier: 1, next_class: "stonewarden", display_name: "Thornguard",  base_hp: 100, hp_per_level: 14, base_str: 16, base_dex: 6,  base_vit: 16, base_int: 2 },
-  windrider:   { tier: 1, next_class: "galestrider", display_name: "Windrider",   base_hp: 75,  hp_per_level: 10, base_str: 4,  base_dex: 16, base_vit: 16, base_int: 4 },
-  sorcerer:    { tier: 2, next_class: "warlock",     display_name: "Sorcerer",    base_hp: 80,  hp_per_level: 10, base_str: 3,  base_dex: 8,  base_vit: 20, base_int: 21 },
-  stonewarden: { tier: 2, next_class: "treesinger",  display_name: "Stonewarden", base_hp: 140, hp_per_level: 18, base_str: 20, base_dex: 8,  base_vit: 21, base_int: 3 },
-  galestrider: { tier: 2, next_class: "shadowbloom", display_name: "Galestrider", base_hp: 100, hp_per_level: 13, base_str: 5,  base_dex: 21, base_vit: 21, base_int: 5 },
-  warlock:     { tier: 3, next_class: "necromancer", display_name: "Warlock",     base_hp: 105, hp_per_level: 13, base_str: 3,  base_dex: 10, base_vit: 27, base_int: 26 },
-  treesinger:  { tier: 3, next_class: "rootbinder",  display_name: "Treesinger",  base_hp: 160, hp_per_level: 20, base_str: 27, base_dex: 10, base_vit: 26, base_int: 3 },
-  shadowbloom: { tier: 3, next_class: "druid",       display_name: "Shadowbloom", base_hp: 125, hp_per_level: 16, base_str: 7,  base_dex: 26, base_vit: 26, base_int: 7 },
-  necromancer: { tier: 4, next_class: "archmage",    display_name: "Summoner",    base_hp: 135, hp_per_level: 17, base_str: 4,  base_dex: 12, base_vit: 33, base_int: 33 },
-  rootbinder:  { tier: 4, next_class: "emberpriest", display_name: "Rootbinder",  base_hp: 210, hp_per_level: 26, base_str: 33, base_dex: 12, base_vit: 33, base_int: 4 },
-  druid:       { tier: 4, next_class: "galeshaper",  display_name: "Druid",       base_hp: 160, hp_per_level: 20, base_str: 8,  base_dex: 33, base_vit: 33, base_int: 8 },
-  emberpriest: { tier: 5, next_class: null,          display_name: "Emberpriest", base_hp: 190, hp_per_level: 24, base_str: 40, base_dex: 15, base_vit: 40, base_int: 5 },
-  archmage:    { tier: 5, next_class: null,          display_name: "Archmage",    base_hp: 165, hp_per_level: 21, base_str: 5,  base_dex: 15, base_vit: 40, base_int: 40 },
-  galeshaper:  { tier: 5, next_class: null,          display_name: "Galeshaper",  base_hp: 195, hp_per_level: 25, base_str: 10, base_dex: 40, base_vit: 40, base_int: 10 },
+  wizard:      { tier: 1, chain: "wizard",     next_class: "sorcerer",    display_name: "Wizard",      base_hp: 60,  hp_per_level: 8,  base_str: 2,  base_dex: 6,  base_vit: 16, base_int: 16 },
+  thornguard:  { tier: 1, chain: "thornguard", next_class: "stonewarden", display_name: "Thornguard",  base_hp: 100, hp_per_level: 14, base_str: 16, base_dex: 6,  base_vit: 16, base_int: 2 },
+  windrider:   { tier: 1, chain: "windrider",  next_class: "galestrider", display_name: "Windrider",   base_hp: 75,  hp_per_level: 10, base_str: 4,  base_dex: 16, base_vit: 16, base_int: 4 },
+  sorcerer:    { tier: 2, chain: "wizard",     next_class: "warlock",     display_name: "Sorcerer",    base_hp: 80,  hp_per_level: 10, base_str: 3,  base_dex: 8,  base_vit: 20, base_int: 21 },
+  stonewarden: { tier: 2, chain: "thornguard", next_class: "treesinger",  display_name: "Stonewarden", base_hp: 140, hp_per_level: 18, base_str: 20, base_dex: 8,  base_vit: 21, base_int: 3 },
+  galestrider: { tier: 2, chain: "windrider",  next_class: "shadowbloom", display_name: "Galestrider", base_hp: 100, hp_per_level: 13, base_str: 5,  base_dex: 21, base_vit: 21, base_int: 5 },
+  warlock:     { tier: 3, chain: "wizard",     next_class: "necromancer", display_name: "Warlock",     base_hp: 105, hp_per_level: 13, base_str: 3,  base_dex: 10, base_vit: 27, base_int: 26 },
+  treesinger:  { tier: 3, chain: "thornguard", next_class: "rootbinder",  display_name: "Treesinger",  base_hp: 160, hp_per_level: 20, base_str: 27, base_dex: 10, base_vit: 26, base_int: 3 },
+  shadowbloom: { tier: 3, chain: "windrider",  next_class: "druid",       display_name: "Shadowbloom", base_hp: 125, hp_per_level: 16, base_str: 7,  base_dex: 26, base_vit: 26, base_int: 7 },
+  necromancer: { tier: 4, chain: "wizard",     next_class: "archmage",    display_name: "Summoner",    base_hp: 135, hp_per_level: 17, base_str: 4,  base_dex: 12, base_vit: 33, base_int: 33 },
+  rootbinder:  { tier: 4, chain: "thornguard", next_class: "emberpriest", display_name: "Rootbinder",  base_hp: 210, hp_per_level: 26, base_str: 33, base_dex: 12, base_vit: 33, base_int: 4 },
+  druid:       { tier: 4, chain: "windrider",  next_class: "galeshaper",  display_name: "Druid",       base_hp: 160, hp_per_level: 20, base_str: 8,  base_dex: 33, base_vit: 33, base_int: 8 },
+  emberpriest: { tier: 5, chain: "thornguard", next_class: null,          display_name: "Emberpriest", base_hp: 190, hp_per_level: 24, base_str: 40, base_dex: 15, base_vit: 40, base_int: 5 },
+  archmage:    { tier: 5, chain: "wizard",     next_class: null,          display_name: "Archmage",    base_hp: 165, hp_per_level: 21, base_str: 5,  base_dex: 15, base_vit: 40, base_int: 40 },
+  galeshaper:  { tier: 5, chain: "windrider",  next_class: null,          display_name: "Galeshaper",  base_hp: 195, hp_per_level: 25, base_str: 10, base_dex: 40, base_vit: 40, base_int: 10 },
 };
+// v0.22.3 (#10): the tier-1 class id for each chain -- a ladder reset drops a character back
+// to this class regardless of which tier it was at.
+const CHAIN_TIER1_CLASS = { wizard: "wizard", thornguard: "thornguard", windrider: "windrider" };
 
 // Balance-equivalent constants/formulas, ported verbatim from index.html's Balance
 // object -- see that file's own comments (search "BRIDGE_ROWS", "STARTING_STAT_POINTS")
@@ -714,7 +789,8 @@ const TRIAL_CLASSES = {
 const TRIAL_BRIDGE_ROWS = 10, TRIAL_BRIDGE_MIN_PLANKS = 2, TRIAL_BRIDGE_MAX_PLANKS = 5;
 const TRIAL_LEVEL_REQUIREMENT_PER_TIER = 10;
 const TRIAL_STARTING_STAT_POINTS = 3;
-const TRIAL_STAMINA_MAX_BASE = 100.0;
+// v0.23.0 (A2): kept in sync by hand with CB.STAMINA_MAX_BASE's own 100 -> 175 change below.
+const TRIAL_STAMINA_MAX_BASE = 175.0;
 const TRIAL_KILLS_PER_LEVEL_TARGET = 20, TRIAL_MONSTER_BASE_XP = 8.0, TRIAL_LEVEL_XP_GROWTH = 0.11;
 
 function trialClampi(n, lo, hi) { return Math.max(lo, Math.min(hi, Math.round(n))); }
@@ -746,6 +822,50 @@ function applyTrialResolutionReset(data, classId, startingPoints) {
   data.current_hp = c.base_hp || 50;
   data.current_stamina = TRIAL_STAMINA_MAX_BASE;
   data.max_maze_depth_reached = 1;
+}
+
+// v0.22.3 (#10 section B): a manual ladder reset touches ONLY class rank + level + current
+// XP -- gear, gold, vault, auction listings, materials, consumables, herbs, weapon_skills,
+// and herbalism_points are all deliberately left untouched (see the spec's "Keep untouched"
+// list). Drops the character back to the tier-1 class of its OWN chain (wizard/thornguard/
+// windrider stays whichever chain it already was), via the same applyTrialResolutionReset()
+// a bridge-trial promotion/failure already uses, then clears the season-specific fields a
+// trial resolution doesn't touch (highest_tier_reached, season_won, trial_progress, the
+// bridge-step/fail-streak counters) and forest_reputation (back to tier 1 = fresh rep).
+function applyLadderReset(data) {
+  const currentClass = TRIAL_CLASSES[data.class_id];
+  const chain = (currentClass && currentClass.chain) || "wizard";
+  const tier1ClassId = CHAIN_TIER1_CLASS[chain] || "wizard";
+  data.class_id = tier1ClassId;
+  applyTrialResolutionReset(data, tier1ClassId, TRIAL_STARTING_STAT_POINTS);
+  data.class_display_name = TRIAL_CLASSES[tier1ClassId].display_name;
+  data.highest_tier_reached = 1;
+  data.season_won = false;
+  data.bridge_fail_streak = 0;
+  data.last_bridge_steps = 0;
+  data.trial_progress = {};
+  data.forest_reputation = {};
+}
+
+// v0.22.3 (#10 section A): declares the season's first tier-5 character to reach Level 100
+// as champion -- guarded by season_state.winner_declared so only the very first character to
+// cross the line wins, no matter how many others hit the same milestone afterward (or in the
+// same instant, since this whole function runs inside the request handler synchronously with
+// respect to node:sqlite's single-threaded execution -- no race window between the read and
+// the write below). Broadcasts a global-chat announcement exactly once, on the winning call.
+function maybeDeclareSeasonWinner(accountId, data) {
+  const classInfo = TRIAL_CLASSES[data.class_id];
+  if (!classInfo || classInfo.tier !== 5) return;
+  if ((data.level || 1) < CB.LEVEL_CAP) return;
+  const state = db.prepare("SELECT winner_declared FROM season_state WHERE id = 1").get();
+  if (state && state.winner_declared) return;
+  const nowStr = nowIso();
+  db.prepare(
+    "UPDATE season_state SET winner_declared = 1, winner_account_id = ?, winner_character_name = ?, winner_class_name = ?, won_at = ? WHERE id = 1"
+  ).run(accountId, data.character_name || "A traveler", classInfo.display_name, nowStr);
+  broadcastSystemMessage(
+    `🏆 ${data.character_name || "A traveler"} the ${classInfo.display_name} has reached Level ${CB.LEVEL_CAP} and won the season! A new champion stands atop the ladder.`
+  );
 }
 
 app.post("/api/trial/attempt", requireAuth, (req, res) => {
@@ -938,6 +1058,13 @@ const ITEM_AFFIX_POOL = [
   "damage", "hp", "crit", "armor", "regen", "stamina_regen", "gold_find", "xp_find", "stamina_max",
   "strength", "dexterity", "vitality", "intelligence", "poison_resist", "magic_find",
   "block_chance", "flee_chance", "crit_multiplier", "attack_speed",
+  // v0.22.4 (#1): 9 new affixes registered so every ITEM_SLOT_AFFIXES entry can reach >=8
+  // legal stats (needed for an 8-affix Legendary to roll 8 distinct affixes per v0.22.3's
+  // slot-legality rules). Each stat's gameplay EFFECT is deferred -- it rolls/validates like
+  // any other affix but has no consumer yet (no mana pool, no spell-damage system, etc.).
+  // Must stay byte-identical to index.html's Balance.AFFIX_POOL.
+  "life_on_hit", "thorns", "max_health_pct", "trap_ward", "spell_cdr",
+  "mana", "mana_regen", "attack_rating", "spell_power",
 ];
 // v0.19.1 (#15): xp_find raised from a T1 max of 1 back up to 5 (5/10/15/20/25% across
 // T1-T5) -- mirrors index.html's Balance.AFFIX_TIER1_MAX. Still well within
@@ -971,12 +1098,55 @@ const ITEM_AFFIX_TIER1_MAX = {
   // T1-T5 (5/10/15/20/25%) through the same machinery as every other affix. Must stay in
   // sync with index.html's Balance.AFFIX_TIER1_MAX.
   attack_speed: 5,
+  // v0.22.4 (#1): 9 new affixes, effect deferred to a later version -- registered now purely
+  // to fill out ITEM_SLOT_AFFIXES below so every slot reaches >=8 legal stats. Values roll
+  // through the same 20-step distribution as every other affix. attack_rating's curve is a
+  // placeholder to retune once a hit/accuracy system exists. Must stay in sync with
+  // index.html's Balance.AFFIX_TIER1_MAX.
+  life_on_hit: 2, thorns: 4, max_health_pct: 3, trap_ward: 10, spell_cdr: 3,
+  mana: 15, mana_regen: 1, attack_rating: 25,
+  // v0.23.0 (Part B8): "spell_power" (renamed from the inert placeholder "spell_damage" of
+  // v0.22.4 (#1)) is now a real PERCENT stat feeding the B5 spell-effectiveness multiplier --
+  // T1 max of 2 (2/4/6/8/10% across T1-T5), the same T1-max-of-2 percent pattern Flee Chance/
+  // Block Chance already use. Must stay in sync with index.html's Balance.AFFIX_TIER1_MAX and
+  // Balance.affixIsPercent (server.js has no equivalent generic percent-affix registry -- see
+  // combatGetSpellPowerPct() below for why that's fine).
+  spell_power: 2,
 };
 // index.html's RARITY_TABLE's `slots` field, keyed by the RARITY_TABLE `name` (internal
 // name, not the player-facing RARITY_DISPLAY_NAMES wording -- items store the internal
 // name, e.g. "Epic" is displayed to players as "Rare").
+// v0.22.3 (#16): per-slot legal-affix map -- generation/reforge/validation must only ever
+// accept a stat from the list for that item's slot (fixes nonsense like armor-on-weapon).
+// Eyesight is handled separately (a fixed rare bonus, not part of this pool) and is gated to
+// head/amulet only at its roll site. Must stay byte-identical to index.html's Balance.SLOT_AFFIXES.
+// v0.22.4 (#2): expanded so every slot has >=8 legal stats (an 8-affix Legendary needs 8
+// distinct legal affixes per slot, and several slots previously came up short) -- the new
+// stats from v0.22.4 (#1) exist specifically to fill this map out. Same enforcement sites as
+// before; only the map grew.
+const ITEM_SLOT_AFFIXES = {
+  weapon: ["damage", "crit", "crit_multiplier", "attack_speed", "strength", "dexterity", "intelligence", "attack_rating", "spell_power", "life_on_hit"],
+  head: ["armor", "hp", "xp_find", "magic_find", "vitality", "intelligence", "mana", "spell_power", "spell_cdr", "max_health_pct"],
+  shoulders: ["armor", "hp", "block_chance", "strength", "poison_resist", "vitality", "thorns", "max_health_pct"],
+  armor: ["armor", "hp", "block_chance", "poison_resist", "regen", "strength", "vitality", "thorns", "max_health_pct", "mana"],
+  pants: ["armor", "hp", "stamina_regen", "stamina_max", "flee_chance", "vitality", "max_health_pct", "trap_ward"],
+  gloves: ["crit", "crit_multiplier", "attack_speed", "armor", "hp", "block_chance", "gold_find", "strength", "dexterity", "attack_rating", "life_on_hit"],
+  boots: ["armor", "hp", "poison_resist", "stamina_regen", "stamina_max", "flee_chance", "dexterity", "trap_ward"],
+  belt: ["armor", "hp", "block_chance", "poison_resist", "regen", "stamina_regen", "gold_find", "strength", "dexterity", "vitality", "thorns", "max_health_pct", "mana_regen", "trap_ward"],
+  ring: ["crit", "crit_multiplier", "attack_speed", "hp", "regen", "gold_find", "xp_find", "magic_find", "strength", "dexterity", "vitality", "intelligence", "mana", "mana_regen", "attack_rating", "spell_power", "life_on_hit", "spell_cdr"],
+  amulet: ["crit", "crit_multiplier", "hp", "poison_resist", "regen", "gold_find", "xp_find", "magic_find", "vitality", "intelligence", "mana", "mana_regen", "spell_power", "life_on_hit", "spell_cdr", "max_health_pct"],
+};
 const ITEM_RARITY_SLOTS = { Common: 1, Uncommon: 2, Rare: 3, Epic: 5, Legendary: 8 };
-const ITEM_GENERATION_SLOTS = ["weapon", "head", "shoulders", "armor", "pants", "gloves", "boots", "ring", "amulet", "belt"];
+// v0.22.6 (#11): "offhand" added -- must stay in sync with index.html's IF.GENERATION_SLOTS.
+const ITEM_GENERATION_SLOTS = ["weapon", "head", "shoulders", "armor", "pants", "gloves", "boots", "ring", "amulet", "belt", "offhand"];
+// v0.22.6 (#14): "offhand" legality is by base-item TYPE (Shield vs Orb) rather than by slot --
+// this is a separate type-keyed map consulted instead of ITEM_SLOT_AFFIXES whenever an item's
+// slot is "offhand" (see legalAffixesForItem() below). Must stay byte-identical to index.html's
+// Balance.OFFHAND_SLOT_AFFIXES.
+const ITEM_OFFHAND_SLOT_AFFIXES = {
+  shield: ["armor", "hp", "block_chance", "poison_resist", "regen", "vitality", "max_health_pct", "thorns"],
+  orb: ["spell_power", "mana", "mana_regen", "spell_cdr", "intelligence", "crit", "crit_multiplier", "magic_find", "hp"],
+};
 const ITEM_ELEMENT_IDS = ["fire", "wind", "earth", "water"];
 const ITEM_WEAPON_DAMAGE_AFFIX_MULT = 1.40;
 const ITEM_SALVAGE_MATERIALS_PER_SLOT = 3, ITEM_REROLL_MATERIAL_COST_MULT = 2;
@@ -1050,6 +1220,21 @@ function itemReforgeGoldCost(tier, slots) { return itemSellValue(tier, slots) * 
 function itemRefineMaterialCost(tier, slots) { return Math.round(itemReforgeMaterialCost(tier, slots) * ITEM_REFINE_MATERIAL_COST_MULT); }
 function itemRefineGoldCost(tier, slots) { return itemReforgeGoldCost(tier, slots) * ITEM_REFINE_GOLD_COST_MULT; }
 
+// v0.22.6 (#14): shared helper -- "offhand" legality is keyed by base-item TYPE (Shield vs
+// Orb) via COMBAT_OFFHAND_TYPE_BY_BASE_NAME (defined further down alongside COMBAT_BASE_NAMES),
+// not by slot like every other ITEM_GENERATION_SLOTS entry. Every call site that used to read
+// ITEM_SLOT_AFFIXES[item.slot] directly (validateGearItem, the Reforge endpoint, Legacy Gear
+// scan/rescale) now goes through this instead, so an offhand item gets the right pool
+// everywhere. Mirrors index.html's equivalent special-case in IF.generate().
+function legalAffixesForSlotAndBaseName(slot, baseName) {
+  if (slot === "offhand") {
+    const t = COMBAT_OFFHAND_TYPE_BY_BASE_NAME[baseName] || "";
+    return ITEM_OFFHAND_SLOT_AFFIXES[t] || [];
+  }
+  return ITEM_SLOT_AFFIXES[slot] || [];
+}
+function legalAffixesForItem(item) { return legalAffixesForSlotAndBaseName(item.slot, item.base_name); }
+
 // Returns null if `item` is a plausible gear item the game's own generation rules could
 // have produced, or a short player-facing string describing what's wrong with it.
 function validateGearItem(item) {
@@ -1072,6 +1257,13 @@ function validateGearItem(item) {
       continue;
     }
     if (!ITEM_AFFIX_POOL.includes(a.stat)) return "Unknown affix stat.";
+    // v0.22.3 (#16): reject any affix illegal for its own slot (e.g. armor rolled onto a
+    // weapon) -- closes the client-crafted-illegal-combo vector the same way the existing
+    // tier/value bounds checks do.
+    // v0.22.6 (#14): routed through legalAffixesForItem() so "offhand" is checked against the
+    // Shield/Orb pool for this item's base_name instead of a flat per-slot list.
+    const legalForSlot = legalAffixesForItem(item);
+    if (!legalForSlot.includes(a.stat)) return `Affix "${a.stat}" isn't legal on this item's slot.`;
     let max = itemAffixCeilingForTier(a.stat, tier);
     if (item.slot === "weapon" && a.stat === "damage") max = round2(max * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
     // v0.22 (batch2 #6): the lower bound used to be a flat `< 1` back when every affix rolled
@@ -1246,10 +1438,17 @@ app.post("/api/blacksmith/reforge", requireAuth, (req, res) => {
   // The new stat must be one the item doesn't already carry (matches IF.generate()'s own
   // no-duplicate-stat rule -- a legitimate item never has the same stat twice) -- pick
   // uniformly at random from whatever's left in the pool.
+  // v0.22.3 (#16): the new stat must ALSO be legal for this item's own slot -- reforge can
+  // no longer hand a weapon an armor affix. Pull from the item's legal pool, not the full pool.
+  // v0.22.6 (#14): routed through legalAffixesForItem() so an offhand item reforges within its
+  // own Shield/Orb pool instead of an undifferentiated "offhand" list.
   const existingStats = new Set(inst.affixes.map((a) => a.stat));
-  const candidatePool = ITEM_AFFIX_POOL.filter((s) => !existingStats.has(s));
-  // Every item has at most 8 normal affixes (Legendary) out of a 15-stat pool, so a fresh
-  // stat is always available; this fallback only exists as a defensive no-op guard.
+  const legalForSlot = legalAffixesForItem(inst).length ? legalAffixesForItem(inst) : ITEM_AFFIX_POOL;
+  const candidatePool = legalForSlot.filter((s) => !existingStats.has(s));
+  // Every slot's legal-affix list has more entries than any item's max affix count
+  // (Legendary=8 vs. the smallest slot list, shoulders, at 4 -- so a slot with only 4 legal
+  // stats could theoretically run dry on a fully-rolled Legendary; this fallback keeps the
+  // existing stat rather than erroring in that edge case).
   const newStat = candidatePool.length > 0
     ? candidatePool[Math.floor(Math.random() * candidatePool.length)]
     : inst.affixes[targetPos].stat;
@@ -1432,6 +1631,14 @@ for (const stmt of [
   "ALTER TABLE combat_sessions ADD COLUMN player_attack_speed REAL NOT NULL DEFAULT 1.0",
   "ALTER TABLE combat_sessions ADD COLUMN monster_attack_speed REAL NOT NULL DEFAULT 1.0",
   "ALTER TABLE combat_sessions ADD COLUMN last_monster_hit_at INTEGER NOT NULL DEFAULT 0",
+  // v0.23.0 (Part B7): per-session spellcasting state -- spell_cooldowns is a JSON map of
+  // {spellId: readyAtEpochMs}, spell_dots is a JSON array of queued Fireflies-style
+  // damage-over-time entries (see combatSettleSpellDots()), rooted_until/flee_override_until
+  // are Entangle's root/100%-flee-chance expiry timestamps (0 = inactive).
+  "ALTER TABLE combat_sessions ADD COLUMN spell_cooldowns TEXT NOT NULL DEFAULT '{}'",
+  "ALTER TABLE combat_sessions ADD COLUMN spell_dots TEXT NOT NULL DEFAULT '[]'",
+  "ALTER TABLE combat_sessions ADD COLUMN rooted_until INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE combat_sessions ADD COLUMN flee_override_until INTEGER NOT NULL DEFAULT 0",
 ]) {
   try { db.exec(stmt); } catch (e) { /* column already exists, fine */ }
 }
@@ -1444,60 +1651,95 @@ for (const stmt of [
 // PERCENTAGE damage reduction) -- retired, see CLASSES' own matching v0.20.4 comment in
 // index.html for the full rationale. combatGetArmor() below now derives ALL Armor from
 // gear (flat) plus total Strength * CB.STR_TO_ARMOR_RATIO, for every class.
+// v0.23.0 (Part B1): base_mana per class, keyed the same way every other per-class base
+// stat here is (base_hp, hp_per_level, etc.) --5 tiers by chain, per Gwen's exact spec:
+// Wizard chain 160 (its whole identity is spellcasting), Windrider chain 100 (a hybrid
+// fighter/caster), Thornguard chain 40 (barely casts at all), with the two off-hand-Orb
+// hybrid healers (Druid, windrider chain; Emberpriest, thornguard chain -- see the offhand
+// Orb class restrictions above) bumped to 160 to match their actual spellcasting role
+// despite their chain's base. Must stay in sync with CLASSES[*].base_mana in index.html.
 const COMBAT_CLASSES = {
-  wizard:      { tier: 1, chain: "wizard",      base_hp: 60,  hp_per_level: 8,  base_damage_min: 8,  base_damage_max: 14, damage_per_level: 1.4, base_crit: 0.05, regen: 0.0 },
-  thornguard:  { tier: 1, chain: "thornguard",  base_hp: 100, hp_per_level: 14, base_damage_min: 6,  base_damage_max: 10, damage_per_level: 1.1, base_crit: 0.05, regen: 0.0 },
-  windrider:   { tier: 1, chain: "windrider",   base_hp: 75,  hp_per_level: 10, base_damage_min: 7,  base_damage_max: 12, damage_per_level: 1.2, base_crit: 0.20, regen: 0.0 },
-  sorcerer:    { tier: 2, chain: "wizard",      base_hp: 80,  hp_per_level: 10, base_damage_min: 12, base_damage_max: 20, damage_per_level: 1.9, base_crit: 0.08, regen: 0.0 },
-  stonewarden: { tier: 2, chain: "thornguard",  base_hp: 140, hp_per_level: 18, base_damage_min: 10, base_damage_max: 16, damage_per_level: 1.6, base_crit: 0.10, regen: 0.0 },
-  galestrider: { tier: 2, chain: "windrider",   base_hp: 100, hp_per_level: 13, base_damage_min: 11, base_damage_max: 18, damage_per_level: 1.7, base_crit: 0.25, regen: 0.0 },
-  warlock:     { tier: 3, chain: "wizard",      base_hp: 105, hp_per_level: 13, base_damage_min: 16, base_damage_max: 26, damage_per_level: 2.4, base_crit: 0.10, regen: 1.0 },
-  treesinger:  { tier: 3, chain: "thornguard",  base_hp: 160, hp_per_level: 20, base_damage_min: 14, base_damage_max: 22, damage_per_level: 2.0, base_crit: 0.15, regen: 2.5 },
-  shadowbloom: { tier: 3, chain: "windrider",   base_hp: 125, hp_per_level: 16, base_damage_min: 18, base_damage_max: 28, damage_per_level: 2.4, base_crit: 0.35, regen: 0.0 },
-  necromancer: { tier: 4, chain: "wizard",      base_hp: 135, hp_per_level: 17, base_damage_min: 22, base_damage_max: 34, damage_per_level: 3.0, base_crit: 0.12, regen: 1.5 },
-  rootbinder:  { tier: 4, chain: "thornguard",  base_hp: 210, hp_per_level: 26, base_damage_min: 18, base_damage_max: 28, damage_per_level: 2.6, base_crit: 0.12, regen: 3.5 },
-  druid:       { tier: 4, chain: "windrider",   base_hp: 160, hp_per_level: 20, base_damage_min: 24, base_damage_max: 36, damage_per_level: 3.1, base_crit: 0.20, regen: 2.0 },
-  emberpriest: { tier: 5, chain: "thornguard",  base_hp: 190, hp_per_level: 24, base_damage_min: 16, base_damage_max: 24, damage_per_level: 2.3, base_crit: 0.10, regen: 6.0 },
-  archmage:    { tier: 5, chain: "wizard",      base_hp: 165, hp_per_level: 21, base_damage_min: 28, base_damage_max: 42, damage_per_level: 3.6, base_crit: 0.15, regen: 2.0 },
-  galeshaper:  { tier: 5, chain: "windrider",   base_hp: 195, hp_per_level: 25, base_damage_min: 30, base_damage_max: 44, damage_per_level: 3.8, base_crit: 0.28, regen: 2.4 },
+  wizard:      { tier: 1, chain: "wizard",      base_hp: 60,  hp_per_level: 8,  base_damage_min: 8,  base_damage_max: 14, damage_per_level: 1.4, base_crit: 0.05, regen: 0.0, base_mana: 160 },
+  thornguard:  { tier: 1, chain: "thornguard",  base_hp: 100, hp_per_level: 14, base_damage_min: 6,  base_damage_max: 10, damage_per_level: 1.1, base_crit: 0.05, regen: 0.0, base_mana: 40 },
+  windrider:   { tier: 1, chain: "windrider",   base_hp: 75,  hp_per_level: 10, base_damage_min: 7,  base_damage_max: 12, damage_per_level: 1.2, base_crit: 0.20, regen: 0.0, base_mana: 100 },
+  sorcerer:    { tier: 2, chain: "wizard",      base_hp: 80,  hp_per_level: 10, base_damage_min: 12, base_damage_max: 20, damage_per_level: 1.9, base_crit: 0.08, regen: 0.0, base_mana: 160 },
+  stonewarden: { tier: 2, chain: "thornguard",  base_hp: 140, hp_per_level: 18, base_damage_min: 10, base_damage_max: 16, damage_per_level: 1.6, base_crit: 0.10, regen: 0.0, base_mana: 40 },
+  galestrider: { tier: 2, chain: "windrider",   base_hp: 100, hp_per_level: 13, base_damage_min: 11, base_damage_max: 18, damage_per_level: 1.7, base_crit: 0.25, regen: 0.0, base_mana: 100 },
+  warlock:     { tier: 3, chain: "wizard",      base_hp: 105, hp_per_level: 13, base_damage_min: 16, base_damage_max: 26, damage_per_level: 2.4, base_crit: 0.10, regen: 1.0, base_mana: 160 },
+  treesinger:  { tier: 3, chain: "thornguard",  base_hp: 160, hp_per_level: 20, base_damage_min: 14, base_damage_max: 22, damage_per_level: 2.0, base_crit: 0.15, regen: 2.5, base_mana: 40 },
+  shadowbloom: { tier: 3, chain: "windrider",   base_hp: 125, hp_per_level: 16, base_damage_min: 18, base_damage_max: 28, damage_per_level: 2.4, base_crit: 0.35, regen: 0.0, base_mana: 100 },
+  necromancer: { tier: 4, chain: "wizard",      base_hp: 135, hp_per_level: 17, base_damage_min: 22, base_damage_max: 34, damage_per_level: 3.0, base_crit: 0.12, regen: 1.5, base_mana: 160 },
+  rootbinder:  { tier: 4, chain: "thornguard",  base_hp: 210, hp_per_level: 26, base_damage_min: 18, base_damage_max: 28, damage_per_level: 2.6, base_crit: 0.12, regen: 3.5, base_mana: 40 },
+  druid:       { tier: 4, chain: "windrider",   base_hp: 160, hp_per_level: 20, base_damage_min: 24, base_damage_max: 36, damage_per_level: 3.1, base_crit: 0.20, regen: 2.0, base_mana: 160 },
+  emberpriest: { tier: 5, chain: "thornguard",  base_hp: 190, hp_per_level: 24, base_damage_min: 16, base_damage_max: 24, damage_per_level: 2.3, base_crit: 0.10, regen: 6.0, base_mana: 160 },
+  archmage:    { tier: 5, chain: "wizard",      base_hp: 165, hp_per_level: 21, base_damage_min: 28, base_damage_max: 42, damage_per_level: 3.6, base_crit: 0.15, regen: 2.0, base_mana: 160 },
+  galeshaper:  { tier: 5, chain: "windrider",   base_hp: 195, hp_per_level: 25, base_damage_min: 30, base_damage_max: 44, damage_per_level: 3.8, base_crit: 0.28, regen: 2.4, base_mana: 100 },
 };
 
+// v0.22.1 (Part A2): mirrors index.html's MONSTER_BAND_INFO exactly -- band key -> display
+// label (unused server-side, kept for parity/reference), spawn-gate area level, and band size.
+// combatMonsterAllowedForAreaLevel() below reads minAreaLevel; combatRollRarityForBand()'s
+// MONSTER_BAND_LOOT_RARITY_WEIGHTS keys off the same 5 band names.
+const COMBAT_MONSTER_BAND_INFO = {
+  Common: { minAreaLevel: 1 }, Uncommon: { minAreaLevel: 8 }, Rare: { minAreaLevel: 13 },
+  Epic: { minAreaLevel: 21 }, Legendary: { minAreaLevel: 34 },
+};
 // Verbatim mirror of index.html's MONSTERS array (id/tier/base stats/loot_table only -- name
 // is used to build the combat log/session `name` field).
 const COMBAT_MONSTERS = [
-  { id: "sprout", name: "Sprout", tier: "common", base_hp: 20, base_damage_min: 2, base_damage_max: 4, base_xp: 8, gold_min: 1, gold_max: 4, loot_table: "common" },
-  { id: "mosshide", name: "Mosshide", tier: "common", base_hp: 22, base_damage_min: 3, base_damage_max: 6, base_xp: 8, gold_min: 2, gold_max: 5, loot_table: "common" },
-  { id: "windwisp", name: "Windwisp", tier: "common", base_hp: 16, base_damage_min: 2, base_damage_max: 5, base_xp: 7, gold_min: 1, gold_max: 3, loot_table: "common" },
-  { id: "pebblekin", name: "Pebblekin", tier: "common", base_hp: 26, base_damage_min: 3, base_damage_max: 6, base_xp: 9, gold_min: 2, gold_max: 5, loot_table: "common" },
-  { id: "cinderling", name: "Cinderling", tier: "common", base_hp: 24, base_damage_min: 4, base_damage_max: 7, base_xp: 9, gold_min: 2, gold_max: 6, loot_table: "common" },
-  { id: "bramble_knight", name: "Bramble Knight", tier: "uncommon", base_hp: 38, base_damage_min: 6, base_damage_max: 10, base_xp: 12, gold_min: 4, gold_max: 10, loot_table: "uncommon" },
-  { id: "thornling", name: "Thornling", tier: "uncommon", base_hp: 32, base_damage_min: 6, base_damage_max: 10, base_xp: 12, gold_min: 3, gold_max: 9, loot_table: "uncommon" },
-  { id: "boglurker", name: "Boglurker", tier: "uncommon", base_hp: 42, base_damage_min: 5, base_damage_max: 9, base_xp: 12, gold_min: 3, gold_max: 8, loot_table: "uncommon" },
-  { id: "emberkin", name: "Emberkin", tier: "uncommon", base_hp: 28, base_damage_min: 7, base_damage_max: 12, base_xp: 13, gold_min: 4, gold_max: 9, loot_table: "uncommon" },
-  { id: "fernstalker", name: "Fernstalker", tier: "uncommon", base_hp: 30, base_damage_min: 8, base_damage_max: 13, base_xp: 13, gold_min: 4, gold_max: 10, loot_table: "uncommon" },
-  { id: "vinewraith", name: "Vinewraith", tier: "rare", base_hp: 65, base_damage_min: 10, base_damage_max: 16, base_xp: 18, gold_min: 8, gold_max: 16, loot_table: "rare" },
-  { id: "stumplurker", name: "Stumplurker", tier: "rare", base_hp: 58, base_damage_min: 9, base_damage_max: 15, base_xp: 17, gold_min: 7, gold_max: 15, loot_table: "rare" },
-  { id: "ashwalker", name: "Ashwalker", tier: "rare", base_hp: 60, base_damage_min: 8, base_damage_max: 14, base_xp: 18, gold_min: 8, gold_max: 18, loot_table: "rare" },
-  { id: "stormroot", name: "Stormroot", tier: "rare", base_hp: 50, base_damage_min: 11, base_damage_max: 18, base_xp: 19, gold_min: 8, gold_max: 17, loot_table: "rare" },
-  { id: "bark_golem", name: "Bark Golem", tier: "rare", base_hp: 90, base_damage_min: 9, base_damage_max: 14, base_xp: 20, gold_min: 10, gold_max: 20, loot_table: "rare" },
-  { id: "ancient_treant", name: "Ancient Treant", tier: "epic", base_hp: 95, base_damage_min: 16, base_damage_max: 24, base_xp: 30, gold_min: 16, gold_max: 28, loot_table: "epic" },
-  { id: "wildfire", name: "Wildfire", tier: "epic", base_hp: 100, base_damage_min: 18, base_damage_max: 28, base_xp: 34, gold_min: 18, gold_max: 32, loot_table: "epic" },
-  { id: "stonewaker", name: "Stonewaker", tier: "epic", base_hp: 110, base_damage_min: 17, base_damage_max: 26, base_xp: 32, gold_min: 17, gold_max: 30, loot_table: "epic" },
-  { id: "tempest_elm", name: "Tempest Elm", tier: "epic", base_hp: 105, base_damage_min: 19, base_damage_max: 29, base_xp: 36, gold_min: 19, gold_max: 34, loot_table: "epic" },
+  { id: "sprout", name: "Sprout", tier: "Common", base_hp: 20, base_damage: 3, base_xp: 8, gold_min: 1, gold_max: 4, loot_table: "common" },
+  { id: "windwisp", name: "Windwisp", tier: "Common", base_hp: 16, base_damage: 3.5, base_xp: 7, gold_min: 1, gold_max: 3, loot_table: "common" },
+  { id: "mosshide", name: "Mosshide", tier: "Common", base_hp: 22, base_damage: 4.5, base_xp: 8, gold_min: 2, gold_max: 5, loot_table: "common" },
+  { id: "pebblekin", name: "Pebblekin", tier: "Common", base_hp: 26, base_damage: 4.5, base_xp: 9, gold_min: 2, gold_max: 5, loot_table: "common" },
+  { id: "cinderling", name: "Cinderling", tier: "Uncommon", base_hp: 24, base_damage: 5.5, base_xp: 9, gold_min: 2, gold_max: 6, loot_table: "uncommon" },
+  { id: "boglurker", name: "Boglurker", tier: "Uncommon", base_hp: 42, base_damage: 7, base_xp: 12, gold_min: 3, gold_max: 8, loot_table: "uncommon" },
+  { id: "thornling", name: "Thornling", tier: "Uncommon", base_hp: 32, base_damage: 8, base_xp: 12, gold_min: 3, gold_max: 9, loot_table: "uncommon" },
+  { id: "bramble_knight", name: "Bramble Knight", tier: "Uncommon", base_hp: 38, base_damage: 8, base_xp: 12, gold_min: 4, gold_max: 10, loot_table: "uncommon" },
+  { id: "emberkin", name: "Emberkin", tier: "Rare", base_hp: 28, base_damage: 9.5, base_xp: 13, gold_min: 4, gold_max: 9, loot_table: "rare" },
+  { id: "fernstalker", name: "Fernstalker", tier: "Rare", base_hp: 30, base_damage: 10.5, base_xp: 13, gold_min: 4, gold_max: 10, loot_table: "rare" },
+  { id: "ashwalker", name: "Ashwalker", tier: "Rare", base_hp: 60, base_damage: 11, base_xp: 18, gold_min: 8, gold_max: 18, loot_table: "rare" },
+  { id: "bark_golem", name: "Bark Golem", tier: "Rare", base_hp: 90, base_damage: 11.5, base_xp: 20, gold_min: 10, gold_max: 20, loot_table: "rare" },
+  { id: "stumplurker", name: "Stumplurker", tier: "Epic", base_hp: 58, base_damage: 12, base_xp: 17, gold_min: 7, gold_max: 15, loot_table: "epic" },
+  { id: "vinewraith", name: "Vinewraith", tier: "Epic", base_hp: 65, base_damage: 13, base_xp: 18, gold_min: 8, gold_max: 16, loot_table: "epic" },
+  { id: "stormroot", name: "Stormroot", tier: "Epic", base_hp: 50, base_damage: 14.5, base_xp: 19, gold_min: 8, gold_max: 17, loot_table: "epic" },
+  { id: "ancient_treant", name: "Ancient Treant", tier: "Epic", base_hp: 95, base_damage: 20, base_xp: 30, gold_min: 16, gold_max: 28, loot_table: "epic" },
+  { id: "stonewaker", name: "Stonewaker", tier: "Legendary", base_hp: 110, base_damage: 21.5, base_xp: 32, gold_min: 17, gold_max: 30, loot_table: "legendary" },
+  { id: "wildfire", name: "Wildfire", tier: "Legendary", base_hp: 100, base_damage: 23, base_xp: 34, gold_min: 18, gold_max: 32, loot_table: "legendary" },
+  { id: "tempest_elm", name: "Tempest Elm", tier: "Legendary", base_hp: 105, base_damage: 24, base_xp: 36, gold_min: 19, gold_max: 34, loot_table: "legendary" },
 ];
 
 // Verbatim mirror of index.html's LOOT_TABLES.
+// v0.22.6 (#26): removed every "dry_branch" (Dry Log) entry -- v0.22.3 (#6b) deprecated Dry
+// Logs client-side, but this server-side mirror was never updated to match, so kills were
+// still handing them out from the server's own loot roll despite the client no longer
+// generating them anywhere. Confirmed via audit that no other server loot source (chest,
+// stronghold chest, merchant stock) references dry_branch either.
 const COMBAT_LOOT_TABLES = {
-  common: [{ type: "nothing", weight: 155 }, { type: "gear", weight: 50 }, { type: "consumable", weight: 66, item_id: "minor_health_potion" }, { type: "herb", weight: 1, herb_id: "sunpetal" }, { type: "consumable", weight: 26, item_id: "dry_branch" }],
-  uncommon: [{ type: "nothing", weight: 139 }, { type: "gear", weight: 66 }, { type: "consumable", weight: 50, item_id: "health_potion" }, { type: "herb", weight: 1, herb_id: "emberroot" }, { type: "consumable", weight: 26, item_id: "dry_branch" }],
-  rare: [{ type: "nothing", weight: 112 }, { type: "gear", weight: 99 }, { type: "consumable", weight: 50, item_id: "medium_health_potion" }, { type: "herb", weight: 1, herb_id: "frostvine" }, { type: "consumable", weight: 20, item_id: "dry_branch" }],
-  epic: [{ type: "nothing", weight: 83 }, { type: "gear", weight: 149 }, { type: "consumable", weight: 50, item_id: "greater_health_potion" }, { type: "herb", weight: 1, herb_id: "frostvine" }, { type: "consumable", weight: 17, item_id: "dry_branch" }],
+  common: [{ type: "nothing", weight: 155 }, { type: "gear", weight: 50 }, { type: "consumable", weight: 66, item_id: "minor_health_potion" }, { type: "herb", weight: 1, herb_id: "sunpetal" }],
+  uncommon: [{ type: "nothing", weight: 139 }, { type: "gear", weight: 66 }, { type: "consumable", weight: 50, item_id: "health_potion" }, { type: "herb", weight: 1, herb_id: "emberroot" }],
+  rare: [{ type: "nothing", weight: 112 }, { type: "gear", weight: 99 }, { type: "consumable", weight: 50, item_id: "medium_health_potion" }, { type: "herb", weight: 1, herb_id: "frostvine" }],
+  epic: [{ type: "nothing", weight: 83 }, { type: "gear", weight: 149 }, { type: "consumable", weight: 50, item_id: "greater_health_potion" }, { type: "herb", weight: 1, herb_id: "frostvine" }],
+  legendary: [{ type: "nothing", weight: 60 }, { type: "gear", weight: 180 }, { type: "consumable", weight: 50, item_id: "supreme_health_potion" }, { type: "herb", weight: 1, herb_id: "starveil" }],
+};
+// v0.22.1 (Part A2d): "Each band drops mostly its own [gear] rarity, with a small weighted
+// tail into adjacent rarities" -- ~70% own rarity / ~15% each adjacent, clamped at the ends
+// (Newborn/Ancient only have one neighbor, so their own share absorbs the missing 15%).
+// Keys are the SAME band names as monster.tier; values name-index into COMBAT_RARITY_TABLE.
+const MONSTER_BAND_LOOT_RARITY_WEIGHTS = {
+  Common: [{ name: "Common", weight: 85 }, { name: "Uncommon", weight: 15 }],
+  Uncommon: [{ name: "Common", weight: 15 }, { name: "Uncommon", weight: 70 }, { name: "Rare", weight: 15 }],
+  Rare: [{ name: "Uncommon", weight: 15 }, { name: "Rare", weight: 70 }, { name: "Epic", weight: 15 }],
+  Epic: [{ name: "Rare", weight: 15 }, { name: "Epic", weight: 70 }, { name: "Legendary", weight: 15 }],
+  Legendary: [{ name: "Epic", weight: 15 }, { name: "Legendary", weight: 85 }],
 };
 
 // Only the fields combat's use-item endpoint actually needs from index.html's ITEMS.
 const COMBAT_CONSUMABLES = {
   minor_health_potion: { heal_amount: 20 }, health_potion: { heal_amount: 40 }, medium_health_potion: { heal_amount: 75 }, greater_health_potion: { heal_amount: 120 }, supreme_health_potion: { heal_amount: 180 },
   minor_stamina_potion: { stamina_amount: 35 }, stamina_potion: { stamina_amount: 60 }, medium_stamina_potion: { stamina_amount: 100 }, greater_stamina_potion: { stamina_amount: 150 }, supreme_stamina_potion: { stamina_amount: 220 },
+  // v0.23.0 (Part B3): mana potion tier line -- same 5-tier naming convention as health/stamina
+  // potions above, mana_amount mirrors heal_amount/stamina_amount exactly.
+  minor_mana_potion: { mana_amount: 20 }, mana_potion: { mana_amount: 40 }, medium_mana_potion: { mana_amount: 60 }, greater_mana_potion: { mana_amount: 90 }, supreme_mana_potion: { mana_amount: 140 },
   antidote: { cures_poison: true },
 };
 const COMBAT_BAG_CAPACITY = { traveler_pouch: 8, woven_bag: 16, bramble_sack: 24, rootpack_ancient: 40 };
@@ -1512,6 +1754,10 @@ const COMBAT_BASE_NAMES = {
   ring: ["Acorn Ring", "Petal Ring", "Vinewrought Ring"],
   amulet: ["Emberstone Pendant", "Driftwood Amulet", "Heartwood Talisman"],
   belt: ["Vine Cinch", "Barkweave Belt", "Root Sash"],
+  // v0.22.6 (#11-14): mirrors index.html's IF.BASE_NAMES.offhand -- both Shield and Orb base
+  // names share the single "offhand" GENERATION_SLOTS key; COMBAT_OFFHAND_TYPE_BY_BASE_NAME
+  // below resolves which TYPE a given name is.
+  offhand: ["Bramble Buckler", "Rootwood Shield", "Bark Aegis", "Moonpetal Orb", "Emberheart Orb", "Wisp-Light Orb"],
 };
 const COMBAT_WEAPON_TYPE_BY_BASE_NAME = { "Twig Wand": "wand", "Bramblestaff": "staff", "Rootcarver": "sword", "Thornbow": "bow", "Charwood Axe": "axe", "Emberbrand": "sword", "Thornfang": "dagger", "Bramblespike": "dagger", "Quickthorn": "dagger", "Goedendag": "dagger" };
 const COMBAT_WEAPON_TYPE_CLASS_RESTRICTIONS = {
@@ -1520,13 +1766,25 @@ const COMBAT_WEAPON_TYPE_CLASS_RESTRICTIONS = {
   axe: ["thornguard", "stonewarden", "rootbinder", "windrider", "galestrider", "galeshaper"],
   bow: ["windrider", "galestrider", "treesinger"],
 };
-const COMBAT_EQUIPPED_SLOT_KEYS = ["weapon", "head", "shoulders", "armor", "pants", "gloves", "boots", "ring1", "ring2", "amulet", "belt"];
+// v0.22.6 (#11-14): must stay byte-identical to index.html's IF.OFFHAND_TYPE_BY_BASE_NAME /
+// OFFHAND_TYPE_CLASS_RESTRICTIONS. Shield has no class-restriction entry (usable by everyone,
+// same "missing entry = every class allowed" convention dagger relies on above); Orb is gated
+// to the wizard chain plus emberpriest/druid.
+const COMBAT_OFFHAND_TYPE_BY_BASE_NAME = { "Bramble Buckler": "shield", "Rootwood Shield": "shield", "Bark Aegis": "shield", "Moonpetal Orb": "orb", "Emberheart Orb": "orb", "Wisp-Light Orb": "orb" };
+const COMBAT_OFFHAND_TYPE_CLASS_RESTRICTIONS = {
+  orb: ["wizard", "sorcerer", "warlock", "necromancer", "archmage", "emberpriest", "druid"],
+};
+const COMBAT_EQUIPPED_SLOT_KEYS = ["weapon", "head", "shoulders", "armor", "pants", "gloves", "boots", "ring1", "ring2", "amulet", "belt", "offhand"];
 const COMBAT_RARITY_TABLE = [{ name: "Common", slots: 1, weight: 60 }, { name: "Uncommon", slots: 2, weight: 25 }, { name: "Rare", slots: 3, weight: 10 }, { name: "Epic", slots: 5, weight: 4 }, { name: "Legendary", slots: 8, weight: 1 }];
 
 // Balance-equivalent constants combat needs, ported verbatim from index.html's Balance
 // object (see that file's own comments for the full rationale behind each number).
 const CB = {
-  CRIT_MULTIPLIER: 1.75, FLEE_FAIL_CHANCE: 0.20, MONSTER_FIRST_STRIKE_CHANCE: 0.5,
+  // v0.22.7 (#18): player crit floor dropped from 1.75 to 1.5, mirroring index.html's
+  // Balance.CRIT_MULTIPLIER. Monsters no longer use this constant as their own floor at all
+  // (see combatGetMonsterCritFloor()/combatGetMonsterCritCeiling() below) -- CB.CRIT_MULTIPLIER
+  // is the PLAYER'S floor only now.
+  CRIT_MULTIPLIER: 1.5, FLEE_FAIL_CHANCE: 0.20, MONSTER_FIRST_STRIKE_CHANCE: 0.5,
   // v0.20 (#9.6): dialed down from 1% to 0.5% per point of Dexterity -- must stay in sync
   // with Balance.BLOCK_CHANCE_PER_DEX in index.html (see its comment for the full rationale).
   BLOCK_CHANCE_PER_DEX: 0.005, BLOCK_CHANCE_MAX: 0.60,
@@ -1538,11 +1796,37 @@ const CB = {
   VIT_HP_PER_POINT_RATIO: 0.35, VIT_STAMINA_PER_POINT_RATIO: 0.15,
   MOB_BLOCK_CHANCE_BASE: 0.05, MOB_BLOCK_CHANCE_PER_LEVEL: 0.005,
   MONSTER_HP_MULT: 2.0, MONSTER_DAMAGE_MULT: 2.0,
+  // v0.22.2 (#1): Part A (v0.22.1) flattened monster damage to a single number, which made every
+  // non-crit hit land for the exact same amount -- reads as robotic. This reintroduces a small
+  // symmetric per-hit swing band around that flattened value (dmg_min/dmg_max stop being equal),
+  // so cbRandRange(dmg_min, dmg_max) produces gentle per-swing variance again while the mean stays
+  // exactly the flattened number (no DPS/balance change, purely cosmetic). 0.05 = +/-5%.
+  MONSTER_DAMAGE_JITTER: 0.05,
+  // v0.22.6 (#24): mirror of MONSTER_DAMAGE_JITTER above, but for the player's own non-crit
+  // hits -- a tight symmetric +/-% band around the flat computed damage value so a run of
+  // swings reads as 64, 66, 63... instead of a flat 66 every time. Average damage across many
+  // hits is unchanged; crits skip this (their own multiplier roll already varies the result).
+  PLAYER_DAMAGE_JITTER: 0.05,
   // v0.22 (batch2 #3): each class chain's primary attribute grants +1 damage/point by default
   // (thornguard->str, windrider->dex, wizard->int, see combatGetDamageRange() above) -- this
   // doubles ONLY the Wizard chain's Intelligence term to +2/point, per Gwen's exact spec. Must
   // stay in sync with Balance.WIZARD_INT_DAMAGE_PER_POINT in index.html.
   WIZARD_INT_DAMAGE_PER_POINT: 2,
+  // v0.23.0 (Part A4): every level-up now ALSO auto-allocates +2 into the character's chain
+  // primary attribute directly (thornguard->str, windrider->dex, wizard->int, the same mapping
+  // WIZARD_INT_DAMAGE_PER_POINT's comment above already documents, see combatAddXp() below),
+  // and grants level-derived flat HP/Mana, computed LIVE from current level in combatGetMaxHp()/
+  // combatGetMaxMana() (mirrors hp_per_level's own "(level-1) * per-level amount" convention),
+  // never stored as an accumulating counter, so a level-1 reset (bridge trial, ladder reset)
+  // removes it for free. Must stay in sync with Balance.LEVEL_UP_* in index.html.
+  LEVEL_UP_PRIMARY_ATTR_BONUS: 2,
+  LEVEL_UP_HP_BONUS_PER_LEVEL: 10,
+  LEVEL_UP_MANA_BONUS_PER_LEVEL: 5,
+  // v0.23.0 (Part B2): base Mana regen, ticked the same way/place as Health/Stamina Regen
+  // (once per real second in town/maze, once per combat round in a fight) -- see
+  // combatGetManaRegen() below. Stacks with the "mana_regen" gear affix. Must stay in sync
+  // with Balance.MANA_REGEN_PER_SEC in index.html.
+  MANA_REGEN_PER_SEC: 1.0,
   // v0.20.4 HOTFIX: AREA_HP_GROWTH/AREA_DAMAGE_GROWTH dialed down from 0.15/0.12 (0.105/
   // 0.09), and LATE_GAME_MONSTER_GROWTH_PER_LEVEL below is now permanently unused (see
   // combatLateGameGrowthMult()) -- must stay in sync with Balance.AREA_HP_GROWTH/
@@ -1589,7 +1873,9 @@ const CB = {
   // of in #7, which the client stopped ever populating -- so the shrine's bonus silently
   // never affected a single server-resolved loot roll after that change shipped.
   SHRINE_MAGIC_FIND_PCT: 25,
-  STAT_POINTS_PER_LEVEL: 3, LEVEL_CAP: 60,
+  // v0.22.3 (#10): raised 60 -> 100 -- the season win condition moves from "reach tier 5"
+  // to "reach tier 5 AND level 100", so the level cap has to actually allow level 100.
+  STAT_POINTS_PER_LEVEL: 3, LEVEL_CAP: 100,
   KILLS_PER_LEVEL_TARGET: 20, MONSTER_BASE_XP: 8.0, LEVEL_XP_GROWTH: 0.11,
   // v0.20 (#9.1): dialed down from +10% to +1% per point of positive Forest Reputation --
   // must stay in sync with Balance.FOREST_REPUTATION_XP_PCT_PER_POINT in index.html.
@@ -1619,7 +1905,7 @@ const CB = {
   ELEMENT_ITEM_CHANCE: 0.3, ELEMENT_IDS: ["fire", "wind", "earth", "water"],
   ELEMENT_AFFIX_BIAS: { fire: "damage", wind: "stamina_max", earth: "armor", water: "regen" },
   EYESIGHT_AFFIX_CHANCE: 0.03,
-  STAMINA_MAX_BASE: 100.0,
+  STAMINA_MAX_BASE: 175.0,
   AREA_LEVEL_MAX: 100,
   // v0.21.1 (#9/#10/#11/#12): attack-speed system. Both player and monster default to
   // exactly 1 attack/sec; the player's own rate only rises via the new "attack_speed" gear
@@ -1691,6 +1977,29 @@ function combatRollRarity(mfPct) {
   }
   return first;
 }
+// v0.22.1 (Part A2d): same shape/Magic-Find-reroll behavior as combatRollRarity() above, but
+// weighted by the killed monster's band (MONSTER_BAND_LOOT_RARITY_WEIGHTS) instead of the
+// flat COMBAT_RARITY_TABLE weights -- this is what makes a Newborn mostly drop Crude gear and
+// an Ancient mostly drop Legendary, while still allowing an occasional one-step-off surprise.
+function combatRollRarityForBand(bandKey, mfPct) {
+  const weights = MONSTER_BAND_LOOT_RARITY_WEIGHTS[bandKey];
+  if (!weights) return combatRollRarity(mfPct);
+  mfPct = mfPct || 0;
+  const rollOnce = () => {
+    let total = 0; for (const w of weights) total += w.weight;
+    let roll = Math.random() * total, cum = 0;
+    for (const w of weights) { cum += w.weight; if (roll < cum) return COMBAT_RARITY_TABLE.find((r) => r.name === w.name) || COMBAT_RARITY_TABLE[0]; }
+    return COMBAT_RARITY_TABLE.find((r) => r.name === weights[0].name) || COMBAT_RARITY_TABLE[0];
+  };
+  const first = rollOnce();
+  if (!mfPct) return first;
+  if (Math.random() < Math.min(0.9, mfPct / 100)) {
+    const second = rollOnce();
+    const fi = COMBAT_RARITY_TABLE.indexOf(first), si = COMBAT_RARITY_TABLE.indexOf(second);
+    return si > fi ? second : first;
+  }
+  return first;
+}
 // v0.20.1 (#10): decides how many BONUS loot entries (beyond the always-resolved first
 // drop) a kill produces -- 0 by default, occasionally 1, rarely 2. isSpecialSpawn is true
 // for roaming mobs and Stronghold guardians, which get their own flat chance bonus on top
@@ -1731,12 +2040,20 @@ function combatRollLoot(tableId, mfPct) {
 // ITEM_GENERATION_SLOTS) already defined above for validateGearItem/the reroll endpoint --
 // so a server-rolled drop and a server-rerolled item can never drift out of sync with each
 // other, and both automatically stay valid against validateGearItem() by construction.
-function combatGenerateGearItem(tier, magicFindPct) {
+function combatGenerateGearItem(tier, magicFindPct, monsterBand) {
   const chosenSlot = cbPick(ITEM_GENERATION_SLOTS);
   const baseName = cbPick(COMBAT_BASE_NAMES[chosenSlot] || ["Item"]);
-  const rarity = combatRollRarity(magicFindPct);
+  // v0.22.1 (Part A2d): only monster-kill drops pass a monsterBand (Merchant stock, Gambling
+  // Goblin, admin spawn, etc. all still call this with no 3rd arg and get the flat roll).
+  const rarity = monsterBand ? combatRollRarityForBand(monsterBand, magicFindPct) : combatRollRarity(magicFindPct);
   const slotCount = rarity.slots;
-  let pool = [...ITEM_AFFIX_POOL];
+  // v0.22.3 (#16): filter to only the affixes legal for this slot BEFORE rolling -- mirrors
+  // IF.generate()'s identical filter client-side, so a server-rolled drop can never carry a
+  // slot-illegal affix in the first place.
+  // v0.22.6 (#14): routed through legalAffixesForSlotAndBaseName() so an "offhand" roll pulls
+  // from the Shield or Orb pool (by baseName) instead of an undifferentiated "offhand" list.
+  const legalPool = legalAffixesForSlotAndBaseName(chosenSlot, baseName);
+  let pool = [...(legalPool.length ? legalPool : ITEM_AFFIX_POOL)];
   cbShuffle(pool);
   if (chosenSlot === "weapon" && Math.random() < CB.WEAPON_DAMAGE_GUARANTEE_CHANCE && pool.includes("damage")) {
     pool = pool.filter((s) => s !== "damage");
@@ -1759,18 +2076,35 @@ function combatGenerateGearItem(tier, magicFindPct) {
     if (chosenSlot === "weapon" && stat === "damage") value = round2(value * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
     affixes.push({ stat, value });
   }
-  if (Math.random() < CB.EYESIGHT_AFFIX_CHANCE) affixes.push({ stat: "eyesight", value: 2 });
+  // v0.22.3 (#16): Eyesight only ever rolls on head/amulet -- mirrors IF.generate()'s identical gate.
+  if ((chosenSlot === "head" || chosenSlot === "amulet") && Math.random() < CB.EYESIGHT_AFFIX_CHANCE) {
+    affixes.push({ stat: "eyesight", value: 2 });
+  }
   return { instance_id: `srv_${Date.now()}_${Math.floor(Math.random() * 999999)}`, slot: chosenSlot, base_name: baseName, tier, rarity: rarity.name, affixes, element };
 }
 
 function combatTierLevelRequirement(tier) { const t = cbClampi(tier, 1, ITEM_TIER_MAX); return Math.max(1, (t - 1) * CB.ITEM_TIER_BRACKET_WIDTH); }
 function combatWeaponTypeForInstance(inst) { return (inst && inst.base_name) ? (COMBAT_WEAPON_TYPE_BY_BASE_NAME[inst.base_name] || null) : null; }
+// v0.22.6 (#11-14): offhand analogue of combatWeaponTypeForInstance.
+function combatOffhandTypeForInstance(inst) { return (inst && inst.base_name) ? (COMBAT_OFFHAND_TYPE_BY_BASE_NAME[inst.base_name] || null) : null; }
 function combatClassCanEquipItem(classId, inst) {
-  if (!inst || inst.slot !== "weapon") return true;
-  const wt = combatWeaponTypeForInstance(inst);
-  if (!wt) return true;
-  const list = COMBAT_WEAPON_TYPE_CLASS_RESTRICTIONS[wt];
-  return !list || list.includes(classId);
+  if (!inst) return true;
+  if (inst.slot === "weapon") {
+    const wt = combatWeaponTypeForInstance(inst);
+    if (!wt) return true;
+    const list = COMBAT_WEAPON_TYPE_CLASS_RESTRICTIONS[wt];
+    return !list || list.includes(classId);
+  }
+  // v0.22.6 (#13): mirrors the weapon branch above -- gates Orb to the wizard chain plus
+  // emberpriest/druid, while Shield (no COMBAT_OFFHAND_TYPE_CLASS_RESTRICTIONS entry) stays
+  // usable by every class.
+  if (inst.slot === "offhand") {
+    const ot = combatOffhandTypeForInstance(inst);
+    if (!ot) return true;
+    const list = COMBAT_OFFHAND_TYPE_CLASS_RESTRICTIONS[ot];
+    return !list || list.includes(classId);
+  }
+  return true;
 }
 function combatCanEquipGear(data, inst) { return (data.level || 1) >= combatTierLevelRequirement(inst.tier) && combatClassCanEquipItem(data.class_id, inst); }
 function combatAffixTotal(inst, stat) {
@@ -1808,6 +2142,15 @@ function combatGetBlockChance(data) {
 function combatGetFleeChanceBonus(data) {
   return combatGearBonus(data, "flee_chance") / 100.0;
 }
+// v0.23.0 (Part B8): raw "spell_power" gear-affix sum (already a percent value per its
+// ITEM_AFFIX_TIER1_MAX comment, 2/4/6/8/10 by tier) -- server.js has no generic
+// affixIsPercent() registry like index.html's Balance.affixIsPercent() (that's a display-only
+// lookup table); every affix's percent-ness is implicit in whichever combatGet*() consumer
+// divides its combatGearBonus() sum by 100, exactly like combatGetBlockChance()/
+// combatGetFleeChanceBonus() just above. Feeds combatGetSpellEffectivenessMult() below.
+function combatGetSpellPowerPct(data) {
+  return combatGearBonus(data, "spell_power");
+}
 // v0.20 (#9.7): Vitality's HP/Stamina contribution is computed LIVE from attributes.vit
 // (see CB.VIT_HP_PER_POINT_RATIO's comment) instead of reading the old bonus_hp_from_
 // attributes/bonus_stamina_from_attributes accumulator fields, which are no longer written
@@ -1817,12 +2160,27 @@ function combatVitStaminaBonus(classData, vit) { return (vit || 0) * (classData.
 function combatGetMaxHp(data) {
   const c = COMBAT_CLASSES[data.class_id] || {};
   const vit = (data.attributes && data.attributes.vit) || 0;
-  return (c.base_hp || 50) + (c.hp_per_level || 5) * ((data.level || 1) - 1) + combatGearBonus(data, "hp") + combatVitHpBonus(c, vit);
+  // v0.23.0 (Part A4): +CB.LEVEL_UP_HP_BONUS_PER_LEVEL per level above 1, computed live from
+  // the current level (never a stored accumulator) so it naturally zeroes out on a level-1
+  // reset -- mirrors hp_per_level's own (level-1) term right beside it.
+  const levelUpBonus = CB.LEVEL_UP_HP_BONUS_PER_LEVEL * ((data.level || 1) - 1);
+  return (c.base_hp || 50) + (c.hp_per_level || 5) * ((data.level || 1) - 1) + levelUpBonus + combatGearBonus(data, "hp") + combatVitHpBonus(c, vit);
 }
 function combatGetMaxStamina(data) {
   const c = COMBAT_CLASSES[data.class_id] || {};
   const vit = (data.attributes && data.attributes.vit) || 0;
   return CB.STAMINA_MAX_BASE + combatGearBonus(data, "stamina_max") + combatVitStaminaBonus(c, vit);
+}
+// v0.23.0 (Part A4): the level-derived half of the future Mana resource (base per-class amount,
+// current_mana tracking, and regen land with Part B) -- lands now so Part B's mana pool inherits
+// +CB.LEVEL_UP_MANA_BONUS_PER_LEVEL per level for free, same live-from-level, no-stored-
+// accumulator pattern as combatGetMaxHp() above. c.base_mana is undefined until Part B adds it
+// per class, so this is purely gear + level-up bonus until then (mirrors index.html's dormant
+// "mana"/"mana_regen" gear affixes, which already read real values with no effect yet).
+function combatGetMaxMana(data) {
+  const c = COMBAT_CLASSES[data.class_id] || {};
+  const levelUpBonus = CB.LEVEL_UP_MANA_BONUS_PER_LEVEL * ((data.level || 1) - 1);
+  return (c.base_mana || 0) + levelUpBonus + combatGearBonus(data, "mana");
 }
 // v0.22 (batch2 #5): Health Regen (the "regen" affix key, unchanged internally -- only its
 // Tier-1 max and display label changed) and the new sibling "stamina_regen" affix. Mirrors
@@ -1831,6 +2189,24 @@ function combatGetMaxStamina(data) {
 // a future patch adds per-class values.
 function combatGetRegen(data) { const c = COMBAT_CLASSES[data.class_id] || {}; return (c.regen || 0.0) + combatGearBonus(data, "regen"); }
 function combatGetStaminaRegen(data) { return combatGearBonus(data, "stamina_regen"); }
+// v0.23.0 (Part B2): CB.MANA_REGEN_PER_SEC (flat, same for every class) plus the "mana_regen"
+// gear affix -- mirrors combatGetStaminaRegen()'s shape exactly. Ticked in the SAME places
+// (combatTickCombatRoundBuffs() below, once per combat round; index.html's town/maze
+// setInterval, once per real second) so mana regen follows identical town/maze/combat rules.
+function combatGetManaRegen(data) { return CB.MANA_REGEN_PER_SEC + combatGearBonus(data, "mana_regen"); }
+// v0.23.0 (Part B1): current_mana is read with the same "|| 0" fallback current_hp/
+// current_stamina already use everywhere, EXCEPT there's no historical save that ever had a
+// real value here -- an old character predating this patch has no `current_mana` field at
+// all. Falling back to 0 would hand every existing character an empty mana bar forever (never
+// full until a mana potion/regen tick nudges it up from 0). This mirrors the lazy-hydration
+// pattern other new per-character fields use (e.g. forest_reputation defaulting to {} on
+// read): the FIRST time a request touches a character with no current_mana field, it's
+// hydrated to full and written back onto `data` so the very next save persists it for good.
+function combatGetCurrentMana(data) {
+  const maxMana = combatGetMaxMana(data);
+  if (data.current_mana == null) { data.current_mana = maxMana; return maxMana; }
+  return Math.min(data.current_mana, maxMana);
+}
 function combatGetEquippedWeaponType(data) { return combatWeaponTypeForInstance(data.equipped && data.equipped.weapon); }
 function combatWeaponSkillCumulativeHitsForLevel(level) { return CB.WEAPON_SKILL_HIT_STEP * level * (level + 1) / 2; }
 function combatWeaponSkillLevelForHits(hits) {
@@ -1841,6 +2217,39 @@ function combatWeaponSkillLevelForHits(hits) {
 function combatGetWeaponSkillLevel(data, weaponType) {
   const hits = (data.weapon_skills && data.weapon_skills[weaponType] && data.weapon_skills[weaponType].hits) || 0;
   return combatWeaponSkillLevelForHits(hits);
+}
+// v0.23.0 (Part B9): Spellcasting proficiency -- a single, non-weapon-typed skill mirroring
+// the weapon-skill hit-counter/level-curve exactly (reuses combatWeaponSkillLevelForHits(),
+// i.e. the same CB.WEAPON_SKILL_HIT_STEP cumulative-hits-per-level formula, rather than a
+// second copy of the curve), incremented once per successful spell cast (see
+// combatRegisterSpellcastHit(), called from POST /api/combat/:sessionId/cast below) instead
+// of once per weapon hit. Storage mirrors a single weapon_skills[weaponType] entry's {hits}
+// shape, just not keyed by type since there's only the one skill:
+// data.spellcasting_skill = {hits: N}. Persists through bridge/ladder resets exactly like
+// weapon_skills already does -- applyTrialResolutionReset()/applyLadderReset() never touch
+// weapon_skills, and this field isn't referenced by either of them either.
+function combatGetSpellcastingSkillLevel(data) {
+  return combatWeaponSkillLevelForHits((data.spellcasting_skill && data.spellcasting_skill.hits) || 0);
+}
+function combatRegisterSpellcastHit(data) {
+  if (!data.spellcasting_skill) data.spellcasting_skill = { hits: 0 };
+  const before = combatWeaponSkillLevelForHits(data.spellcasting_skill.hits);
+  data.spellcasting_skill.hits++;
+  const after = combatWeaponSkillLevelForHits(data.spellcasting_skill.hits);
+  return { leveledUp: after > before, newLevel: after };
+}
+// Grants +1% spell effectiveness per level -- reuses CB.WEAPON_SKILL_DAMAGE_PCT_PER_LEVEL,
+// the same 1%/level curve weapon skills already use for their own damage bonus, per Gwen's
+// spec ("this project uses 1%/level, don't invent a different curve").
+function combatGetSpellcastingEffectivenessPct(data) {
+  return combatGetSpellcastingSkillLevel(data) * CB.WEAPON_SKILL_DAMAGE_PCT_PER_LEVEL * 100;
+}
+// v0.23.0 (Part B5): 1 + SpellPower%/100 + SpellcastingSkill%/100, additively stacked before
+// applying to a spell's base magnitude. Durations/cooldowns and Entangle's root/flee-override
+// are NEVER scaled by this (pure utility, no magnitude to scale) -- only Heal's restore
+// amount and Fireflies' per-hit damage are, per Gwen's exact spec.
+function combatGetSpellEffectivenessMult(data) {
+  return 1 + combatGetSpellPowerPct(data) / 100 + combatGetSpellcastingEffectivenessPct(data) / 100;
 }
 function combatGetDamageRange(data) {
   const c = COMBAT_CLASSES[data.class_id] || {};
@@ -1868,7 +2277,9 @@ function combatGetCritChance(data) { const c = COMBAT_CLASSES[data.class_id] || 
 // (a level 24 mob: 10 + 23 = 33%), per Gwen's exact spec. Used for both the monster's
 // counter-attack (combatResolveMonsterTurn) and the pre-fight "strikes first" roll in
 // POST /api/combat/start -- both use the fight's own area_level as the monster's level.
-function combatGetMonsterCritChance(areaLevel) { return cbClampf(0.10 + (Math.max(1, areaLevel) - 1) * 0.01, 0, 0.95); }
+// v0.22.7 (#18): halved -- was 10% + 1%/level (L1=10%, L25=34%), now 5% + 0.5%/level
+// (L1=5%, L25=17%). Mirrors index.html's Balance.monsterCritChance() exactly.
+function combatGetMonsterCritChance(areaLevel) { return cbClampf(0.05 + (Math.max(1, areaLevel) - 1) * 0.005, 0, 0.95); }
 // v0.21 (#8): the NEW stat -- how hard a crit hits, separate from combatGetCritChance()'s
 // odds of landing one at all. Raw gear sum divided by 100 (see ITEM_AFFIX_TIER1_MAX's
 // crit_multiplier comment), added on top of the shared CB.CRIT_MULTIPLIER floor. Mirrors
@@ -1888,23 +2299,35 @@ function combatMonsterAttackSpeed(areaLevel) {
   const brackets = Math.floor(Math.max(1, areaLevel || 1) / 5);
   return CB.MONSTER_BASE_ATTACK_SPEED * (1 + brackets * (CB.MONSTER_ATTACK_SPEED_PCT_PER_5_LEVELS / 100));
 }
-// v0.21 (#9): monsters also scale their crit MULTIPLIER ceiling in breakpoints every 5
-// levels: +0.00/0.5/1.0/1.5/2.0/2.5, starting from Lv1 -- mirrors index.html's
-// Balance.monsterCritMultiplierBonus()/monsterCritMultiplierMax() exactly (see that
-// function's comment for the worked Lv25 example: floor(25/5)=5 -> +2.5, so a Lv25 mob's
-// crit ceiling is CB.CRIT_MULTIPLIER(1.75)+2.5=4.25).
-const MONSTER_CRIT_MULT_BONUS_TABLE = [0, 0.5, 1.0, 1.5, 2.0, 2.5];
-function combatGetMonsterCritMultiplierBonus(areaLevel) {
-  const idx = cbClampi(Math.floor(Math.max(1, areaLevel) / 5), 0, MONSTER_CRIT_MULT_BONUS_TABLE.length - 1);
-  return MONSTER_CRIT_MULT_BONUS_TABLE[idx];
+// v0.22.7 (#18): replaces the old fixed-floor/rising-ceiling model (v0.21 #9) with a RISING
+// floor AND a rising ceiling, both driven by `bracket = floor(areaLevel/5)`:
+//   floor   = 1.5 + 0.25 * floor(bracket/2)   (rises every OTHER bracket, i.e. every 10 levels)
+//   ceiling = 2.0 + 0.25 * bracket            (rises every bracket, i.e. every 5 levels)
+// Verification against Gwen's spec: L1 (bracket 0) 1.5-2.0 -- L5 (bracket 1) 1.5-2.25 --
+// L10 (bracket 2) 1.75-2.5 -- L15 (bracket 3) 1.75-2.75 -- L20 (bracket 4) 2.0-3.0 --
+// L25 (bracket 5) 2.0-3.25 -- L30 (bracket 6) 2.25-3.5. Uncapped past L30 by design (level cap
+// is 100); a ceiling cap can be added later if very-high-level crits feel too spiky. Mirrors
+// index.html's Balance.monsterCritFloor()/monsterCritCeiling() exactly.
+function combatGetMonsterCritFloor(areaLevel) {
+  const bracket = Math.floor(Math.max(1, areaLevel) / 5);
+  return 1.5 + 0.25 * Math.floor(bracket / 2);
 }
-function combatGetMonsterCritMultiplierMax(areaLevel) { return CB.CRIT_MULTIPLIER + combatGetMonsterCritMultiplierBonus(areaLevel); }
+function combatGetMonsterCritCeiling(areaLevel) {
+  const bracket = Math.floor(Math.max(1, areaLevel) / 5);
+  return 2.0 + 0.25 * bracket;
+}
 // v0.21 (#10): a landed crit doesn't always hit for the full ceiling -- it's a fresh random
-// roll each time, somewhere between the shared CB.CRIT_MULTIPLIER floor and whichever max
-// applies (player's combatGetCritMultiplierMax(data) or a monster's
-// combatGetMonsterCritMultiplierMax(areaLevel)), per Gwen's exact spec: "a player with 5.50
-// crit multiplier can crit randomly between 1.75 and 5.50, not 5.50 all the time."
+// roll each time, somewhere between CB.CRIT_MULTIPLIER (the player's own floor) and the
+// player's combatGetCritMultiplierMax(data), per Gwen's exact spec: "a player with 5.50
+// crit multiplier can crit randomly between 1.5 and 5.50, not 5.50 all the time." PLAYER-ONLY
+// as of v0.22.7 (#18) -- see combatRollMonsterCritMultiplier() below for the monster path,
+// which no longer reuses CB.CRIT_MULTIPLIER as its floor.
 function combatRollCritMultiplier(maxMult) { return CB.CRIT_MULTIPLIER + Math.random() * Math.max(0, maxMult - CB.CRIT_MULTIPLIER); }
+// v0.22.7 (#18): monster-specific crit roll -- unlike the player's combatRollCritMultiplier()
+// above, a monster's floor is NOT the shared CB.CRIT_MULTIPLIER constant; it's its own
+// area-level-dependent value from combatGetMonsterCritFloor(). Takes both bounds explicitly
+// so it can never accidentally fall back to the player's floor.
+function combatRollMonsterCritMultiplier(floor, ceiling) { return floor + Math.random() * Math.max(0, ceiling - floor); }
 // v0.20.4: Armor rework -- used to be a 0-0.75 PERCENTAGE (class-innate base + gear%),
 // multiplicatively reducing monster damage (`mdmg *= 1-armor`, see the two call sites
 // below). Now a FLAT number: gear's "armor" affix (flat 2/4/6/8/10 per tier, see
@@ -2005,16 +2428,27 @@ function combatTickCombatRoundBuffs(data) {
   if (regen > 0) data.current_hp = Math.min(combatGetMaxHp(data), (data.current_hp || 0) + regen);
   const staminaRegen = combatGetStaminaRegen(data);
   if (staminaRegen > 0) data.current_stamina = Math.min(combatGetMaxStamina(data), (data.current_stamina || 0) + staminaRegen);
+  // v0.23.0 (Part B2): Mana Regen ticks once per combat round here, same as HP/Stamina Regen
+  // just above -- combatGetCurrentMana(data) both lazily hydrates a legacy character's missing
+  // current_mana to full AND clamps it, so this can never push current_mana above max.
+  const manaRegen = combatGetManaRegen(data);
+  if (manaRegen > 0) data.current_mana = Math.min(combatGetMaxMana(data), combatGetCurrentMana(data) + manaRegen);
 }
 // Shared fragment merged into every combat endpoint's `player` response object so the client
 // always has a fresh, authoritative snapshot of all 3 round-based shrine buffs to overwrite
 // its own local copy with -- see the comment above combatTickCombatRoundBuffs() for why that
 // matters even on endpoints (like use-item) that don't tick anything themselves.
+// v0.23.0 (Part B1/B2): also carries current_mana/max_mana -- folding these into this SAME
+// shared fragment (rather than editing every "player: {...}" object below individually) means
+// every combat endpoint's response picks up the mana pool for free, exactly like it already
+// does for the three shrine-buff counters. combatGetCurrentMana(data) lazily hydrates/clamps.
 function combatRoundBuffsPayload(data) {
   return {
     invuln_rounds_left: data.invuln_rounds_left || 0,
     quad_dmg_rounds_left: data.quad_dmg_rounds_left || 0,
     magic_find_rounds_left: data.magic_find_rounds_left || 0,
+    current_mana: combatGetCurrentMana(data),
+    max_mana: combatGetMaxMana(data),
   };
 }
 
@@ -2062,6 +2496,16 @@ function combatSettleAllHeals(data) {
     data.current_stamina = Math.min(maxStamina, (data.current_stamina || 0) + delivered);
     data.srv_stamina_heal = heal;
   }
+  // v0.23.0 (Part B3): mana potions use the exact same lazy heal-over-time settlement as
+  // health/stamina potions -- see combatQueueHeal()'s call in the use-item endpoint below.
+  const maxMana = combatGetMaxMana(data);
+  if (data.srv_mana_heal) {
+    const { delivered, heal } = combatSettleHeal(data.srv_mana_heal);
+    data.current_mana = Math.min(maxMana, combatGetCurrentMana(data) + delivered);
+    data.srv_mana_heal = heal;
+  } else {
+    combatGetCurrentMana(data); // lazily hydrate/clamp even when no heal is in flight
+  }
 }
 
 // v0.20 (#9.3): `amount` is now the RAW, un-buffed base XP (session.xp) -- every bonus
@@ -2086,9 +2530,23 @@ function combatAddXp(data, amount) {
     data.level = (data.level || 1) + 1;
     data.xp_to_next = combatXpRequiredForLevel(data.level);
     data.unspent_stat_points = (data.unspent_stat_points || 0) + CB.STAT_POINTS_PER_LEVEL;
+    // v0.23.0 (Part A4): on top of the manual stat points above, auto-allocate
+    // +CB.LEVEL_UP_PRIMARY_ATTR_BONUS directly into the chain's primary attribute (same
+    // thornguard->str / windrider->dex / wizard->int mapping combatGetDamageRange() and
+    // WIZARD_INT_DAMAGE_PER_POINT already use). This is a real, persisted mutation of
+    // data.attributes (like manual stat-point spends), but that's reset-safe for free: a
+    // bridge trial promotion/failure or ladder reset already re-bases data.attributes to the
+    // class's base stats via applyTrialResolutionReset(), so this rides along with that
+    // existing reset behavior with no special-casing needed here.
+    const levelUpClass = COMBAT_CLASSES[data.class_id] || {};
+    if (!data.attributes) data.attributes = {};
+    if (levelUpClass.chain === "thornguard") data.attributes.str = (data.attributes.str || 0) + CB.LEVEL_UP_PRIMARY_ATTR_BONUS;
+    else if (levelUpClass.chain === "windrider") data.attributes.dex = (data.attributes.dex || 0) + CB.LEVEL_UP_PRIMARY_ATTR_BONUS;
+    else if (levelUpClass.chain === "wizard") data.attributes.int = (data.attributes.int || 0) + CB.LEVEL_UP_PRIMARY_ATTR_BONUS;
     // v0.20 (#9.7): no longer touches bonus_hp_from_attributes/bonus_stamina_from_attributes
     // here -- see combatGetMaxHp()'s comment. The full-HP heal below is still needed on
-    // every level-up regardless.
+    // every level-up regardless (now also reflects the +10/level HP bonus baked into
+    // combatGetMaxHp() itself, see its own v0.23.0 comment).
     data.current_hp = combatGetMaxHp(data);
     leveled = true;
   }
@@ -2145,11 +2603,10 @@ function combatStrongholdKeyEligible(mazeDepth, playerLevel) { return (mazeDepth
 // Mirrors DL.pickRandomMonsterForArea()'s own tier gate -- used at /api/combat/start to
 // reject a claimed monster id that isn't actually available at the claimed area level.
 function combatMonsterAllowedForAreaLevel(monster, areaLevel) {
-  if (monster.tier === "common") return true;
-  if (monster.tier === "uncommon") return areaLevel >= 8;
-  if (monster.tier === "rare") return areaLevel >= 20;
-  if (monster.tier === "epic") return areaLevel >= 35;
-  return false;
+  // v0.22.1 (Part A2a): mirrors index.html's pickRandomMonsterForArea() -- spawn gating now
+  // follows the new band system (COMBAT_MONSTER_BAND_INFO) instead of the old flat tier.
+  const info = COMBAT_MONSTER_BAND_INFO[monster.tier];
+  return !!info && areaLevel >= info.minAreaLevel;
 }
 
 function loadCharacterRow(accountId, slot) {
@@ -2187,17 +2644,25 @@ function updateCombatSession(id, fields) {
 // the round response; never touches the session/monster HP (that's the caller's job).
 function combatResolveMonsterTurn(data, session, invulnActiveThisRound) {
   if (invulnActiveThisRound) return { invulnerable: true, blocked: false, damage: null, crit: false, crit_mult: null, fatal: false };
+  // v0.23.0 (Part B7): Entangle roots the monster -- it deals 0 damage for the duration
+  // (checked ahead of the normal block/damage roll, mirroring the invulnActiveThisRound
+  // branch immediately above). Reached by every call site that already resolves a monster
+  // turn/catch-up hit through this function, so the root applies uniformly whether the
+  // monster "misses" via a real-time catch-up tick, a failed-flee counter, or an /attack round.
+  if (session.rooted_until && Date.now() < session.rooted_until) {
+    return { invulnerable: false, blocked: false, damage: null, crit: false, crit_mult: null, fatal: false, rooted: true };
+  }
   if (Math.random() < combatGetBlockChance(data)) return { invulnerable: false, blocked: true, damage: null, crit: false, crit_mult: null, fatal: false };
   let mdmg = cbRandRange(session.dmg_min, session.dmg_max);
   // v0.19.1 (#10): the monster's own crit roll, applied BEFORE armor mitigation (same order
   // as the player's own crit-then-quad-damage math above) -- 10% + 1%/area-level.
   const crit = Math.random() < combatGetMonsterCritChance(session.area_level);
-  // v0.21 (#9/#10): the ACTUAL multiplier for this hit is its own random roll between
-  // CB.CRIT_MULTIPLIER and this monster's own crit ceiling (see
-  // combatGetMonsterCritMultiplierMax()) -- not always the same fixed 1.75. critMult stays
-  // null on a non-crit hit (nothing to report), returned either way so the client can render
-  // it.
-  const critMult = crit ? combatRollCritMultiplier(combatGetMonsterCritMultiplierMax(session.area_level)) : null;
+  // v0.22.7 (#18): the ACTUAL multiplier for this hit is its own random roll between this
+  // monster's own area-level-dependent floor AND ceiling (see combatGetMonsterCritFloor()/
+  // combatGetMonsterCritCeiling()) -- monsters do NOT reuse the player's CB.CRIT_MULTIPLIER
+  // floor. critMult stays null on a non-crit hit (nothing to report), returned either way so
+  // the client can render it.
+  const critMult = crit ? combatRollMonsterCritMultiplier(combatGetMonsterCritFloor(session.area_level), combatGetMonsterCritCeiling(session.area_level)) : null;
   if (crit) mdmg *= critMult;
   // v0.20.4: flat subtraction instead of a percentage multiplier -- see combatGetArmor()'s
   // own comment for the full mechanic change.
@@ -2205,7 +2670,21 @@ function combatResolveMonsterTurn(data, session, invulnActiveThisRound) {
   data.current_hp = (data.current_hp || 0) - mdmg;
   let fatal = false;
   if (data.current_hp < 1) { data.current_hp = 0; fatal = true; }
-  return { invulnerable: false, blocked: false, damage: Math.round(mdmg), crit, crit_mult: critMult, fatal };
+  // v0.22.7 (#1): Thorns is now a flat value (no longer a %) -- exactly that much damage
+  // reflects back onto the monster every time ITS attack actually lands on the player (i.e.
+  // past both the invulnerable and blocked early-returns above, so a fully-avoided hit
+  // reflects nothing). session.hp is mutated directly here since session is the same object
+  // the caller reads back from afterward (both the /attack handler's `newMonsterHp =
+  // session.hp` and the elapsed-time catch-up path) -- this lets a landed monster hit
+  // potentially finish off the monster even on a round where the player's own swing was
+  // blocked or hasn't happened yet.
+  const thorns = combatGearBonus(data, "thorns");
+  let thornsDamage = 0;
+  if (thorns > 0 && session.hp > 0) {
+    thornsDamage = Math.min(session.hp, thorns);
+    session.hp = Math.max(0, session.hp - thorns);
+  }
+  return { invulnerable: false, blocked: false, damage: Math.round(mdmg), crit, crit_mult: critMult, fatal, thorns_damage: thornsDamage };
 }
 
 // v0.21.1 (#9): continuous mob attacks. Resolves however many monster hits are "owed" since
@@ -2243,6 +2722,110 @@ function combatCatchUpMonsterHits(session, data, invulnActiveThisRound) {
   return { ticks, newLastHitAt, fatal };
 }
 
+/* ---------------- v0.23.0 (Part B4-B9): Spells ----------------
+   Server-authoritative spell definitions (SPELLS) used for validation/resolution --
+   index.html's SPELLS is a display-only copy that must stay byte-identical (name/price/
+   level_req/mana_cost/cooldown_ms). Every class can buy/use every spell (no class_id gate);
+   every class has exactly SPELL_SLOT_COUNT=2 active spell slots, a flat constant. */
+const SPELLS = {
+  heal_1: { id: "heal_1", name: "Heal", price: 300, level_req: 3, mana_cost: 15, cooldown_ms: 3000, effect: "heal", heal_amount: 50 },
+  fireflies: { id: "fireflies", name: "Fireflies", price: 600, level_req: 6, mana_cost: 25, cooldown_ms: 5000, effect: "fireflies", hit_count: 6, hit_min: 8, hit_max: 12, duration_ms: 2000 },
+  entangle: { id: "entangle", name: "Entangle", price: 1200, level_req: 10, mana_cost: 50, cooldown_ms: 10000, effect: "entangle", duration_ms: 4000 },
+};
+const SPELL_SLOT_COUNT = 2;
+
+// Lazy, on-demand settlement of a session's queued Fireflies-style damage-over-time entries --
+// mirrors combatSettleHeal()/combatSettleAllHeals()'s "computed on demand instead of a real
+// 200ms tick loop" philosophy, adapted to discrete RANDOM-per-hit damage (8-12 per hit, not a
+// smooth rate) rather than a continuous rate, since each Fireflies hit must independently roll
+// its own damage. Deliberately clamps at hp=1 rather than ever landing the kill blow itself --
+// the monster's actual defeat/loot/XP/gold resolution lives entirely in POST /api/combat/
+// :sessionId/attack's existing kill branch, and duplicating that non-trivial block (loot rolls,
+// leaderboard upsert, guardian key drops, etc.) into every DOT-settling call site was judged
+// out of scope for this pass; the practical effect is a monster already at 1 HP dies on the
+// very next landed swing or idle tick, sub-second in real play.
+function combatSettleSpellDots(session) {
+  let dots;
+  try { dots = JSON.parse(session.spell_dots || "[]"); } catch (e) { dots = []; }
+  if (!Array.isArray(dots) || dots.length === 0) return { ticks: [], newHp: session.hp, newDots: [], dotsChanged: false };
+  const now = Date.now();
+  let hp = session.hp;
+  const ticks = [];
+  const remaining = [];
+  for (const dot of dots) {
+    let d = dot;
+    let changed = false;
+    while (d.hits_remaining > 0 && d.next_hit_at <= now && hp > 1) {
+      const dmg = Math.min(hp - 1, Math.round(cbRandRange(d.dmg_min, d.dmg_max)));
+      hp -= dmg;
+      ticks.push({ spell_id: d.spell_id, damage: dmg });
+      d = Object.assign({}, d, { hits_remaining: d.hits_remaining - 1, next_hit_at: d.next_hit_at + d.interval_ms });
+      changed = true;
+    }
+    if (changed || ticks.length === 0) { /* no-op, just avoids an unused-var lint concern */ }
+    if (d.hits_remaining > 0) remaining.push(d);
+  }
+  return { ticks, newHp: hp, newDots: remaining, dotsChanged: true };
+}
+
+// v0.23.0 (Part B4/B6): Magician spell-purchase endpoint -- mirrors the Blacksmith reroll
+// endpoint's exact validate -> deduct gold -> mutate -> save -> respond shape (gold is
+// account-bound via getAccountGold/creditAccountGold, same pattern as every other
+// gold-spending route).
+app.post("/api/magician/buy", requireAuth, (req, res) => {
+  const slot = Number(req.body?.slot);
+  const spellId = req.body?.spell_id;
+  if (!Number.isInteger(slot) || slot < 0 || slot >= MAX_CHARACTER_SLOTS) return res.status(400).json({ error: "Invalid slot." });
+  const spell = SPELLS[spellId];
+  if (!spell) return res.status(400).json({ error: "Unknown spell." });
+
+  const row = db.prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?").get(req.account.id, slot);
+  if (!row) return res.status(404).json({ error: "No character in that slot." });
+  let data;
+  try { data = JSON.parse(row.data); } catch (e) { return res.status(500).json({ error: "Corrupt character save." }); }
+
+  const owned = Array.isArray(data.owned_spells) ? data.owned_spells.slice() : [];
+  if (owned.includes(spellId)) return res.status(400).json({ error: "You already know that spell." });
+  if ((data.level || 1) < spell.level_req) return res.status(400).json({ error: `Requires level ${spell.level_req} to learn this.` });
+  if (getAccountGold(req.account.id) < spell.price) return res.status(400).json({ error: `Not enough gold, this spell costs ${spell.price}g.` });
+
+  const accountGoldAfter = creditAccountGold(req.account.id, -spell.price);
+  owned.push(spellId);
+  data.owned_spells = owned;
+  data._save_seq = (data._save_seq || 0) + 1;
+  db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(JSON.stringify(data), nowIso(), req.account.id, slot);
+  res.json({ ok: true, owned_spells: data.owned_spells, account_gold: accountGoldAfter, _save_seq: data._save_seq });
+});
+
+// v0.23.0 (Part B6): sets/clears one of the SPELL_SLOT_COUNT flat spell slots. Slotting is a
+// Character Sheet/Town-only CLIENT concern per spec ("slotting only happens outside combat")
+// -- this endpoint itself doesn't reject based on combat state, since nothing about the slots
+// array is combat-session-scoped (it lives on the character, not the session).
+app.post("/api/magician/slot", requireAuth, (req, res) => {
+  const slot = Number(req.body?.slot);
+  const slotIndex = Number(req.body?.slot_index);
+  const spellId = req.body?.spell_id == null ? null : req.body.spell_id;
+  if (!Number.isInteger(slot) || slot < 0 || slot >= MAX_CHARACTER_SLOTS) return res.status(400).json({ error: "Invalid slot." });
+  if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex >= SPELL_SLOT_COUNT) return res.status(400).json({ error: "Invalid spell slot index." });
+  if (spellId != null && !SPELLS[spellId]) return res.status(400).json({ error: "Unknown spell." });
+
+  const row = db.prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?").get(req.account.id, slot);
+  if (!row) return res.status(404).json({ error: "No character in that slot." });
+  let data;
+  try { data = JSON.parse(row.data); } catch (e) { return res.status(500).json({ error: "Corrupt character save." }); }
+
+  const owned = Array.isArray(data.owned_spells) ? data.owned_spells : [];
+  if (spellId != null && !owned.includes(spellId)) return res.status(400).json({ error: "You don't own that spell." });
+
+  const spellSlots = (Array.isArray(data.spell_slots) ? data.spell_slots.slice(0, SPELL_SLOT_COUNT) : []);
+  while (spellSlots.length < SPELL_SLOT_COUNT) spellSlots.push(null);
+  spellSlots[slotIndex] = spellId;
+  data.spell_slots = spellSlots;
+  data._save_seq = (data._save_seq || 0) + 1;
+  db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(JSON.stringify(data), nowIso(), req.account.id, slot);
+  res.json({ ok: true, spell_slots: data.spell_slots, _save_seq: data._save_seq });
+});
+
 app.post("/api/combat/start", requireAuth, (req, res) => {
   const slot = Number(req.body?.slot);
   const monsterId = req.body?.monster_id;
@@ -2267,8 +2850,16 @@ app.post("/api/combat/start", requireAuth, (req, res) => {
   const dmgMult = isGuardian ? CB.STRONGHOLD_GUARDIAN_DAMAGE_MULT : isRoamer ? CB.ROAMING_MOB_DAMAGE_MULT : 1;
   const xpMult = isGuardian ? CB.STRONGHOLD_GUARDIAN_XP_MULT : isRoamer ? CB.ROAMING_MOB_XP_MULT : 1;
   const maxHp = combatMonsterHp(monster.base_hp, areaLevel) * hpMult;
-  const dmgMin = combatMonsterDamage(monster.base_damage_min, areaLevel) * dmgMult;
-  const dmgMax = combatMonsterDamage(monster.base_damage_max, areaLevel) * dmgMult;
+  // v0.22.1 (Part A1): monster damage is now a single flat base_damage (the average of the
+  // old min/max pair) instead of an independent per-hit range.
+  // v0.22.2 (#1): dmgMin/dmgMax are no longer forced equal -- they're a tight symmetric band
+  // around the flattened value, so the existing per-hit cbRandRange(dmgMin, dmgMax) roll (used
+  // by both the first-strike hit below and combatResolveMonsterTurn()'s counter-attack/catch-up)
+  // naturally produces gentle per-swing variance again (e.g. 41, 45, 39, 43...) while the mean
+  // stays exactly the flattened value -- no DPS/balance change, purely cosmetic. Crit multiplier
+  // still multiplies on top of whichever jittered value gets rolled.
+  const dmgFlat = combatMonsterDamage(monster.base_damage, areaLevel) * dmgMult;
+  const dmgMin = dmgFlat * (1 - CB.MONSTER_DAMAGE_JITTER), dmgMax = dmgFlat * (1 + CB.MONSTER_DAMAGE_JITTER);
   // v0.20 (#9.5): session.xp is the RAW pre-bonus-stack base reward (see combatAddXp()) --
   // the level-difference penalty is baked in here, at the source, alongside the
   // guardian/roamer multiplier, so it applies uniformly regardless of which bonus sources
@@ -2279,6 +2870,10 @@ app.post("/api/combat/start", requireAuth, (req, res) => {
   combatSettleAllHeals(data);
   const log = [];
   let firstStrike = null;
+  // v0.22.7 (#1): the engage first-strike also counts as "a monster's attack lands on the
+  // player" -- Thorns reflects onto the monster here too, subtracted from its starting HP
+  // before the combat_sessions row is even inserted below.
+  let engageThornsDamage = 0;
   // v0.22 (batch2 #18): Touch of Unicorn (Invulnerability) is supposed to block ALL incoming
   // damage while active, but this engage-time first-strike roll never checked it -- a player
   // who triggered the shrine and then walked straight into a fight would still eat the
@@ -2287,15 +2882,20 @@ app.post("/api/combat/start", requireAuth, (req, res) => {
   if (!combatIsInvulnerable(data) && Math.random() < CB.MONSTER_FIRST_STRIKE_CHANCE) {
     let mdmg = cbRandRange(dmgMin, dmgMax);
     // v0.19.1 (#10): the first-strike hit can crit too, same formula/order as the regular
-    // counter-attack in combatResolveMonsterTurn. v0.21 (#9/#10): critMult is this hit's own
-    // random roll between CB.CRIT_MULTIPLIER and this monster's ceiling, same as that function.
+    // counter-attack in combatResolveMonsterTurn. v0.22.7 (#18): critMult is this hit's own
+    // random roll between this monster's own floor and ceiling, same as that function.
     const crit = Math.random() < combatGetMonsterCritChance(areaLevel);
-    const critMult = crit ? combatRollCritMultiplier(combatGetMonsterCritMultiplierMax(areaLevel)) : null;
+    const critMult = crit ? combatRollMonsterCritMultiplier(combatGetMonsterCritFloor(areaLevel), combatGetMonsterCritCeiling(areaLevel)) : null;
     if (crit) mdmg *= critMult;
     mdmg = Math.max(0, mdmg - combatGetArmor(data));
     data.current_hp = Math.max(1, (data.current_hp || 0) - mdmg);
     firstStrike = { damage: Math.round(mdmg), crit, crit_mult: critMult };
     log.push(`The ${name} strikes first, hitting you for ${Math.round(mdmg)} damage${crit ? ` (Critical! x${critMult.toFixed(2)})` : ""} before you can react!`);
+    const thorns = combatGearBonus(data, "thorns");
+    if (thorns > 0) {
+      engageThornsDamage = Math.min(maxHp, thorns);
+      log.push(`Your Thorns reflect ${engageThornsDamage} damage back at the ${name}!`);
+    }
   }
 
   const id = crypto.randomBytes(16).toString("hex");
@@ -2310,15 +2910,19 @@ app.post("/api/combat/start", requireAuth, (req, res) => {
   const playerAttackSpeed = combatGetAttackSpeed(data);
   const monsterAttackSpeed = combatMonsterAttackSpeed(areaLevel);
   const lastMonsterHitAt = Date.now();
+  // v0.22.7 (#1): the monster's persisted starting HP already reflects any Thorns damage from
+  // the engage first-strike above -- a subsequent /attack call will naturally resolve the kill
+  // (with full XP/gold/loot) once the player's next action lands, same as any other kill.
+  const startingHp = Math.max(0, maxHp - engageThornsDamage);
   db.prepare(
     `INSERT INTO combat_sessions (id, account_id, slot, monster_id, name, area_level, max_hp, hp, dmg_min, dmg_max, xp, gold_min, gold_max, loot_table, is_guardian, is_roamer, status, created_at, updated_at, player_attack_speed, monster_attack_speed, last_monster_hit_at)
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?, ?, ?, ?, ?)`
-  ).run(id, req.account.id, slot, monster.id, name, areaLevel, maxHp, maxHp, dmgMin, dmgMax, xp, monster.gold_min, monster.gold_max, monster.loot_table, isGuardian ? 1 : 0, isRoamer ? 1 : 0, now, now, playerAttackSpeed, monsterAttackSpeed, lastMonsterHitAt);
+  ).run(id, req.account.id, slot, monster.id, name, areaLevel, maxHp, startingHp, dmgMin, dmgMax, xp, monster.gold_min, monster.gold_max, monster.loot_table, isGuardian ? 1 : 0, isRoamer ? 1 : 0, now, now, playerAttackSpeed, monsterAttackSpeed, lastMonsterHitAt);
 
   const saveSeq = saveCharacterRow(req.account.id, slot, data);
   res.json({
     ok: true, session_id: id,
-    monster: { name, hp: maxHp, max_hp: maxHp, attack_speed: monsterAttackSpeed },
+    monster: { name, hp: startingHp, max_hp: maxHp, attack_speed: monsterAttackSpeed },
     player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data), attack_speed: playerAttackSpeed, ...combatRoundBuffsPayload(data) },
     first_strike: firstStrike, log, _save_seq: saveSeq,
   });
@@ -2332,6 +2936,14 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
   if (!data) return res.status(404).json({ error: "No character in that slot." });
 
   combatSettleAllHeals(data);
+  // v0.23.0 (Part B7): settle any queued Fireflies DOT ticks against the monster before this
+  // round's own action -- same lazy on-demand pattern as combatSettleAllHeals() just above,
+  // applied to session.hp instead of the player's HP/Stamina/Mana.
+  const spellDotResult = combatSettleSpellDots(session);
+  if (spellDotResult.dotsChanged) {
+    session.hp = spellDotResult.newHp;
+    updateCombatSession(session.id, { hp: spellDotResult.newHp, spell_dots: JSON.stringify(spellDotResult.newDots || []) });
+  }
   const quadActiveThisRound = combatHasQuadDamage(data);
   const invulnActiveThisRound = combatIsInvulnerable(data);
 
@@ -2349,7 +2961,7 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
     return res.json({
       ok: true, mob_blocked: false, player_hit: null, weapon_skill: null,
       monster: { hp: session.hp, max_hp: session.max_hp, defeated: false },
-      kill: null, monster_turn: null, monster_ticks: catchUp.ticks,
+      kill: null, monster_turn: null, monster_ticks: catchUp.ticks, spell_dot_ticks: spellDotResult.ticks,
       player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), ...combatRoundBuffsPayload(data) },
       fatal: true, _save_seq: saveSeq,
     });
@@ -2376,15 +2988,32 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
     // the player's current ceiling (combatGetCritMultiplierMax(), driven by the new
     // "crit_multiplier" gear affix) -- not a fixed 1.75 every time. null on a non-crit hit.
     const critMult = crit ? combatRollCritMultiplier(combatGetCritMultiplierMax(data)) : null;
-    if (crit) dmg *= critMult;
+    if (crit) {
+      dmg *= critMult;
+    } else {
+      // v0.22.6 (#24): tight +/-% jitter band on non-crit hits only, mirroring the monster's
+      // own per-hit jitter (v0.22.2 #1) -- see CB.PLAYER_DAMAGE_JITTER above.
+      dmg *= cbRandRange(1 - CB.PLAYER_DAMAGE_JITTER, 1 + CB.PLAYER_DAMAGE_JITTER);
+    }
     if (quadActiveThisRound) dmg *= 4;
     newMonsterHp = session.hp - dmg;
     playerHit = { damage: Math.round(dmg), crit, crit_mult: critMult, quad_damage: quadActiveThisRound };
+    // v0.22.3 (#20, credit: Gwen): no weapon-skill XP from a hit swung with an equipped
+    // weapon that no longer meets its level/class requirement (e.g. after a demotion) --
+    // mirrors the same combatCanEquipGear() gate used everywhere else gear validity matters.
     const weaponType = combatGetEquippedWeaponType(data);
-    if (weaponType) weaponSkill = { weapon_type: weaponType, ...combatRegisterWeaponHit(data, weaponType) };
+    if (weaponType && data.equipped && data.equipped.weapon && combatCanEquipGear(data, data.equipped.weapon)){
+      weaponSkill = { weapon_type: weaponType, ...combatRegisterWeaponHit(data, weaponType) };
+    }
   }
 
-  const monsterDefeated = !mobBlocked && newMonsterHp <= 0;
+  // v0.22.7 (#1): used to require `!mobBlocked` too, on the assumption that monster HP could
+  // only ever drop from the player's OWN landed swing this round. Thorns (above) can now also
+  // drain the monster's HP purely from the elapsed-time catch-up hits it took THIS round,
+  // independent of whether the player's own swing connects -- so a monster already at 0 from
+  // thorns must still register as defeated even on a round where the player's own hit was
+  // blocked.
+  const monsterDefeated = newMonsterHp <= 0;
   let kill = null, monsterTurn = null, fatal = false;
 
   if (monsterDefeated) {
@@ -2397,6 +3026,10 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
     // instead of being partly pre-multiplied here and partly multiplied again inside it.
     const xpResult = combatAddXp(data, session.xp);
     const leveled = xpResult.leveled;
+    // v0.22.3 (#10): the season is now won by "tier 5 AND Level 100", not by reaching tier 5
+    // alone -- only check on an actual level-up, and only a tier-5 character can possibly
+    // qualify (maybeDeclareSeasonWinner() checks both and no-ops otherwise).
+    if (leveled) maybeDeclareSeasonWinner(req.account.id, data);
     creditAccountGold(req.account.id, goldCredited);
     combatIncrementKillStreak(data);
     // v0.19.1 (#19): this endpoint used to persist the raw characters-table row via
@@ -2407,11 +3040,16 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
     upsertLeaderboardBests(req.account.id, data);
 
     const magicFind = combatGetMagicFind(data);
+    // v0.22.1 (Part A2d): look up the slain monster's band once, so both the guaranteed drop
+    // and any bonus drops below skew toward its matching item rarity (see
+    // combatRollRarityForBand()/MONSTER_BAND_LOOT_RARITY_WEIGHTS).
+    const monsterForLoot = COMBAT_MONSTERS.find((m) => m.id === session.monster_id);
+    const monsterBand = monsterForLoot ? monsterForLoot.tier : null;
     const rolled = combatRollLoot(session.loot_table, magicFind);
     let loot = { type: rolled.type };
     if (rolled.type === "gear") {
       const tier = combatRollItemTier(session.area_level);
-      const inst = combatGenerateGearItem(tier, magicFind);
+      const inst = combatGenerateGearItem(tier, magicFind, monsterBand);
       const placement = combatAddGearAutoEquip(data, inst);
       loot = { type: "gear", item: inst, fit: placement.fit, auto_equipped: placement.autoEquipped };
     } else if (rolled.type === "consumable") {
@@ -2435,7 +3073,7 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
       const extraRolled = combatRollLoot(session.loot_table, bonusMagicFind);
       if (extraRolled.type === "gear") {
         const extraTier = combatRollItemTier(session.area_level);
-        const extraInst = combatGenerateGearItem(extraTier, bonusMagicFind);
+        const extraInst = combatGenerateGearItem(extraTier, bonusMagicFind, monsterBand);
         const extraPlacement = combatAddGearAutoEquip(data, extraInst);
         bonusLoot.push({ type: "gear", item: extraInst, fit: extraPlacement.fit, auto_equipped: extraPlacement.autoEquipped });
       } else if (extraRolled.type === "consumable") {
@@ -2486,7 +3124,7 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
   res.json({
     ok: true, mob_blocked: mobBlocked, player_hit: playerHit, weapon_skill: weaponSkill,
     monster: { hp: Math.max(0, newMonsterHp), max_hp: session.max_hp, defeated: monsterDefeated },
-    kill, monster_turn: monsterTurn, monster_ticks: catchUp.ticks,
+    kill, monster_turn: monsterTurn, monster_ticks: catchUp.ticks, spell_dot_ticks: spellDotResult.ticks,
     // v0.22 (batch2 #5): current_stamina/max_stamina now echoed here too (previously only
     // current_hp was) -- combatTickCombatRoundBuffs() above may have applied a Stamina Regen
     // gear-affix tick this round, and the client must adopt the server's post-tick value the
@@ -2519,9 +3157,13 @@ app.post("/api/combat/:sessionId/flee", requireAuth, (req, res) => {
     });
   }
 
+  // v0.23.0 (Part B7): Entangle overrides the flee roll entirely to a guaranteed success for
+  // its duration (session.flee_override_until), checked ahead of the normal gear-modified
+  // fail-chance formula -- reverts to that normal formula the instant the override expires.
+  const fleeOverrideActive = !!(session.flee_override_until && Date.now() < session.flee_override_until);
   // v0.21 (#6): "flee_chance" gear affix reduces the fail chance (can drive it to 0 or below,
   // which Math.max clamps to 0 -- an always-succeed flee -- per Gwen's exact spec).
-  const failed = Math.random() < Math.max(0, CB.FLEE_FAIL_CHANCE - combatGetFleeChanceBonus(data));
+  const failed = fleeOverrideActive ? false : (Math.random() < Math.max(0, CB.FLEE_FAIL_CHANCE - combatGetFleeChanceBonus(data)));
   let monsterTurn = null, fatal = false;
   if (failed) {
     // v0.20 BUG FIX: a failed flee attempt still gives the monster a turn (see
@@ -2595,6 +3237,16 @@ app.post("/api/combat/:sessionId/use-item", requireAuth, (req, res) => {
       used = true;
     }
   }
+  // v0.23.0 (Part B3): mana potions, mirrors the stamina_amount branch immediately above.
+  if ((item.mana_amount || 0) > 0) {
+    const maxMana = combatGetMaxMana(data);
+    const curMana = combatGetCurrentMana(data);
+    const pendingMana = data.srv_mana_heal ? data.srv_mana_heal.rate * data.srv_mana_heal.remainingMs : 0;
+    if (curMana + pendingMana < maxMana) {
+      data.srv_mana_heal = combatQueueHeal(data.srv_mana_heal, item.mana_amount, maxMana - curMana, totalTicks);
+      used = true;
+    }
+  }
   if (item.cures_poison && data.poison_expires_at && data.poison_expires_at > Date.now()) {
     data.poison_expires_at = 0;
     data.poison_pct_per_sec = 0;
@@ -2630,15 +3282,123 @@ app.post("/api/combat/:sessionId/tick", requireAuth, (req, res) => {
   if (!data) return res.status(404).json({ error: "No character in that slot." });
 
   combatSettleAllHeals(data);
+  // v0.23.0 (Part B7): idle-polling must settle spell DOTs too, same as /attack -- otherwise
+  // a Fireflies cast would only visibly progress while the player kept attacking.
+  const spellDotResult = combatSettleSpellDots(session);
+  if (spellDotResult.dotsChanged) {
+    session.hp = spellDotResult.newHp;
+    updateCombatSession(session.id, { hp: spellDotResult.newHp, spell_dots: JSON.stringify(spellDotResult.newDots || []) });
+  }
   const invulnActiveThisRound = combatIsInvulnerable(data);
   const catchUp = combatCatchUpMonsterHits(session, data, invulnActiveThisRound);
   updateCombatSession(session.id, catchUp.fatal ? { status: "lost", last_monster_hit_at: catchUp.newLastHitAt } : { last_monster_hit_at: catchUp.newLastHitAt });
 
   const saveSeq = saveCharacterRow(req.account.id, session.slot, data);
   res.json({
-    ok: true, monster_ticks: catchUp.ticks, fatal: catchUp.fatal,
+    ok: true, monster_ticks: catchUp.ticks, spell_dot_ticks: spellDotResult.ticks, fatal: catchUp.fatal,
     monster: { hp: session.hp, max_hp: session.max_hp },
     player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
+    _save_seq: saveSeq,
+  });
+});
+
+// v0.23.0 (Part B7): spellcasting -- mirrors POST /api/combat/:sessionId/attack's exact
+// route/auth/session-loading boilerplate. Validates ownership/slotting/level-req/cooldown/
+// mana entirely server-side (never trusts the client), applies the spell's effect, and tells
+// the client to advance its own attack-timer beat (see "consumed_attack_beat" below) so a
+// cast can't ALSO land a physical hit in the same instant.
+app.post("/api/combat/:sessionId/cast", requireAuth, (req, res) => {
+  const session = getCombatSession(req.account.id, req.params.sessionId);
+  if (!session) return res.status(404).json({ error: "That fight no longer exists." });
+  if (session.status !== "active") return res.status(409).json({ error: "That fight has already ended." });
+  const spellId = req.body?.spell_id;
+  const spell = SPELLS[spellId];
+  if (!spell) return res.status(400).json({ error: "Unknown spell." });
+
+  const data = loadCharacterRow(req.account.id, session.slot);
+  if (!data) return res.status(404).json({ error: "No character in that slot." });
+
+  const owned = Array.isArray(data.owned_spells) ? data.owned_spells : [];
+  if (!owned.includes(spellId)) return res.status(400).json({ error: "You don't know that spell." });
+  const spellSlots = Array.isArray(data.spell_slots) ? data.spell_slots : [];
+  if (!spellSlots.includes(spellId)) return res.status(400).json({ error: "That spell isn't slotted." });
+  if ((data.level || 1) < spell.level_req) return res.status(400).json({ error: `Requires level ${spell.level_req}.` });
+
+  let cooldowns;
+  try { cooldowns = JSON.parse(session.spell_cooldowns || "{}"); } catch (e) { cooldowns = {}; }
+  const now = Date.now();
+  if (cooldowns[spellId] && now < cooldowns[spellId]) {
+    return res.status(400).json({ error: "That spell is still on cooldown.", ready_at: cooldowns[spellId] });
+  }
+
+  combatSettleAllHeals(data);
+  const currentMana = combatGetCurrentMana(data);
+  if (currentMana < spell.mana_cost) return res.status(400).json({ error: "Not enough mana." });
+
+  // Settle any already-queued spell DOT ticks (e.g. an earlier Fireflies cast) before this
+  // cast layers a new effect on top -- same lazy on-demand pattern combatSettleAllHeals()
+  // already uses for HP/Stamina/Mana potions, applied here to the monster's HP instead.
+  const dotResult = combatSettleSpellDots(session);
+  let monsterHp = dotResult.newHp;
+  let spellDots = dotResult.newDots || [];
+
+  const invulnActiveThisRound = combatIsInvulnerable(data);
+  const catchUp = combatCatchUpMonsterHits(session, data, invulnActiveThisRound);
+  if (catchUp.fatal) {
+    updateCombatSession(session.id, { status: "lost", last_monster_hit_at: catchUp.newLastHitAt, hp: monsterHp, spell_dots: JSON.stringify(spellDots) });
+    const saveSeq = saveCharacterRow(req.account.id, session.slot, data);
+    return res.json({
+      ok: true, monster_ticks: catchUp.ticks, spell_dot_ticks: dotResult.ticks, fatal: true,
+      player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), ...combatRoundBuffsPayload(data) },
+      _save_seq: saveSeq,
+    });
+  }
+
+  // Everything below only happens once we know the cast will actually resolve: deduct mana,
+  // set this spell's cooldown, and increment the B9 spellcasting hit counter -- committed
+  // regardless of which effect branch fires next.
+  data.current_mana = currentMana - spell.mana_cost;
+  cooldowns[spellId] = now + spell.cooldown_ms;
+  const skillResult = combatRegisterSpellcastHit(data);
+
+  const mult = combatGetSpellEffectivenessMult(data);
+  const castResult = { spell_id: spellId };
+  if (spell.effect === "heal") {
+    const maxHp = combatGetMaxHp(data);
+    const amount = Math.round(spell.heal_amount * mult);
+    data.current_hp = Math.min(maxHp, (data.current_hp || 0) + amount);
+    castResult.heal_amount = amount;
+  } else if (spell.effect === "fireflies") {
+    const scaledMin = Math.round(spell.hit_min * mult), scaledMax = Math.round(spell.hit_max * mult);
+    const intervalMs = Math.round(spell.duration_ms / spell.hit_count);
+    spellDots.push({ spell_id: spellId, hits_remaining: spell.hit_count, next_hit_at: now + intervalMs, interval_ms: intervalMs, dmg_min: scaledMin, dmg_max: scaledMax });
+    castResult.queued_hits = spell.hit_count;
+  } else if (spell.effect === "entangle") {
+    // Not scaled by `mult` at all -- pure utility, no magnitude, per Gwen's exact spec.
+    updateCombatSession(session.id, { rooted_until: now + spell.duration_ms, flee_override_until: now + spell.duration_ms });
+    castResult.rooted_until = now + spell.duration_ms;
+  }
+
+  updateCombatSession(session.id, {
+    hp: monsterHp, spell_dots: JSON.stringify(spellDots),
+    spell_cooldowns: JSON.stringify(cooldowns), last_monster_hit_at: catchUp.newLastHitAt,
+  });
+
+  const saveSeq = saveCharacterRow(req.account.id, session.slot, data);
+  res.json({
+    ok: true, cast: castResult, spell_skill: { leveled_up: skillResult.leveledUp, new_level: skillResult.newLevel },
+    monster_ticks: catchUp.ticks, spell_dot_ticks: dotResult.ticks,
+    monster: { hp: Math.max(0, monsterHp), max_hp: session.max_hp },
+    // v0.23.0 (Part B7 #3): this project's player attack-speed gate is entirely CLIENT-side
+    // (see index.html's tryFireAttack()/cb._lastAttackFiredAt -- there is no server-held
+    // "next attack allowed" field for the player at all, only the monster's own
+    // last_monster_hit_at catch-up clock above). "Consuming this beat's attack action" is
+    // therefore a client-side responsibility: the client stamps cb._lastAttackFiredAt the
+    // instant this call succeeds, exactly as tryFireAttack() already does after a normal
+    // landed swing, which delays the next auto-attack tick by the same attack-speed interval.
+    // This flag just confirms to the client that it should do so.
+    consumed_attack_beat: true,
+    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_mana: data.current_mana, max_mana: combatGetMaxMana(data), ...combatRoundBuffsPayload(data) },
     _save_seq: saveSeq,
   });
 });
@@ -2815,7 +3575,7 @@ app.get("/api/leaderboard", (req, res) => {
   const rows = db
     .prepare(
       `SELECT account_id, character_name, class_name, level, highest_tier_reached, gold, lifetime_xp, hardcore, is_dead, last_bridge_steps, xp, updated_at
-       FROM leaderboard_bests ORDER BY highest_tier_reached DESC, last_bridge_steps DESC, level DESC, xp DESC LIMIT 50`
+       FROM leaderboard_bests ORDER BY highest_tier_reached DESC, last_bridge_steps DESC, level DESC, xp DESC LIMIT 1000`
     )
     .all();
   // join usernames without leaking passcode data
@@ -2859,7 +3619,7 @@ app.get("/api/leaderboard", (req, res) => {
 app.get("/api/leaderboard/skills", (req, res) => {
   const rows = db
     .prepare(
-      `SELECT account_id, character_name, class_name, level, weapon_skills, herbalism_points, is_dead
+      `SELECT account_id, character_name, class_name, level, weapon_skills, herbalism_points, spellcasting_hits, is_dead
        FROM leaderboard_bests`
     )
     .all();
@@ -2879,6 +3639,9 @@ app.get("/api/leaderboard/skills", (req, res) => {
       level: r.level,
       weapon_skills: weaponSkills,
       herbalism_points: r.herbalism_points || 0,
+      // v0.23.0 (Part B9): raw hit counter -- client computes level/progress from it via the
+      // exact same Balance.weaponSkillLevelForHits() math weapon skills already use.
+      spellcasting_hits: r.spellcasting_hits || 0,
       is_dead: !!r.is_dead,
     };
   });
@@ -2906,7 +3669,7 @@ app.get("/api/leaderboard/killstreak", (req, res) => {
   const rows = db
     .prepare(
       `SELECT account_id, character_name, class_name, max_kill_streak, is_dead
-       FROM leaderboard_bests ORDER BY max_kill_streak DESC LIMIT 50`
+       FROM leaderboard_bests ORDER BY max_kill_streak DESC LIMIT 1000`
     )
     .all();
   const withNames = rows.map((r) => {
@@ -2931,7 +3694,7 @@ app.get("/api/leaderboard/monsterskilled", (req, res) => {
   const rows = db
     .prepare(
       `SELECT account_id, character_name, class_name, total_kills, is_dead
-       FROM leaderboard_bests ORDER BY total_kills DESC LIMIT 50`
+       FROM leaderboard_bests ORDER BY total_kills DESC LIMIT 1000`
     )
     .all();
   const withNames = rows.map((r) => {
@@ -3057,9 +3820,19 @@ app.get("/api/leaderboard/inspect/:accountId/:characterName", requireAuth, (req,
     // just surfaced here too so Inspect Player's step visualization can show it alongside
     // last_bridge_steps. Not sensitive: no plank-by-plank replay, just a fail count.
     bridge_fail_streak: data.bridge_fail_streak || 0,
+    // v0.22.3 (#12): the SAME red/green plank-progress data the character's own owner sees
+    // on the real Broken Bridge Trial screen -- discoveredSides (which plank was safe at
+    // each cleared step) and stepFailedPlanks (which planks are already known-broken at the
+    // in-progress step), for the character's CURRENT class only. Read-only: this route never
+    // accepts a plank guess or resolves anything, it only lets bridgeTrialView() render the
+    // same grid the inspecting player already sees for their own character.
+    trial_progress_current: (data.trial_progress && data.trial_progress[data.class_id]) || { discoveredSides: [], stepFailedPlanks: {} },
     attributes: data.attributes || { str: 0, dex: 0, vit: 0, int: 0 },
     equipped: data.equipped || {},
     weapon_skills: data.weapon_skills || {},
+    // v0.23.0 (Part B9): Spellcasting proficiency, surfaced to Inspect Player alongside the
+    // weapon skills it's a direct parallel of.
+    spellcasting_skill: data.spellcasting_skill || { hits: 0 },
     herbalism_points: data.herbalism_points || 0,
     // v0.18.2 (#6): Forest Reputation, per Gwen's spec ("also shown in the player inspect
     // view") -- read straight off the character's own data blob (there's no separate
@@ -3153,6 +3926,90 @@ app.get("/api/admin/accounts", requireAuth, requireAdmin, (req, res) => {
   });
 });
 
+/* ---------------- v0.22.3 (#10 section C): admin "Reset Ladder" tab ----------------
+   Human-in-the-loop, per-character ladder reset. Deliberately NO bulk "reset everyone"
+   endpoint -- the admin resets one character at a time, from a listing of every character
+   across every account, exactly the same "review then act on one row" shape as the existing
+   Legacy Gear tool. Also exposes the current season-winner record (if any) so the admin tab
+   can show whether/who has already won this season. */
+app.get("/api/admin/reset-ladder", requireAuth, requireAdmin, (req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT c.account_id, c.slot, a.username,
+              json_extract(c.data, '$.character_name') AS character_name,
+              json_extract(c.data, '$.class_display_name') AS class_display_name,
+              json_extract(c.data, '$.highest_tier_reached') AS highest_tier_reached,
+              json_extract(c.data, '$.level') AS level
+       FROM characters c
+       JOIN accounts a ON a.id = c.account_id
+       WHERE json_extract(c.data, '$.character_name') IS NOT NULL
+       ORDER BY a.username, c.slot`
+    )
+    .all();
+  const season = db.prepare("SELECT * FROM season_state WHERE id = 1").get() || {};
+  res.json({
+    entries: rows.map((r) => ({
+      account_id: r.account_id,
+      slot: r.slot,
+      username: r.username,
+      character_name: r.character_name || "",
+      class_display_name: r.class_display_name || "",
+      highest_tier_reached: r.highest_tier_reached || 1,
+      level: r.level || 1,
+    })),
+    season: {
+      winner_declared: !!season.winner_declared,
+      winner_character_name: season.winner_character_name || "",
+      winner_class_name: season.winner_class_name || "",
+      won_at: season.won_at || null,
+    },
+  });
+});
+
+app.post("/api/admin/reset-ladder/:accountId/:slot", requireAuth, requireAdmin, (req, res) => {
+  const accountId = Number(req.params.accountId);
+  const slot = Number(req.params.slot);
+  if (!Number.isInteger(accountId)) return res.status(400).json({ error: "Invalid account id." });
+  if (!Number.isInteger(slot) || slot < 0 || slot >= MAX_CHARACTER_SLOTS) return res.status(400).json({ error: "Invalid slot." });
+  const row = db.prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?").get(accountId, slot);
+  if (!row) return res.status(404).json({ error: "No character in that slot." });
+  let data;
+  try { data = JSON.parse(row.data); } catch (e) { return res.status(500).json({ error: "Corrupt character save." }); }
+
+  applyLadderReset(data);
+  data._save_seq = (data._save_seq || 0) + 1;
+  const nowStr = nowIso();
+  db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(
+    JSON.stringify(data),
+    nowStr,
+    accountId,
+    slot
+  );
+  upsertLeaderboardBests(accountId, data);
+  console.log(`[admin] ${req.account.username} reset the ladder for "${data.character_name}" (account_id=${accountId}, slot=${slot})`);
+  res.json({
+    ok: true,
+    character_name: data.character_name,
+    class_display_name: data.class_display_name,
+    level: data.level,
+    highest_tier_reached: data.highest_tier_reached,
+  });
+});
+
+// v0.22.3 (#17): admin tool to push a one-off system message to every connected player's
+// global chat -- handy for announcing maintenance/server resets to a live playerbase.
+// Reuses the exact same broadcastSystemMessage() every other system announcement (login,
+// trial result, graveyard death, season win) already goes through, so it renders identically.
+const ADMIN_BROADCAST_MAX_LEN = 500;
+app.post("/api/admin/broadcast", requireAuth, requireAdmin, (req, res) => {
+  const message = String(req.body?.message || "").trim();
+  if (!message) return res.status(400).json({ error: "Message can't be empty." });
+  const trimmed = message.length > ADMIN_BROADCAST_MAX_LEN ? message.slice(0, ADMIN_BROADCAST_MAX_LEN) : message;
+  broadcastSystemMessage(trimmed);
+  console.log(`[admin] ${req.account.username} broadcast a system message: "${trimmed}"`);
+  res.json({ ok: true });
+});
+
 /* ---------------- v0.19.1 (#26): "Legacy Gear" admin review + manual rescale tool ----------------
    Over successive balance patches, some stat maxes for a given tier have been tightened (e.g.
    xp_find's Tier-1 max went 10 -> 1 -> 5, see ITEM_AFFIX_TIER1_MAX_CEILING's own comment
@@ -3172,10 +4029,26 @@ app.get("/api/admin/accounts", requireAuth, requireAdmin, (req, res) => {
 function legacyGearOutOfSpecAffixes(item) {
   if (!item || !Array.isArray(item.affixes) || !Number.isInteger(item.tier)) return [];
   const out = [];
+  // v0.22.6 (#14): routed through legalAffixesForItem() so an offhand item is checked against
+  // its own Shield/Orb pool instead of an undifferentiated "offhand" list.
+  const legalForSlot = legalAffixesForItem(item);
   for (const a of item.affixes) {
-    if (!a || typeof a.stat !== "string" || a.stat === "eyesight" || !Number.isFinite(a.value)) continue;
+    if (!a || typeof a.stat !== "string" || !Number.isFinite(a.value)) continue;
+    // v0.22.3 (#16): flag eyesight sitting on any slot besides head/amulet (pre-dates the
+    // new roll-site gate) alongside the pre-existing over-max-value flagging below.
+    if (a.stat === "eyesight") {
+      if (item.slot !== "head" && item.slot !== "amulet") out.push({ stat: a.stat, value: a.value, slotIllegal: true });
+      continue;
+    }
+    // v0.22.3 (#16): also flag any affix that's simply illegal for this item's slot (e.g.
+    // armor rolled onto a weapon) -- pre-dates the new SLOT_AFFIXES filter at generation/reforge.
+    if (!legalForSlot.includes(a.stat)) { out.push({ stat: a.stat, value: a.value, slotIllegal: true }); continue; }
     let max = itemAffixMaxForTier(a.stat, item.tier);
     if (item.slot === "weapon" && a.stat === "damage") max = round2(max * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
+    // v0.22.7 (#11): old percent-era Thorns rolls are already covered by this same over-max
+    // check below -- the percent-to-flat conversion (item 1) kept the exact same tier-max
+    // numbers (4/8/12/16/20), so a legacy Thorns value can only be out of spec here if it
+    // exceeds that ceiling, same as any other stat. No separate thorns-specific branch needed.
     if (a.value > max) out.push({ stat: a.stat, value: a.value, max });
   }
   return out;
@@ -3186,8 +4059,34 @@ function legacyGearOutOfSpecAffixes(item) {
 // this is intentionally NOT a full re-roll (the player keeps the exact item they've always
 // had, just corrected to current balance) and never touches affixes that are already in spec.
 function legacyGearRescale(item) {
+  // v0.22.3 (#16): a slot-illegal eyesight (anywhere but head/amulet) is simply dropped --
+  // there's no "legal eyesight slot" to reforge it into that preserves its rare-bonus intent,
+  // and eyesight was never counted against the item's normal-affix slotCount to begin with.
+  if (item.slot !== "head" && item.slot !== "amulet") {
+    const filtered = item.affixes.filter((a) => !a || a.stat !== "eyesight");
+    if (filtered.length !== item.affixes.length) item = Object.assign({}, item, { affixes: filtered });
+  }
+  // v0.22.6 (#14): routed through legalAffixesForItem() so a slot-illegal offhand affix gets
+  // reforged into its own Shield/Orb pool instead of an undifferentiated "offhand" list.
+  const legalForSlot = legalAffixesForItem(item);
+  const existingStats = new Set(item.affixes.filter((a) => a && a.stat !== "eyesight").map((a) => a.stat));
   const affixes = item.affixes.map((a) => {
     if (!a || a.stat === "eyesight") return a;
+    // v0.22.3 (#16): a slot-illegal affix (e.g. armor on a weapon) gets reforged into a
+    // random LEGAL stat for this slot (that the item doesn't already carry), rolled fresh on
+    // the current tier -- same "keep the item, fix the stat" philosophy as the existing
+    // over-max-value clamp below, just for the newer illegal-stat case.
+    if (!legalForSlot.includes(a.stat)) {
+      const candidatePool = legalForSlot.filter((s) => !existingStats.has(s));
+      const newStat = candidatePool.length > 0
+        ? candidatePool[Math.floor(Math.random() * candidatePool.length)]
+        : a.stat;
+      existingStats.delete(a.stat);
+      existingStats.add(newStat);
+      let newValue = rollAffixValue(newStat, item.tier);
+      if (item.slot === "weapon" && newStat === "damage") newValue = round2(newValue * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
+      return { stat: newStat, value: newValue };
+    }
     let max = itemAffixMaxForTier(a.stat, item.tier);
     if (item.slot === "weapon" && a.stat === "damage") max = round2(max * ITEM_WEAPON_DAMAGE_AFFIX_MULT);
     return a.value > max ? Object.assign({}, a, { value: max }) : a;
@@ -3386,6 +4285,99 @@ function rescaleLegacyGearAtLocation(location) {
   throw Object.assign(new Error("Invalid location kind."), { httpStatus: 400 });
 }
 
+// v0.22.7 (#10): a hard, permanent per-item delete for exactly one gear instance at the exact
+// location the admin selected -- for legacy items that are too broken/unwanted to bother
+// rescaling (e.g. an old percent-era Thorns roll, or a slot-illegal affix nobody wants
+// reforged). Mirrors rescaleLegacyGearAtLocation()'s find/validate/persist shape but removes
+// the instance instead of replacing its values, and re-reads the character/vault/listing row
+// fresh right before mutating so a player who moved the item in the meantime can't have an
+// unrelated item deleted out from under them. Per-item only -- there is intentionally no bulk
+// "delete all" counterpart, per the standing data-safety directive. Leaderboards in this codebase
+// are computed fresh from the `characters` table on every request (see /api/leaderboard*), so
+// nothing extra needs to run here to keep them in sync -- persisting the character row is enough.
+function deleteLegacyGearAtLocation(location) {
+  if (!location || typeof location !== "object" || typeof location.instance_id !== "string" || !location.instance_id) {
+    throw Object.assign(new Error("Invalid location."), { httpStatus: 400 });
+  }
+  const { kind, instance_id } = location;
+  const accountId = Number(location.account_id);
+  if (!Number.isInteger(accountId)) throw Object.assign(new Error("Invalid account."), { httpStatus: 400 });
+
+  if (kind === "equipped" || kind === "backpack") {
+    const slot = Number(location.slot);
+    if (!Number.isInteger(slot) || slot < 0 || slot >= MAX_CHARACTER_SLOTS) throw Object.assign(new Error("Invalid slot."), { httpStatus: 400 });
+    const row = db.prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?").get(accountId, slot);
+    if (!row) throw Object.assign(new Error("Character not found."), { httpStatus: 404 });
+    let data;
+    try { data = JSON.parse(row.data); } catch (e) { throw Object.assign(new Error("Corrupt character data."), { httpStatus: 500 }); }
+
+    let removed;
+    if (kind === "equipped") {
+      const equipSlot = location.equip_slot;
+      const inst = data.equipped && data.equipped[equipSlot];
+      if (!inst || inst.instance_id !== instance_id) throw Object.assign(new Error("That item is no longer there (equipped slot changed)."), { httpStatus: 404 });
+      removed = inst;
+      delete data.equipped[equipSlot];
+    } else {
+      const list = Array.isArray(data.gear_instances) ? data.gear_instances : [];
+      const idx = list.findIndex((i) => i && i.instance_id === instance_id);
+      if (idx === -1) throw Object.assign(new Error("That item is no longer in the backpack."), { httpStatus: 404 });
+      removed = list[idx];
+      list.splice(idx, 1);
+      data.gear_instances = list;
+    }
+    db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(
+      JSON.stringify(data), nowIso(), accountId, slot
+    );
+    console.log(`[admin] deleted a legacy gear item (${kind}) for account_id=${accountId} slot=${slot}`);
+    return { kind, removed };
+  }
+
+  if (kind === "vault") {
+    const row = db.prepare("SELECT data FROM vaults WHERE account_id = ?").get(accountId);
+    if (!row) throw Object.assign(new Error("Vault not found."), { httpStatus: 404 });
+    let items;
+    try { items = JSON.parse(row.data); } catch (e) { throw Object.assign(new Error("Corrupt vault data."), { httpStatus: 500 }); }
+    if (!Array.isArray(items)) throw Object.assign(new Error("Corrupt vault data."), { httpStatus: 500 });
+    const idx = items.findIndex((e) => e && e.kind === "gear" && e.inst && e.inst.instance_id === instance_id);
+    if (idx === -1) throw Object.assign(new Error("That item is no longer in the vault."), { httpStatus: 404 });
+    const removed = items[idx].inst;
+    items.splice(idx, 1);
+    db.prepare("UPDATE vaults SET data = ?, updated_at = ?, version = version + 1 WHERE account_id = ?").run(
+      JSON.stringify(items), nowIso(), accountId
+    );
+    console.log(`[admin] deleted a legacy gear item (vault) for account_id=${accountId}`);
+    return { kind, removed };
+  }
+
+  if (kind === "auction") {
+    const listingId = Number(location.listing_id);
+    if (!Number.isInteger(listingId)) throw Object.assign(new Error("Invalid listing."), { httpStatus: 400 });
+    const row = db.prepare("SELECT item_json FROM auction_listings WHERE id = ? AND type = 'gear'").get(listingId);
+    if (!row || !row.item_json) throw Object.assign(new Error("Listing not found."), { httpStatus: 404 });
+    let target;
+    try { target = JSON.parse(row.item_json); } catch (e) { throw Object.assign(new Error("Corrupt listing data."), { httpStatus: 500 }); }
+    if (target.instance_id !== instance_id) throw Object.assign(new Error("That listing no longer holds the expected item."), { httpStatus: 404 });
+    db.prepare("DELETE FROM auction_listings WHERE id = ?").run(listingId);
+    console.log(`[admin] deleted a legacy gear item (auction listing #${listingId})`);
+    return { kind, removed: target };
+  }
+
+  throw Object.assign(new Error("Invalid location kind."), { httpStatus: 400 });
+}
+
+app.post("/api/admin/legacy-gear/delete", requireAuth, requireAdmin, (req, res) => {
+  const location = req.body && req.body.location;
+  try {
+    const result = deleteLegacyGearAtLocation(location);
+    console.log(`[admin] ${req.account.username} permanently deleted a legacy gear item (${result.kind})`);
+    broadcastSystemMessage("An admin permanently removed an out-of-date item from a player's gear.");
+    return res.json({ ok: true, removed: result.removed });
+  } catch (e) {
+    return res.status(e.httpStatus || 500).json({ error: e.message || "Could not delete that item." });
+  }
+});
+
 app.post("/api/admin/legacy-gear/rescale", requireAuth, requireAdmin, (req, res) => {
   const location = req.body && req.body.location;
   try {
@@ -3511,9 +4503,24 @@ app.get("/api/auction", requireAuth, (req, res) => {
   res.json({ listings: out });
 });
 
+// v0.22.3 (#4): charge-bearing consumables (currently only Elixir of Clairvoyance) must never
+// be listed below full charges -- a buyer paying for "an elixir" should always get a full one.
+// Unopened elixirs sitting in `consumables` are always full stacks (the currently-open one's
+// partial charge count lives in a separate per-character field, `clarity_charges_left`, which
+// never becomes part of a listing today) -- this guard is both the label source and a defense-
+// in-depth check against any future/modified-client path that could attach a partial charge
+// count to a listing via an explicit `charges_left` field.
+const CHARGE_BEARING_CONSUMABLES = { elixir_of_clarity: 10 };
+
 app.post("/api/auction", requireAuth, (req, res) => {
-  const { type, price, character_name, item, item_key, quantity, display_name, seller_slot } = req.body || {};
-  if (!["gear", "consumable", "herb"].includes(type)) return res.status(400).json({ error: "Invalid item type." });
+  const { type, price, character_name, item, item_key, quantity, display_name, seller_slot, charges_left } = req.body || {};
+  if (!["gear", "consumable", "herb", "material"].includes(type)) return res.status(400).json({ error: "Invalid item type." });
+  if (type === "consumable" && CHARGE_BEARING_CONSUMABLES[item_key] != null) {
+    const maxCharges = CHARGE_BEARING_CONSUMABLES[item_key];
+    if (charges_left != null && Number(charges_left) < maxCharges) {
+      return res.status(400).json({ error: "Only a full, unused elixir can be listed." });
+    }
+  }
   const numPrice = Number(price);
   if (!Number.isFinite(numPrice) || numPrice < 1) return res.status(400).json({ error: "Invalid price." });
   if (!character_name || !display_name) return res.status(400).json({ error: "Missing listing details." });
@@ -3540,8 +4547,31 @@ app.post("/api/auction", requireAuth, (req, res) => {
   // requester actually owns a character to sell as, not where the gold itself lives.
   const slot = Number.isInteger(seller_slot) ? seller_slot : -1;
   if (slot < 0) return res.status(400).json({ error: "Missing seller character slot." });
-  const charRow = db.prepare("SELECT 1 FROM characters WHERE account_id = ? AND slot = ?").get(req.account.id, slot);
+  const charRow = db.prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?").get(req.account.id, slot);
   if (!charRow) return res.status(400).json({ error: "Character not found." });
+
+  // v0.22.3 (#14): materials are per-character (not account-bound like gold), so listing a
+  // material stack deducts it from THIS character's own data.materials, server-side and
+  // atomically -- same discipline as the v0.22.1 gold-dupe fix, never trusting a client-
+  // supplied "I have enough" figure. The deduction happens here (before the listing is even
+  // inserted) so a listing can never exist without the materials having actually left the
+  // seller's character.
+  if (type === "material") {
+    let sellerData;
+    try { sellerData = JSON.parse(charRow.data); } catch (e) { return res.status(500).json({ error: "Corrupt character save." }); }
+    if ((sellerData.materials || 0) < numQty) {
+      return res.status(400).json({ error: "Not enough Salvage Materials." });
+    }
+    sellerData.materials -= numQty;
+    sellerData._save_seq = (sellerData._save_seq || 0) + 1;
+    db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(
+      JSON.stringify(sellerData),
+      nowIso(),
+      req.account.id,
+      slot
+    );
+  }
+
   const fee = auctionListingFee(roundedPrice);
   if (getAccountGold(req.account.id) < fee) {
     return res.status(400).json({ error: `Not enough gold for the ${fee}g listing fee.` });
@@ -3576,12 +4606,32 @@ app.delete("/api/auction/:id", requireAuth, (req, res) => {
   if (!listing) return res.status(404).json({ error: "Listing not found." });
   if (listing.seller_account_id !== req.account.id) return res.status(403).json({ error: "Not your listing." });
   db.prepare("DELETE FROM auction_listings WHERE id = ?").run(id);
+  // v0.22.3 (#14): a delisted material stack is credited straight back to the seller's OWN
+  // character row (the same one it was deducted from at listing time, listing.seller_slot),
+  // server-side -- mirrors the listing-time deduction above so materials are never created
+  // or destroyed by a list/cancel round trip.
+  if (listing.type === "material") {
+    const sellerRow = db.prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?").get(listing.seller_account_id, listing.seller_slot);
+    if (sellerRow) {
+      try {
+        const sellerData = JSON.parse(sellerRow.data);
+        sellerData.materials = (sellerData.materials || 0) + listing.quantity;
+        sellerData._save_seq = (sellerData._save_seq || 0) + 1;
+        db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(
+          JSON.stringify(sellerData),
+          nowIso(),
+          listing.seller_account_id,
+          listing.seller_slot
+        );
+      } catch (e) { /* corrupt row -- nothing more we can safely do here */ }
+    }
+  }
   res.json({ ok: true, refund: { type: listing.type, item_key: listing.item_key, item: listing.item_json ? JSON.parse(listing.item_json) : null, quantity: listing.quantity } });
 });
 
 app.post("/api/auction/:id/buy", requireAuth, (req, res) => {
   const id = Number(req.params.id);
-  const { character_name } = req.body || {};
+  const { character_name, buyer_slot } = req.body || {};
   const listing = db.prepare("SELECT * FROM auction_listings WHERE id = ?").get(id);
   if (!listing) return res.status(404).json({ error: "That listing is no longer available." });
   if (listing.seller_account_id === req.account.id) return res.status(400).json({ error: "You can't buy your own listing." });
@@ -3592,9 +4642,40 @@ app.post("/api/auction/:id/buy", requireAuth, (req, res) => {
   // first place; that whole problem no longer exists).
   if (getAccountGold(req.account.id) < listing.price) return res.status(400).json({ error: "Not enough gold." });
 
+  // v0.22.3 (#14): a material listing needs the BUYER's own character slot to credit
+  // data.materials to (materials are per-character, unlike account-bound gold) -- validated
+  // up front, before the listing is removed, so a bad/missing slot fails clean rather than
+  // consuming the listing without paying anything out.
+  let buyerSlotNum = null;
+  if (listing.type === "material") {
+    buyerSlotNum = Number(buyer_slot);
+    if (!Number.isInteger(buyerSlotNum) || buyerSlotNum < 0 || buyerSlotNum >= MAX_CHARACTER_SLOTS) {
+      return res.status(400).json({ error: "Missing buyer character slot." });
+    }
+    const buyerCharRow = db.prepare("SELECT 1 FROM characters WHERE account_id = ? AND slot = ?").get(req.account.id, buyerSlotNum);
+    if (!buyerCharRow) return res.status(400).json({ error: "Character not found." });
+  }
+
   // Remove the listing first (best-effort race protection against double-buy).
   const del = db.prepare("DELETE FROM auction_listings WHERE id = ?").run(id);
   if (del.changes === 0) return res.status(409).json({ error: "Someone already bought that." });
+
+  if (listing.type === "material") {
+    const buyerRow = db.prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?").get(req.account.id, buyerSlotNum);
+    if (buyerRow) {
+      try {
+        const buyerData = JSON.parse(buyerRow.data);
+        buyerData.materials = (buyerData.materials || 0) + listing.quantity;
+        buyerData._save_seq = (buyerData._save_seq || 0) + 1;
+        db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(
+          JSON.stringify(buyerData),
+          nowIso(),
+          req.account.id,
+          buyerSlotNum
+        );
+      } catch (e) { /* corrupt row -- gold still refunds correctly below, materials just can't be credited */ }
+    }
+  }
 
   const buyerGoldAfter = creditAccountGold(req.account.id, -listing.price);
   // v0.17 (#29) BUG FIX: this used to credit the seller's OWN CHARACTER ROW directly, which
@@ -3709,16 +4790,25 @@ setInterval(() => {
     const data = loadCharacterRow(client.accountId, session.slot);
     if (!data) continue;
     combatSettleAllHeals(data);
+    // v0.23.0 (Part B7): settle queued Fireflies DOT ticks on the server's own clock too, so
+    // they land even if the player never sends another attack/tick request while idle.
+    const spellDotResult = combatSettleSpellDots(session);
     const invulnActiveThisRound = combatIsInvulnerable(data);
     const catchUp = combatCatchUpMonsterHits(session, data, invulnActiveThisRound);
-    if (catchUp.ticks.length === 0 && !catchUp.fatal) continue;
+    if (catchUp.ticks.length === 0 && !catchUp.fatal && spellDotResult.ticks.length === 0) continue;
+    if (spellDotResult.dotsChanged) updateCombatSession(session.id, { hp: spellDotResult.newHp, spell_dots: JSON.stringify(spellDotResult.newDots || []) });
     updateCombatSession(session.id, catchUp.fatal ? { status: "lost", last_monster_hit_at: catchUp.newLastHitAt } : { last_monster_hit_at: catchUp.newLastHitAt });
     const saveSeq = saveCharacterRow(client.accountId, session.slot, data);
     client.send(JSON.stringify({
-      type: "combat_tick", session_id: session.id, monster_ticks: catchUp.ticks, fatal: catchUp.fatal,
+      type: "combat_tick", session_id: session.id, monster_ticks: catchUp.ticks, spell_dot_ticks: spellDotResult.ticks, fatal: catchUp.fatal,
+      monster: spellDotResult.dotsChanged ? { hp: spellDotResult.newHp } : undefined,
       player: {
         current_hp: catchUp.fatal ? 0 : data.current_hp, max_hp: combatGetMaxHp(data),
         current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data),
+        // v0.23.0 (Part B2): Mana rides along on the WS-pushed combat tick too, so idle-in-combat
+        // Mana regen/heal-over-time settlement (already computed above by combatSettleAllHeals())
+        // is visible without waiting on a player-initiated attack/flee/use-item call.
+        current_mana: combatGetCurrentMana(data), max_mana: combatGetMaxMana(data),
       },
       _save_seq: saveSeq,
     }));
