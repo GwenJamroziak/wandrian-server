@@ -1801,7 +1801,7 @@ const ITEM_SLOT_AFFIXES = {
   ring: ["crit", "crit_multiplier", "attack_speed", "hp", "regen", "gold_find", "xp_find", "magic_find", "strength", "dexterity", "vitality", "intelligence", "mana", "mana_regen", "attack_rating", "spell_power", "life_on_hit", "spell_cdr"],
   amulet: ["crit", "crit_multiplier", "hp", "poison_resist", "regen", "gold_find", "xp_find", "magic_find", "vitality", "intelligence", "mana", "mana_regen", "spell_power", "life_on_hit", "spell_cdr", "max_health_pct"],
 };
-const ITEM_RARITY_SLOTS = { Common: 1, Uncommon: 2, Rare: 3, Epic: 5, Legendary: 8 };
+const ITEM_RARITY_SLOTS = { Common: 1, Uncommon: 2, Rare: 3, Epic: 5, Legendary: 8, Set: 3 };
 // v0.22.6 (#11): "offhand" added -- must stay in sync with index.html's IF.GENERATION_SLOTS.
 const ITEM_GENERATION_SLOTS = ["weapon", "head", "shoulders", "armor", "pants", "gloves", "boots", "ring", "amulet", "belt", "offhand"];
 // v0.22.6 (#14): "offhand" legality is by base-item TYPE (Shield vs Orb) rather than by slot --
@@ -2408,7 +2408,10 @@ const MONSTER_BAND_LOOT_RARITY_WEIGHTS = {
   Uncommon: [{ name: "Common", weight: 15 }, { name: "Uncommon", weight: 70 }, { name: "Rare", weight: 15 }],
   Rare: [{ name: "Uncommon", weight: 15 }, { name: "Rare", weight: 70 }, { name: "Epic", weight: 15 }],
   Epic: [{ name: "Rare", weight: 15 }, { name: "Epic", weight: 70 }, { name: "Legendary", weight: 15 }],
-  Legendary: [{ name: "Epic", weight: 15 }, { name: "Legendary", weight: 85 }],
+  // v0.23.6: small "Set" tail added to the top band only -- Set pieces are endgame-only, so
+  // only the hardest monster band gets any chance at one, at the expense of a few points of
+  // Legendary's own share.
+  Legendary: [{ name: "Epic", weight: 15 }, { name: "Legendary", weight: 80 }, { name: "Set", weight: 5 }],
 };
 
 // Only the fields combat's use-item endpoint actually needs from index.html's ITEMS.
@@ -2423,12 +2426,12 @@ const COMBAT_CONSUMABLES = {
 const COMBAT_BAG_CAPACITY = { traveler_pouch: 8, woven_bag: 16, bramble_sack: 24, rootpack_ancient: 40 };
 const COMBAT_BASE_NAMES = {
   weapon: ["Twig Wand", "Bramblestaff", "Rootcarver", "Thornbow", "Charwood Axe", "Emberbrand", "Thornfang", "Bramblespike", "Quickthorn", "Goedendag"],
-  head: ["Bramble Circlet", "Mosscap", "Antlercrown", "Leafwood Hood"],
-  shoulders: ["Bark Mantle", "Rootguard Pauldrons", "Thistle Shoulderguard"],
-  armor: ["Big Leaf Wrap", "Bark Plate", "Mosscloak", "Reedmail", "Ashen Hide"],
+  head: ["Bramble Circlet", "Mosscap", "Antlercrown", "Leafwood Hood", "Wizard Hat"],
+  shoulders: ["Bark Mantle", "Rootguard Pauldrons", "Thistle Shoulderguard", "Bark Pauldrons"],
+  armor: ["Big Leaf Wrap", "Bark Plate", "Mosscloak", "Reedmail", "Ashen Hide", "Chainmail"],
   pants: ["Root-woven Leggings", "Bark Greaves", "Vine Trousers"],
-  gloves: ["Thornweave Gloves", "Barkgrip Gauntlets", "Mossback Handwraps"],
-  boots: ["Rootstep Boots", "Mossy Treads", "Bramblehide Boots"],
+  gloves: ["Thornweave Gloves", "Barkgrip Gauntlets", "Mossback Handwraps", "Windrider Gloves"],
+  boots: ["Rootstep Boots", "Mossy Treads", "Bramblehide Boots", "Windstep Boots"],
   ring: ["Acorn Ring", "Petal Ring", "Vinewrought Ring"],
   amulet: ["Emberstone Pendant", "Driftwood Amulet", "Heartwood Talisman"],
   belt: ["Vine Cinch", "Barkweave Belt", "Root Sash"],
@@ -2437,23 +2440,100 @@ const COMBAT_BASE_NAMES = {
   // below resolves which TYPE a given name is.
   offhand: ["Bramble Buckler", "Rootwood Shield", "Bark Aegis", "Moonpetal Orb", "Emberheart Orb", "Wisp-Light Orb"],
 };
-const COMBAT_WEAPON_TYPE_BY_BASE_NAME = { "Twig Wand": "wand", "Bramblestaff": "staff", "Rootcarver": "sword", "Thornbow": "bow", "Charwood Axe": "axe", "Emberbrand": "sword", "Thornfang": "dagger", "Bramblespike": "dagger", "Quickthorn": "dagger", "Goedendag": "dagger" };
+// v0.23.6: "Wizard Wand" added -- the Wizard Set's weapon piece, same "wand" TYPE (not a new
+// restriction) as Twig Wand.
+const COMBAT_WEAPON_TYPE_BY_BASE_NAME = { "Twig Wand": "wand", "Bramblestaff": "staff", "Rootcarver": "sword", "Thornbow": "bow", "Charwood Axe": "axe", "Emberbrand": "sword", "Thornfang": "dagger", "Bramblespike": "dagger", "Quickthorn": "dagger", "Goedendag": "dagger", "Wizard Wand": "wand" };
+// v0.23.6: rebuilt to a strict 2-weapon-types-per-class distribution (see the Aug 3 balance/
+// itemization handover), replacing the old uneven 1-4 map. Dagger now has its own explicit
+// entry too, so it is no longer implicitly "every class allowed" via the missing-entry
+// convention -- it is restricted like every other weapon type. Must stay byte-identical to
+// index.html's IF.WEAPON_TYPE_CLASS_RESTRICTIONS.
 const COMBAT_WEAPON_TYPE_CLASS_RESTRICTIONS = {
-  wand: ["wizard", "sorcerer"], staff: ["warlock", "rootbinder", "druid"],
-  sword: ["thornguard", "stonewarden", "treesinger", "galestrider"],
-  axe: ["thornguard", "stonewarden", "rootbinder", "windrider", "galestrider", "galeshaper"],
-  bow: ["windrider", "galestrider", "treesinger"],
+  wand: ["wizard", "sorcerer", "archmage", "emberpriest", "shadowbloom"],
+  staff: ["wizard", "sorcerer", "necromancer", "archmage", "rootbinder", "druid"],
+  sword: ["thornguard", "stonewarden", "treesinger", "galestrider", "shadowbloom", "druid"],
+  axe: ["warlock", "thornguard", "stonewarden", "windrider", "galeshaper"],
+  bow: ["treesinger", "emberpriest", "windrider", "galestrider"],
+  dagger: ["warlock", "necromancer", "rootbinder", "galeshaper"],
 };
 // v0.22.6 (#11-14): must stay byte-identical to index.html's IF.OFFHAND_TYPE_BY_BASE_NAME /
 // OFFHAND_TYPE_CLASS_RESTRICTIONS. Shield has no class-restriction entry (usable by everyone,
 // same "missing entry = every class allowed" convention dagger relies on above); Orb is gated
 // to the wizard chain plus emberpriest/druid.
-const COMBAT_OFFHAND_TYPE_BY_BASE_NAME = { "Bramble Buckler": "shield", "Rootwood Shield": "shield", "Bark Aegis": "shield", "Moonpetal Orb": "orb", "Emberheart Orb": "orb", "Wisp-Light Orb": "orb" };
+// v0.23.6: "Wizard Orb" added -- the Wizard Set's offhand piece, same "orb" TYPE as the other 3 orbs.
+const COMBAT_OFFHAND_TYPE_BY_BASE_NAME = { "Bramble Buckler": "shield", "Rootwood Shield": "shield", "Bark Aegis": "shield", "Moonpetal Orb": "orb", "Emberheart Orb": "orb", "Wisp-Light Orb": "orb", "Wizard Orb": "orb" };
 const COMBAT_OFFHAND_TYPE_CLASS_RESTRICTIONS = {
   orb: ["wizard", "sorcerer", "warlock", "necromancer", "archmage", "emberpriest", "druid"],
 };
+// v0.23.6: class-exclusive armor -- gated by CHAIN (any tier of that chain can equip it), not a
+// single class, so legality is COMBAT_CLASSES[classId].chain==="wizard"/etc. rather than a
+// hardcoded id list. Must stay byte-identical to index.html's IF.CHAIN_EXCLUSIVE_BASE_NAMES.
+const COMBAT_CHAIN_EXCLUSIVE_BASE_NAMES = {
+  "Wizard Hat": "wizard",
+  "Chainmail": "thornguard",
+  "Bark Pauldrons": "thornguard",
+  "Windrider Gloves": "windrider",
+  "Windstep Boots": "windrider",
+  // v0.23.6: Wizard Set's 3 remaining armor-slot pieces (weapon/offhand pieces are gated via
+  // the WEAPON/OFFHAND maps above instead); Wizard Hat is dual-purpose (chain-exclusive AND
+  // this set's head piece).
+  "Wizard Robes": "wizard",
+  "Wizard Gloves": "wizard",
+  "Wizard Sash": "wizard",
+};
+// v0.23.6: Set item framework -- mirrors index.html's IF.ITEM_SETS exactly. Only Wizard Set is
+// populated this batch; Thornguard/Windrider are empty stubs per Gwen's "Ship Wizard Set only" call.
+// NOTE: the actual const COMBAT_ITEM_SETS declaration is placed further down, AFTER `const CB`
+// finishes initializing (see the comment there) -- its bonuses array reads CB.WIZARD_SET_*
+// eagerly (template literals evaluated at object-construction time, not lazily like a function
+// body), so declaring it up here at the original insertion point threw "Cannot access 'CB'
+// before initialization" (CB.WIZARD_SET_2PC_MANA_REGEN_PCT etc. weren't defined yet -- CB itself
+// is declared with `const` further down in the file, so referencing it here hit the temporal
+// dead zone). combatSetPieceCandidatesForSlot()/combatEquippedSetCounts()/combatSetBonusesFor()
+// below are ordinary function DECLARATIONS, though -- those don't execute until called (well
+// after CB is fully initialized), so they're safe to leave right here.
+function combatSetPieceCandidatesForSlot(slot) {
+  const out = [];
+  for (const setId in COMBAT_ITEM_SETS) { const bn = COMBAT_ITEM_SETS[setId].pieces[slot]; if (bn) out.push({ set_id: setId, base_name: bn }); }
+  return out;
+}
+// v0.23.6: counts this character's currently-equipped (and equip-VALID, mirroring how
+// combatGearBonus() already excludes under-level/wrong-class gear) pieces per set.
+function combatEquippedSetCounts(data) {
+  const counts = {};
+  const equipped = data.equipped || {};
+  for (const slot of COMBAT_EQUIPPED_SLOT_KEYS) {
+    const inst = equipped[slot];
+    if (!inst || !inst.set_id) continue;
+    if (!combatCanEquipGear(data, inst)) continue;
+    counts[inst.set_id] = (counts[inst.set_id] || 0) + 1;
+  }
+  return counts;
+}
+function combatSetBonusesFor(data, setId) {
+  const def = COMBAT_ITEM_SETS[setId];
+  if (!def) return { count: 0, active: [], def: null };
+  const count = combatEquippedSetCounts(data)[setId] || 0;
+  return { count, active: def.bonuses.filter((b) => b.count <= count), def };
+}
+// v0.23.6: inherent attribute-scaling bonus -- a property of the base item TYPE, identical for
+// every class allowed to equip it (there is no class-conditional here, only the wearer's OWN
+// attribute value differs). inherentBonus = (totalScalingAttr/50) x per50. Stacks additively
+// with any rolled affix of the same stat (see combatGearBonus()). Must stay byte-identical to
+// index.html's IF.INHERENT_SCALING_BY_BASE_NAME.
+const COMBAT_INHERENT_SCALING_BY_BASE_NAME = {
+  "Wizard Hat": { attr: "int", stat: "spell_power", per50: 3 },
+  "Chainmail": { attr: "str", stat: "armor", per50: 4 },
+  "Bark Pauldrons": { attr: "str", stat: "armor", per50: 3 },
+  "Windrider Gloves": { attr: "dex", stat: "attack_speed", per50: 4 },
+  "Windstep Boots": { attr: "dex", stat: "block_chance", per50: 2 },
+};
+function combatInherentScalingFor(inst) { return (inst && inst.base_name) ? (COMBAT_INHERENT_SCALING_BY_BASE_NAME[inst.base_name] || null) : null; }
 const COMBAT_EQUIPPED_SLOT_KEYS = ["weapon", "head", "shoulders", "armor", "pants", "gloves", "boots", "ring1", "ring2", "amulet", "belt", "offhand"];
-const COMBAT_RARITY_TABLE = [{ name: "Common", slots: 1, weight: 60 }, { name: "Uncommon", slots: 2, weight: 25 }, { name: "Rare", slots: 3, weight: 10 }, { name: "Epic", slots: 5, weight: 4 }, { name: "Legendary", slots: 8, weight: 1 }];
+// v0.23.6: "Set" rarity added at the same flat weight as Legendary but fewer affix slots (3,
+// same as Rare) -- see combatGenerateGearItem()'s Set-rarity branch for what actually
+// constrains a roll to a real set piece. Must stay byte-identical to index.html's Balance.RARITY_TABLE.
+const COMBAT_RARITY_TABLE = [{ name: "Common", slots: 1, weight: 60 }, { name: "Uncommon", slots: 2, weight: 25 }, { name: "Rare", slots: 3, weight: 10 }, { name: "Epic", slots: 5, weight: 4 }, { name: "Legendary", slots: 8, weight: 1 }, { name: "Set", slots: 3, weight: 1 }];
 
 // Balance-equivalent constants combat needs, ported verbatim from index.html's Balance
 // object (see that file's own comments for the full rationale behind each number).
@@ -2511,12 +2591,24 @@ const CB = {
   // AREA_DAMAGE_GROWTH's own v0.20.4 comment in index.html for the full rationale, the
   // tier-blended-monster-pool bug this accounts for, and why the late-game multiplier was
   // removed outright instead of re-tuned again. Full methodology in BALANCE_REPORT_v0.20.4.md.
-  AREA_HP_GROWTH: 0.105, AREA_DAMAGE_GROWTH: 0.09, AREA_XP_GROWTH: 0.062,
+  // v0.23.6: second pass -- the one-shot problem was fundamentally a damage problem, so damage
+  // growth is cut further (0.09 -> 0.06) while HP growth is raised (0.105 -> 0.13) to shift
+  // danger from burst kills toward a longer, more tactical attrition fight. Validated against
+  // a Monte-Carlo combat sim (player vs Bramble Knight, per class) before/after; late-game
+  // multiplier stays disabled, do not re-enable it.
+  AREA_HP_GROWTH: 0.13, AREA_DAMAGE_GROWTH: 0.06, AREA_XP_GROWTH: 0.062,
   LATE_GAME_MONSTER_GROWTH_START_LEVEL: 10, LATE_GAME_MONSTER_GROWTH_PER_LEVEL: 0.10,
   // v0.20.4: every point of total Strength grants this much flat Armor, for every class --
   // must stay in sync with Balance.STR_TO_ARMOR_RATIO in index.html (see that constant's
   // comment for the full calibration).
   STR_TO_ARMOR_RATIO: 0.25,
+  // v0.23.6: Wizard Set threshold-bonus magnitudes -- must stay in sync with index.html's
+  // Balance.WIZARD_SET_* constants (see that file's comment for the rationale).
+  WIZARD_SET_2PC_MANA_REGEN_PCT: 5,
+  WIZARD_SET_3PC_SPELL_POWER_PCT: 15,
+  WIZARD_SET_4PC_SPELL_POWER_PCT_PER_MANA: 0.05,
+  WIZARD_SET_6PC_MANA_COST_REDUCTION_PCT: 20,
+  WIZARD_SET_6PC_BONUS_SPELL_SLOTS: 1,
   // v0.22 (batch2 #4): guardians are engage-chosen (the player picks the fight) and are meant
   // to be the hardest encounter in a maze, so they now carry the tougher numbers that used to
   // belong to roamers (including a brand-new damage multiplier -- guardians previously hit at
@@ -2608,6 +2700,28 @@ const CB = {
   // long catch-up loop; any hits beyond this cap are simply resolved on a LATER request
   // instead of all at once.
   MONSTER_CATCH_UP_MAX_HITS: 20,
+};
+
+// v0.23.6: Set item framework -- mirrors index.html's IF.ITEM_SETS exactly. Only Wizard Set is
+// populated this batch; Thornguard/Windrider are empty stubs per Gwen's "Ship Wizard Set only"
+// call. Declared HERE (after CB, not up near COMBAT_WEAPON_TYPE_CLASS_RESTRICTIONS/
+// COMBAT_CHAIN_EXCLUSIVE_BASE_NAMES where the rest of this patch's data tables live) because its
+// bonuses array's template literals read CB.WIZARD_SET_* eagerly at object-construction time --
+// see the comment left at the original insertion point for the full explanation of the crash
+// this avoids.
+const COMBAT_ITEM_SETS = {
+  wizard_set: {
+    display_name: "Wizard's Regalia",
+    pieces: { weapon: "Wizard Wand", offhand: "Wizard Orb", head: "Wizard Hat", armor: "Wizard Robes", gloves: "Wizard Gloves", belt: "Wizard Sash" },
+    bonuses: [
+      { count: 2, desc: `+${CB.WIZARD_SET_2PC_MANA_REGEN_PCT}% Mana Regeneration` },
+      { count: 3, desc: `+${CB.WIZARD_SET_3PC_SPELL_POWER_PCT}% Spell Power` },
+      { count: 4, desc: "Spell damage also scales off Max Mana" },
+      { count: 6, desc: `Spells cost ${CB.WIZARD_SET_6PC_MANA_COST_REDUCTION_PCT}% less Mana, +${CB.WIZARD_SET_6PC_BONUS_SPELL_SLOTS} Spell Slot` },
+    ],
+  },
+  thornguard_set: { display_name: "", pieces: {}, bonuses: [] },
+  windrider_set: { display_name: "", pieces: {}, bonuses: [] },
 };
 
 function cbClampf(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
@@ -2729,10 +2843,25 @@ function combatRollLoot(tableId, mfPct) {
 // other, and both automatically stay valid against validateGearItem() by construction.
 function combatGenerateGearItem(tier, magicFindPct, monsterBand) {
   const chosenSlot = cbPick(ITEM_GENERATION_SLOTS);
-  const baseName = cbPick(COMBAT_BASE_NAMES[chosenSlot] || ["Item"]);
   // v0.22.1 (Part A2d): only monster-kill drops pass a monsterBand (Merchant stock, Gambling
   // Goblin, admin spawn, etc. all still call this with no 3rd arg and get the flat roll).
-  const rarity = monsterBand ? combatRollRarityForBand(monsterBand, magicFindPct) : combatRollRarity(magicFindPct);
+  let rarity = monsterBand ? combatRollRarityForBand(monsterBand, magicFindPct) : combatRollRarity(magicFindPct);
+  // v0.23.6 (Item 4): rarity is now rolled BEFORE baseName -- mirrors index.html's IF.generate()
+  // reorder, since a "Set" rarity roll needs to override baseName selection to pull from
+  // COMBAT_ITEM_SETS. If the slot has no populated set piece (e.g. pants/ring/amulet/boots
+  // aren't Wizard Set slots), fall back to a Legendary roll instead.
+  let baseName = null, setTag = null;
+  if (rarity.name === "Set") {
+    const candidates = combatSetPieceCandidatesForSlot(chosenSlot);
+    if (candidates.length > 0) {
+      const chosen = cbPick(candidates);
+      baseName = chosen.base_name;
+      setTag = { set_id: chosen.set_id, set_slot: chosenSlot };
+    } else {
+      rarity = COMBAT_RARITY_TABLE.find((r) => r.name === "Legendary") || rarity;
+    }
+  }
+  if (!baseName) baseName = cbPick(COMBAT_BASE_NAMES[chosenSlot] || ["Item"]);
   const slotCount = rarity.slots;
   // v0.22.3 (#16): filter to only the affixes legal for this slot BEFORE rolling -- mirrors
   // IF.generate()'s identical filter client-side, so a server-rolled drop can never carry a
@@ -2767,7 +2896,7 @@ function combatGenerateGearItem(tier, magicFindPct, monsterBand) {
   if ((chosenSlot === "head" || chosenSlot === "amulet") && Math.random() < CB.EYESIGHT_AFFIX_CHANCE) {
     affixes.push({ stat: "eyesight", value: 2 });
   }
-  return { instance_id: `srv_${Date.now()}_${Math.floor(Math.random() * 999999)}`, slot: chosenSlot, base_name: baseName, tier, rarity: rarity.name, affixes, element };
+  return { instance_id: `srv_${Date.now()}_${Math.floor(Math.random() * 999999)}`, slot: chosenSlot, base_name: baseName, tier, rarity: rarity.name, affixes, element, ...(setTag ? { set_id: setTag.set_id, set_slot: setTag.set_slot } : {}) };
 }
 
 function combatTierLevelRequirement(tier) { const t = cbClampi(tier, 1, ITEM_TIER_MAX); return Math.max(1, (t - 1) * CB.ITEM_TIER_BRACKET_WIDTH); }
@@ -2791,6 +2920,13 @@ function combatClassCanEquipItem(classId, inst) {
     const list = COMBAT_OFFHAND_TYPE_CLASS_RESTRICTIONS[ot];
     return !list || list.includes(classId);
   }
+  // v0.23.6: class-exclusive armor -- gated by chain, e.g. Wizard Hat requires
+  // COMBAT_CLASSES[classId].chain==="wizard" (wizard/sorcerer/warlock/necromancer/archmage all pass).
+  const requiredChain = COMBAT_CHAIN_EXCLUSIVE_BASE_NAMES[inst.base_name];
+  if (requiredChain) {
+    const c = COMBAT_CLASSES[classId];
+    return !!(c && c.chain === requiredChain);
+  }
   return true;
 }
 function combatCanEquipGear(data, inst) { return (data.level || 1) >= combatTierLevelRequirement(inst.tier) && combatClassCanEquipItem(data.class_id, inst); }
@@ -2804,7 +2940,20 @@ function combatGearBonus(data, stat) {
   const equipped = data.equipped || {};
   for (const slot of COMBAT_EQUIPPED_SLOT_KEYS) {
     const inst = equipped[slot];
-    if (inst && combatCanEquipGear(data, inst)) total += combatAffixTotal(inst, stat);
+    if (inst && combatCanEquipGear(data, inst)) {
+      total += combatAffixTotal(inst, stat);
+      // v0.23.6: class-exclusive armor's inherent attribute-scaling bonus -- same formula for
+      // every wearer, reads THIS character's own attribute (not class-conditional), stacks
+      // additively with any rolled affix of the same stat above. combatGetTotalAttr() is safe
+      // to call here (not infinite recursion): it calls combatGearBonus(data, gearStat) with
+      // gearStat in {"strength","dexterity","vitality","intelligence"} -- a namespace that
+      // never matches an inherent.stat value ("armor"/"spell_power"/"attack_speed"/
+      // "block_chance"), so the nested call's own inherent branch is always a no-op.
+      const inherent = combatInherentScalingFor(inst);
+      if (inherent && inherent.stat === stat) {
+        total += (combatGetTotalAttr(data, inherent.attr) / 50) * inherent.per50;
+      }
+    }
   }
   return total;
 }
@@ -2842,7 +2991,12 @@ function combatGetFleeChanceBonus(data) {
 // divides its combatGearBonus() sum by 100, exactly like combatGetBlockChance()/
 // combatGetFleeChanceBonus() just above. Feeds combatGetSpellEffectivenessMult() below.
 function combatGetSpellPowerPct(data) {
-  return combatGearBonus(data, "spell_power");
+  let pct = combatGearBonus(data, "spell_power");
+  // v0.23.6 (Item 4): Wizard Set 3pc/4pc bonuses -- mirrors index.html's PS.getSpellPowerPct().
+  const wiz = combatSetBonusesFor(data, "wizard_set");
+  if (wiz.count >= 3) pct += CB.WIZARD_SET_3PC_SPELL_POWER_PCT;
+  if (wiz.count >= 4) pct += combatGetMaxMana(data) * CB.WIZARD_SET_4PC_SPELL_POWER_PCT_PER_MANA;
+  return pct;
 }
 // v0.20 (#9.7): Vitality's HP/Stamina contribution is computed LIVE from attributes.vit
 // (see CB.VIT_HP_PER_POINT_RATIO's comment) instead of reading the old bonus_hp_from_
@@ -2893,7 +3047,12 @@ function combatGetStaminaRegen(data) { return combatGearBonus(data, "stamina_reg
 // gear affix -- mirrors combatGetStaminaRegen()'s shape exactly. Ticked in the SAME places
 // (combatTickCombatRoundBuffs() below, once per combat round; index.html's town/maze
 // setInterval, once per real second) so mana regen follows identical town/maze/combat rules.
-function combatGetManaRegen(data) { return CB.MANA_REGEN_PER_SEC + combatGearBonus(data, "mana_regen"); }
+function combatGetManaRegen(data) {
+  let regen = CB.MANA_REGEN_PER_SEC + combatGearBonus(data, "mana_regen");
+  // v0.23.6 (Item 4): Wizard Set 2pc bonus -- mirrors index.html's PS.getManaRegen() (multiplicative).
+  if (combatSetBonusesFor(data, "wizard_set").count >= 2) regen *= (1 + CB.WIZARD_SET_2PC_MANA_REGEN_PCT / 100);
+  return regen;
+}
 // v0.23.0 (Part B1): current_mana is read with the same "|| 0" fallback current_hp/
 // current_stamina already use everywhere, EXCEPT there's no historical save that ever had a
 // real value here -- an old character predating this patch has no `current_mana` field at
@@ -3526,6 +3685,13 @@ const SPELLS = {
   verdant_siphon: { id: "verdant_siphon", name: "Verdant Siphon", price: 900, level_req: 12, mana_cost: 30, cooldown_ms: 6000, effect: "drain", hit_count: 6, hit_min: 5, hit_max: 9, duration_ms: 2000, heal_pct: 0.5 },
 };
 const SPELL_SLOT_COUNT = 2;
+// v0.23.6 (Item 4): Wizard Set 6pc grants +WIZARD_SET_6PC_BONUS_SPELL_SLOTS on top of the flat
+// SPELL_SLOT_COUNT -- mirrors index.html's PS.getEffectiveSpellSlotCount().
+function combatGetEffectiveSpellSlotCount(data) {
+  let n = SPELL_SLOT_COUNT;
+  if (combatSetBonusesFor(data, "wizard_set").count >= 6) n += CB.WIZARD_SET_6PC_BONUS_SPELL_SLOTS;
+  return n;
+}
 
 // Lazy, on-demand settlement of a session's queued Fireflies-style damage-over-time entries --
 // mirrors combatSettleHeal()/combatSettleAllHeals()'s "computed on demand instead of a real
@@ -3615,7 +3781,6 @@ app.post("/api/magician/slot", requireAuth, (req, res) => {
   const slotIndex = Number(req.body?.slot_index);
   const spellId = req.body?.spell_id == null ? null : req.body.spell_id;
   if (!Number.isInteger(slot) || slot < 0 || slot >= MAX_CHARACTER_SLOTS) return res.status(400).json({ error: "Invalid slot." });
-  if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex >= SPELL_SLOT_COUNT) return res.status(400).json({ error: "Invalid spell slot index." });
   if (spellId != null && !SPELLS[spellId]) return res.status(400).json({ error: "Unknown spell." });
 
   const row = db.prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?").get(req.account.id, slot);
@@ -3623,11 +3788,16 @@ app.post("/api/magician/slot", requireAuth, (req, res) => {
   let data;
   try { data = JSON.parse(row.data); } catch (e) { return res.status(500).json({ error: "Corrupt character save." }); }
 
+  // v0.23.6 (Item 4): bound check moved below the data load so it can use the EFFECTIVE slot
+  // count (flat SPELL_SLOT_COUNT + Wizard Set 6pc bonus slot) instead of the flat constant.
+  const effectiveSlotCount = combatGetEffectiveSpellSlotCount(data);
+  if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex >= effectiveSlotCount) return res.status(400).json({ error: "Invalid spell slot index." });
+
   const owned = Array.isArray(data.owned_spells) ? data.owned_spells : [];
   if (spellId != null && !owned.includes(spellId)) return res.status(400).json({ error: "You don't own that spell." });
 
-  const spellSlots = (Array.isArray(data.spell_slots) ? data.spell_slots.slice(0, SPELL_SLOT_COUNT) : []);
-  while (spellSlots.length < SPELL_SLOT_COUNT) spellSlots.push(null);
+  const spellSlots = (Array.isArray(data.spell_slots) ? data.spell_slots.slice(0, effectiveSlotCount) : []);
+  while (spellSlots.length < effectiveSlotCount) spellSlots.push(null);
   spellSlots[slotIndex] = spellId;
   data.spell_slots = spellSlots;
   data._save_seq = (data._save_seq || 0) + 1;
@@ -4190,7 +4360,13 @@ app.post("/api/combat/:sessionId/cast", requireAuth, (req, res) => {
 
   combatSettleAllHeals(data);
   const currentMana = combatGetCurrentMana(data);
-  if (currentMana < spell.mana_cost) return res.status(400).json({ error: "Not enough mana." });
+  // v0.23.6 (Item 4): Wizard Set 6pc bonus -- spells cost WIZARD_SET_6PC_MANA_COST_REDUCTION_PCT%
+  // less mana. Computed once here and reused for both the affordability check and the actual
+  // deduction below, so they can never disagree.
+  const effectiveManaCost = (combatSetBonusesFor(data, "wizard_set").count >= 6)
+    ? Math.round(spell.mana_cost * (1 - CB.WIZARD_SET_6PC_MANA_COST_REDUCTION_PCT / 100))
+    : spell.mana_cost;
+  if (currentMana < effectiveManaCost) return res.status(400).json({ error: "Not enough mana." });
 
   // Settle any already-queued spell DOT ticks (e.g. an earlier Fireflies cast) before this
   // cast layers a new effect on top -- same lazy on-demand pattern combatSettleAllHeals()
@@ -4215,7 +4391,7 @@ app.post("/api/combat/:sessionId/cast", requireAuth, (req, res) => {
   // Everything below only happens once we know the cast will actually resolve: deduct mana,
   // set this spell's cooldown, and increment the B9 spellcasting hit counter -- committed
   // regardless of which effect branch fires next.
-  data.current_mana = currentMana - spell.mana_cost;
+  data.current_mana = currentMana - effectiveManaCost;
   cooldowns[spellId] = now + spell.cooldown_ms;
   const skillResult = combatRegisterSpellcastHit(data);
 

@@ -406,7 +406,7 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 .quest-claim{width:100%;background:linear-gradient(180deg,var(--gold),#b98f30);border:none;color:#241d08;font-weight:bold;padding:8px;border-radius:8px;cursor:pointer;font-size:.9em;box-shadow:0 0 12px rgba(224,178,61,.4);margin-top:10px;}
 .quest-inprog{width:100%;text-align:center;font-size:.8em;color:var(--muted);padding:7px;border:1px dashed var(--border);border-radius:8px;margin-top:10px;}
 .quest-done{width:100%;text-align:center;font-size:.85em;color:var(--good);padding:7px;margin-top:10px;}
-.rarity-Common{color:#9a9686;} .rarity-Uncommon{color:#e8e4d8;} .rarity-Rare{color:#5a9ae0;} .rarity-Epic{color:#e0c94a;} .rarity-Legendary{color:#d9902f;}
+.rarity-Common{color:#9a9686;} .rarity-Uncommon{color:#e8e4d8;} .rarity-Rare{color:#5a9ae0;} .rarity-Epic{color:#e0c94a;} .rarity-Legendary{color:#d9902f;} .rarity-Set{color:#3fbf5f;}
 .plank-btn{min-width:52px;}
 .plank-btn.safe{background:#254a25;color:#9fe89f;border-color:#3a7a3a;}
 .plank-btn.unsafe{background:#4a2020;color:#e89f9f;border-color:#7a3a3a;}
@@ -1493,7 +1493,7 @@ const Balance = {
   
   
   LEVEL_XP_GROWTH:0.11,
-  AREA_LEVEL_MIN:1, AREA_LEVEL_MAX:100, AREA_HP_GROWTH:0.105, AREA_DAMAGE_GROWTH:0.09, AREA_LOOT_GROWTH:0.05,
+  AREA_LEVEL_MIN:1, AREA_LEVEL_MAX:100, AREA_HP_GROWTH:0.13, AREA_DAMAGE_GROWTH:0.06, AREA_LOOT_GROWTH:0.05,
   
   
   
@@ -1833,7 +1833,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.23.5-web",
+  GAME_VERSION:"v0.23.6-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   
@@ -1856,6 +1856,9 @@ const Balance = {
   // slot in the world-lore doc -- placeholder name, easy to swap in one place if a different
   // name is preferred.
   NPC_ELDER_NAME:"Elder Rowan Embertide",
+  // v0.23.6 (Item 5): the Keeper of the Emerald's given name -- last of the naming-pass NPCs
+  // (Blacksmith/Alchemist/Merchant/Goblin/Elder above were all already named in prior passes).
+  NPC_KEEPER_NAME:"Amarald",
   ITEM_TIER_MAX:5, ITEM_STAT_PER_TIER:5, ITEM_TIER_ADJECTIVES:["Withered","Budding","Blooming","Ancient","Eternal"],
   
   
@@ -1964,7 +1967,20 @@ const Balance = {
   
   
   STR_TO_ARMOR_RATIO:0.25,
-  RARITY_TABLE:[{name:"Common",slots:1,weight:60},{name:"Uncommon",slots:2,weight:25},{name:"Rare",slots:3,weight:10},{name:"Epic",slots:5,weight:4},{name:"Legendary",slots:8,weight:1}],
+  // v0.23.6: Wizard Set threshold-bonus magnitudes (design judgment -- the handover proposed
+  // the bonuses' shape, not exact numbers). 4pc's ratio means a Wizard with 200 max mana gets
+  // +10% Spell Power purely from this piece, comparable to a Rare-tier spell_power affix roll.
+  WIZARD_SET_2PC_MANA_REGEN_PCT:5,
+  WIZARD_SET_3PC_SPELL_POWER_PCT:15,
+  WIZARD_SET_4PC_SPELL_POWER_PCT_PER_MANA:0.05,
+  WIZARD_SET_6PC_MANA_COST_REDUCTION_PCT:20,
+  WIZARD_SET_6PC_BONUS_SPELL_SLOTS:1,
+  // v0.23.6: "Set" is a distinct rarity, not a per-item flag -- dropping at the same flat
+  // weight as Legendary (see IF.generate()'s Set-rarity branch, which is what actually
+  // constrains a Set roll to a real set piece or falls it back to Legendary). Deliberately
+  // FEWER affix slots than Legendary (3, same as Rare) since a set piece's power is meant to
+  // come from the set bonus, not its own rolled affixes -- "individual pieces weak alone."
+  RARITY_TABLE:[{name:"Common",slots:1,weight:60},{name:"Uncommon",slots:2,weight:25},{name:"Rare",slots:3,weight:10},{name:"Epic",slots:5,weight:4},{name:"Legendary",slots:8,weight:1},{name:"Set",slots:3,weight:1}],
   
   
   
@@ -1976,7 +1992,7 @@ const Balance = {
   
   
   
-  RARITY_DISPLAY_NAMES:{Common:"Crude", Uncommon:"Common", Rare:"Magical", Epic:"Rare", Legendary:"Legendary"},
+  RARITY_DISPLAY_NAMES:{Common:"Crude", Uncommon:"Common", Rare:"Magical", Epic:"Rare", Legendary:"Legendary", Set:"Set"},
   rarityDisplayName(name){ return this.RARITY_DISPLAY_NAMES[name]!=null ? this.RARITY_DISPLAY_NAMES[name] : name; },
   
   
@@ -2645,12 +2661,12 @@ const IF = {
     
     
     weapon:["Twig Wand","Bramblestaff","Rootcarver","Thornbow","Charwood Axe","Emberbrand","Thornfang","Bramblespike","Quickthorn","Goedendag"],
-    head:["Bramble Circlet","Mosscap","Antlercrown","Leafwood Hood"],
-    shoulders:["Bark Mantle","Rootguard Pauldrons","Thistle Shoulderguard"],
-    armor:["Big Leaf Wrap","Bark Plate","Mosscloak","Reedmail","Ashen Hide"],
+    head:["Bramble Circlet","Mosscap","Antlercrown","Leafwood Hood","Wizard Hat"],
+    shoulders:["Bark Mantle","Rootguard Pauldrons","Thistle Shoulderguard","Bark Pauldrons"],
+    armor:["Big Leaf Wrap","Bark Plate","Mosscloak","Reedmail","Ashen Hide","Chainmail"],
     pants:["Root-woven Leggings","Bark Greaves","Vine Trousers"],
-    gloves:["Thornweave Gloves","Barkgrip Gauntlets","Mossback Handwraps"],
-    boots:["Rootstep Boots","Mossy Treads","Bramblehide Boots"],
+    gloves:["Thornweave Gloves","Barkgrip Gauntlets","Mossback Handwraps","Windrider Gloves"],
+    boots:["Rootstep Boots","Mossy Treads","Bramblehide Boots","Windstep Boots"],
     ring:["Acorn Ring","Petal Ring","Vinewrought Ring"],
     amulet:["Emberstone Pendant","Driftwood Amulet","Heartwood Talisman"],
     belt:["Vine Cinch","Barkweave Belt","Root Sash"],
@@ -2670,13 +2686,19 @@ const IF = {
 
 
 
-  WEAPON_TYPE_BY_BASE_NAME:{"Twig Wand":"wand","Bramblestaff":"staff","Rootcarver":"sword","Thornbow":"bow","Charwood Axe":"axe","Emberbrand":"sword","Thornfang":"dagger","Bramblespike":"dagger","Quickthorn":"dagger","Goedendag":"dagger"},
+  // v0.23.6: "Wizard Wand" added -- the Wizard Set's weapon piece. It's still just a "wand"
+  // TYPE (same class-access list as Twig Wand), not a NEW restriction -- Item 4's set gating
+  // is "this base_name is only ever generated as part of ITEM_SETS.wizard_set", not a second
+  // equip-restriction layer on top of the existing wand list.
+  WEAPON_TYPE_BY_BASE_NAME:{"Twig Wand":"wand","Bramblestaff":"staff","Rootcarver":"sword","Thornbow":"bow","Charwood Axe":"axe","Emberbrand":"sword","Thornfang":"dagger","Bramblespike":"dagger","Quickthorn":"dagger","Goedendag":"dagger","Wizard Wand":"wand"},
   WEAPON_TYPE_LIST:["wand","staff","sword","axe","bow","dagger"],
   WEAPON_TYPE_LABELS:{wand:"Wand",staff:"Staff",sword:"Sword",axe:"Axe",bow:"Bow",dagger:"Dagger"},
   weaponTypeForInstance(inst){ return (inst&&inst.base_name) ? (this.WEAPON_TYPE_BY_BASE_NAME[inst.base_name]||null) : null; },
   // v0.22.6 (#11-14): offhand analogue of WEAPON_TYPE_BY_BASE_NAME/weaponTypeForInstance --
   // must stay byte-identical to server.js's COMBAT_OFFHAND_TYPE_BY_BASE_NAME.
-  OFFHAND_TYPE_BY_BASE_NAME:{"Bramble Buckler":"shield","Rootwood Shield":"shield","Bark Aegis":"shield","Moonpetal Orb":"orb","Emberheart Orb":"orb","Wisp-Light Orb":"orb"},
+  // v0.23.6: "Wizard Orb" added -- the Wizard Set's offhand piece, same "orb" TYPE (not a new
+  // restriction layer) as the existing 3 orbs, per the same reasoning as Wizard Wand above.
+  OFFHAND_TYPE_BY_BASE_NAME:{"Bramble Buckler":"shield","Rootwood Shield":"shield","Bark Aegis":"shield","Moonpetal Orb":"orb","Emberheart Orb":"orb","Wisp-Light Orb":"orb","Wizard Orb":"orb"},
   OFFHAND_TYPE_LABELS:{shield:"Shield",orb:"Orb"},
   offhandTypeForInstance(inst){ return (inst&&inst.base_name) ? (this.OFFHAND_TYPE_BY_BASE_NAME[inst.base_name]||null) : null; },
 
@@ -2689,12 +2711,12 @@ const IF = {
 
 
   WEAPON_TYPE_CLASS_RESTRICTIONS:{
-    wand:["wizard","sorcerer"],
-    staff:["warlock","rootbinder","druid"],
-    sword:["thornguard","stonewarden","treesinger","galestrider"],
-    axe:["thornguard","stonewarden","rootbinder","windrider","galestrider","galeshaper"],
-    bow:["windrider","galestrider","treesinger"],
-
+    wand:["wizard","sorcerer","archmage","emberpriest","shadowbloom"],
+    staff:["wizard","sorcerer","necromancer","archmage","rootbinder","druid"],
+    sword:["thornguard","stonewarden","treesinger","galestrider","shadowbloom","druid"],
+    axe:["warlock","thornguard","stonewarden","windrider","galeshaper"],
+    bow:["treesinger","emberpriest","windrider","galestrider"],
+    dagger:["warlock","necromancer","rootbinder","galeshaper"],
   },
   // v0.22.6 (#13): Orb is restricted to the wizard chain (wizard/sorcerer/warlock/necromancer/
   // archmage) plus emberpriest and druid, per spec; Shield has no entry here at all (same
@@ -2703,6 +2725,99 @@ const IF = {
   // COMBAT_OFFHAND_TYPE_CLASS_RESTRICTIONS.
   OFFHAND_TYPE_CLASS_RESTRICTIONS:{
     orb:["wizard","sorcerer","warlock","necromancer","archmage","emberpriest","druid"],
+  },
+  // v0.23.6: class-exclusive armor -- gated by CHAIN (any tier of that chain can equip it),
+  // not a single class, so a base item's legality is CLASSES[classId].chain==="wizard"/etc.
+  // rather than a hardcoded id list. Must stay byte-identical to server.js's
+  // COMBAT_CHAIN_EXCLUSIVE_BASE_NAMES.
+  CHAIN_EXCLUSIVE_BASE_NAMES:{
+    "Wizard Hat":"wizard",
+    "Chainmail":"thornguard",
+    "Bark Pauldrons":"thornguard",
+    "Windrider Gloves":"windrider",
+    "Windstep Boots":"windrider",
+    // v0.23.6: Wizard Set's 3 remaining armor-slot pieces (weapon/offhand pieces are gated via
+    // the WEAPON/OFFHAND_TYPE_CLASS_RESTRICTIONS maps instead, see WEAPON_TYPE_BY_BASE_NAME/
+    // OFFHAND_TYPE_BY_BASE_NAME above); Wizard Hat above is dual-purpose (chain-exclusive AND
+    // this set's head piece).
+    "Wizard Robes":"wizard",
+    "Wizard Gloves":"wizard",
+    "Wizard Sash":"wizard",
+  },
+  classesForChain(chain){ return Object.keys(CLASSES).filter(id=>CLASSES[id].chain===chain); },
+  // v0.23.6: inherent attribute-scaling bonus -- a property of the base item TYPE, identical
+  // for every class allowed to equip it (there is no class-conditional here, only the
+  // wearer's OWN attribute value differs). inherentBonus = (totalScalingAttr/50) x per50.
+  // Stacks additively with any rolled affix of the same stat (see PlayerState.gearBonus()).
+  // Must stay byte-identical to server.js's COMBAT_INHERENT_SCALING_BY_BASE_NAME.
+  INHERENT_SCALING_BY_BASE_NAME:{
+    "Wizard Hat":{attr:"int", stat:"spell_power", per50:3},
+    "Chainmail":{attr:"str", stat:"armor", per50:4},
+    "Bark Pauldrons":{attr:"str", stat:"armor", per50:3},
+    "Windrider Gloves":{attr:"dex", stat:"attack_speed", per50:4},
+    "Windstep Boots":{attr:"dex", stat:"block_chance", per50:2},
+  },
+  inherentScalingFor(inst){ return (inst&&inst.base_name) ? (this.INHERENT_SCALING_BY_BASE_NAME[inst.base_name]||null) : null; },
+
+  // v0.23.6: Set item framework -- "one set per chain (3 total)", only Wizard Set populated
+  // this batch (Thornguard/Windrider are empty stubs per Gwen's "Ship Wizard Set only" call).
+  // pieces maps EQUIPPED_SLOT_KEYS-style slot -> the exact base_name that IS that set's piece
+  // for that slot (weapon/offhand pieces are gated by the normal WEAPON/OFFHAND_TYPE_CLASS_
+  // RESTRICTIONS maps below; armor-slot pieces are gated via CHAIN_EXCLUSIVE_BASE_NAMES like
+  // Item 3's class-exclusive armor). bonuses are threshold-gated (count<=equipped -> active),
+  // not tier-exclusive, so hitting 4pc keeps the 2pc/3pc bonuses active too.
+  ITEM_SETS:{
+    wizard_set:{
+      display_name:"Wizard's Regalia",
+      pieces:{weapon:"Wizard Wand", offhand:"Wizard Orb", head:"Wizard Hat", armor:"Wizard Robes", gloves:"Wizard Gloves", belt:"Wizard Sash"},
+      bonuses:[
+        {count:2, desc:`+${Balance.WIZARD_SET_2PC_MANA_REGEN_PCT}% Mana Regeneration`},
+        {count:3, desc:`+${Balance.WIZARD_SET_3PC_SPELL_POWER_PCT}% Spell Power`},
+        {count:4, desc:"Spell damage also scales off Max Mana"},
+        {count:6, desc:`Spells cost ${Balance.WIZARD_SET_6PC_MANA_COST_REDUCTION_PCT}% less Mana, +${Balance.WIZARD_SET_6PC_BONUS_SPELL_SLOTS} Spell Slot`},
+      ],
+    },
+    // v0.23.6: intentionally empty -- compositions/bonus ladders pending Gwen's call per the
+    // handover's §4/§7 (Thornguard's exclusive 2nd armor slot is Bark Pauldrons, Windrider's
+    // is Windstep Boots, both already locked by Item 3, so these can be authored on request).
+    thornguard_set:{display_name:"", pieces:{}, bonuses:[]},
+    windrider_set:{display_name:"", pieces:{}, bonuses:[]},
+  },
+  // v0.23.6: reverse lookup -- which set (if any) a given base_name belongs to, and which slot
+  // of that set it fills.
+  setDefForBaseName(baseName){
+    for(const setId in this.ITEM_SETS){
+      const def=this.ITEM_SETS[setId];
+      for(const slotKey in def.pieces){ if(def.pieces[slotKey]===baseName) return {set_id:setId, set_slot:slotKey, def}; }
+    }
+    return null;
+  },
+  // v0.23.6: every populated set's piece (if any) for a given generation slot -- used by
+  // generate() to pick a real set piece when a "Set" rarity roll lands on this slot.
+  setPieceCandidatesForSlot(slot){
+    const out=[];
+    for(const setId in this.ITEM_SETS){ const bn=this.ITEM_SETS[setId].pieces[slot]; if(bn) out.push({set_id:setId, base_name:bn}); }
+    return out;
+  },
+  // v0.23.6: counts this character's currently-EQUIPPED (and equip-VALID, mirroring how
+  // gearBonus() already excludes under-level/wrong-class gear from affix totals) pieces per
+  // set, then resolves which threshold bonuses are active for a given set. Called fresh each
+  // time rather than cached, same pattern as gearBonus() itself.
+  equippedSetCounts(){
+    const counts={};
+    for(const slot of this.EQUIPPED_SLOT_KEYS){
+      const inst=PS.equipped[slot];
+      if(!inst || !inst.set_id) continue;
+      if(!PS.canEquipGear(inst)) continue;
+      counts[inst.set_id]=(counts[inst.set_id]||0)+1;
+    }
+    return counts;
+  },
+  setBonusesFor(setId){
+    const def=this.ITEM_SETS[setId];
+    if(!def) return {count:0, active:[], def:null};
+    const count=this.equippedSetCounts()[setId]||0;
+    return {count, active:def.bonuses.filter(b=>b.count<=count), def};
   },
 
 
@@ -2735,6 +2850,10 @@ const IF = {
     // v0.22.6 (#13): mirrors the weapon branch above, gating Orb to the wizard chain +
     // emberpriest/druid while Shield (no OFFHAND_TYPE_CLASS_RESTRICTIONS entry) stays open to all.
     if(inst.slot==="offhand") return this.classCanUseOffhandType(classId, this.offhandTypeForInstance(inst));
+    // v0.23.6: class-exclusive armor -- gated by chain, e.g. Wizard Hat requires
+    // CLASSES[classId].chain==="wizard" (wizard/sorcerer/warlock/necromancer/archmage all pass).
+    const requiredChain=this.CHAIN_EXCLUSIVE_BASE_NAMES[inst.base_name];
+    if(requiredChain) return !!(CLASSES[classId] && CLASSES[classId].chain===requiredChain);
     return true;
   },
 
@@ -2770,11 +2889,24 @@ const IF = {
   generate(tier, slot="", forcedRarityName=""){
     let chosenSlot=slot;
     if(!chosenSlot||!this.BASE_NAMES[chosenSlot]) chosenSlot=pick(this.GENERATION_SLOTS);
-    const baseName=pick(this.BASE_NAMES[chosenSlot]||["Item"]);
-    
-    
-    
-    const rarity=forcedRarityName ? (Balance.RARITY_TABLE.find(r=>r.name===forcedRarityName)||Balance.rollRarity()) : Balance.rollRarity(PS.getMagicFind());
+    let rarity=forcedRarityName ? (Balance.RARITY_TABLE.find(r=>r.name===forcedRarityName)||Balance.rollRarity()) : Balance.rollRarity(PS.getMagicFind());
+    // v0.23.6: a "Set" rarity roll must produce an actual set piece, not a random base name
+    // painted green -- pick from whichever populated set(s) have a piece for this exact slot.
+    let baseName=null, setTag=null;
+    if(rarity.name==="Set"){
+      const candidates=this.setPieceCandidatesForSlot(chosenSlot);
+      if(candidates.length>0){
+        const chosen=pick(candidates);
+        baseName=chosen.base_name;
+        setTag={set_id:chosen.set_id, set_slot:chosenSlot};
+      } else {
+        // v0.23.6: this slot isn't part of any populated set (e.g. pants/ring/amulet aren't
+        // Wizard Set slots) -- fall back to Legendary so the roll still produces a real item
+        // instead of silently wasting the roll.
+        rarity=Balance.RARITY_TABLE.find(r=>r.name==="Legendary")||rarity;
+      }
+    }
+    if(!baseName) baseName=pick(this.BASE_NAMES[chosenSlot]||["Item"]);
     const slotCount=rarity.slots;
     // v0.22.3 (#16): filter to only the affixes legal for this slot BEFORE rolling -- this is
     // what stops nonsense like armor rolling onto a weapon. Falls back to the full pool if a
@@ -2817,7 +2949,7 @@ const IF = {
     if((chosenSlot==="head"||chosenSlot==="amulet") && Math.random()<Balance.EYESIGHT_AFFIX_CHANCE){
       affixes.push({stat:"eyesight", value:2});
     }
-    return {instance_id:`${Date.now()}_${randi(999999)}`, slot:chosenSlot, base_name:baseName, tier, rarity:rarity.name, affixes, element};
+    return {instance_id:`${Date.now()}_${randi(999999)}`, slot:chosenSlot, base_name:baseName, tier, rarity:rarity.name, affixes, element, ...(setTag?{set_id:setTag.set_id, set_slot:setTag.set_slot}:{})};
   },
   displayName(inst){
     const rarityLabel=Balance.rarityDisplayName(inst.rarity);
@@ -2926,20 +3058,37 @@ const IF = {
     
     const weaponType=this.weaponTypeForInstance(inst);
     const offhandType=this.offhandTypeForInstance(inst);
+    const chainRestriction=this.CHAIN_EXCLUSIVE_BASE_NAMES[inst.base_name];
     // v0.22.6 (#13): mirrors the weapon-type restriction line just above for an Orb off-hand.
-    const restrictedTo=weaponType?this.WEAPON_TYPE_CLASS_RESTRICTIONS[weaponType]:(offhandType?this.OFFHAND_TYPE_CLASS_RESTRICTIONS[offhandType]:null);
+    // v0.23.6: class-exclusive armor (Wizard Hat, Chainmail, etc.) is restricted by CHAIN --
+    // every class in that chain is listed, not just one.
+    const restrictedTo=weaponType?this.WEAPON_TYPE_CLASS_RESTRICTIONS[weaponType]:(offhandType?this.OFFHAND_TYPE_CLASS_RESTRICTIONS[offhandType]:(chainRestriction?this.classesForChain(chainRestriction):null));
     if(restrictedTo) lines.push(`Class: ${restrictedTo.map(id=>DL.getClass(id).display_name||id).join(", ")}`);
-    
-    
-    
-    
-    
-    
-    
-    
-    
+    // v0.23.6: inherent attribute-scaling line -- reflects the CURRENT wearer (this viewing
+    // character), not a fixed value baked into the item, since the same item reads whoever's
+    // wearing it. Shown even if this particular tooltip viewer can't equip the item, same as
+    // the "Class:" line above.
+    const inherent=this.inherentScalingFor(inst);
+    if(inherent){
+      const attrLabels={str:"Strength",dex:"Dexterity",vit:"Vitality",int:"Intelligence"};
+      const attrVal=PS.getTotalAttr(inherent.attr);
+      const bonusVal=(attrVal/50)*inherent.per50;
+      const bonusStr=this.affixIsPercent(inherent.stat)?`+${trimDecimal(bonusVal)}% ${this.affixLabel(inherent.stat)}`:`+${trimDecimal(bonusVal)} ${this.affixLabel(inherent.stat)}`;
+      lines.push(`${bonusStr} (from ${Math.round(attrVal)} ${attrLabels[inherent.attr]})`);
+    }
     if(inst.affixes && inst.affixes.length>0) lines.push("───────────────");
     for(const a of inst.affixes) lines.push(this.formatAffix(a,inst));
+    // v0.23.6: Set item framework -- shows the set's full bonus ladder even at 0-1 pieces
+    // equipped (aspirational per Gwen's spec), with active thresholds marked distinctly from
+    // locked ones. equippedSetCounts() only counts THIS character's own equip-valid pieces,
+    // so this line is meaningful even when tooltipping someone else's/an unequipped item.
+    if(inst.set_id && this.ITEM_SETS[inst.set_id]){
+      const def=this.ITEM_SETS[inst.set_id];
+      const count=this.equippedSetCounts()[inst.set_id]||0;
+      lines.push("───────────────");
+      lines.push(`Set: ${def.display_name} (${count}/${Object.keys(def.pieces).length})`);
+      for(const b of def.bonuses) lines.push(`${b.count<=count?"✓":"○"} (${b.count}) ${b.desc}`);
+    }
     return lines.join("\n");
   },
   affixSummary(inst){
@@ -3888,10 +4037,26 @@ const PS = {
   // combatGetSpellEffectivenessMult() exactly, used here only for client-side display
   // previews (Magician tooltip, etc.); the server is always the authority on the actual
   // resolved cast amount.
-  getSpellPowerPct(){ return this.gearBonus("spell_power"); },
+  // v0.23.6: Wizard Set 3pc (+WIZARD_SET_3PC_SPELL_POWER_PCT flat) and 4pc (spell damage also
+  // scales off max mana, expressed here as more spell_power% -- see the WIZARD_SET_4PC_* ratio
+  // constant's comment) both stack additively into this same total, same as a rolled affix would.
+  getSpellPowerPct(){
+    let pct=this.gearBonus("spell_power");
+    const wiz=IF.setBonusesFor("wizard_set");
+    if(wiz.count>=3) pct+=Balance.WIZARD_SET_3PC_SPELL_POWER_PCT;
+    if(wiz.count>=4) pct+=this.getMaxMana()*Balance.WIZARD_SET_4PC_SPELL_POWER_PCT_PER_MANA;
+    return pct;
+  },
   getSpellEffectivenessMult(){ return 1 + this.getSpellPowerPct()/100 + this.getSpellcastingSkillLevel()*Balance.WEAPON_SKILL_DAMAGE_PCT_PER_LEVEL; },
   ownsSpell(spellId){ return (this.owned_spells||[]).includes(spellId); },
-  getSpellSlots(){ const s=(this.spell_slots||[]).slice(0,Balance.SPELL_SLOT_COUNT); while(s.length<Balance.SPELL_SLOT_COUNT) s.push(null); return s; },
+  // v0.23.6: Wizard Set 6pc grants +WIZARD_SET_6PC_BONUS_SPELL_SLOTS on top of the flat
+  // Balance.SPELL_SLOT_COUNT every class starts with.
+  getEffectiveSpellSlotCount(){
+    let n=Balance.SPELL_SLOT_COUNT;
+    if(IF.setBonusesFor("wizard_set").count>=6) n+=Balance.WIZARD_SET_6PC_BONUS_SPELL_SLOTS;
+    return n;
+  },
+  getSpellSlots(){ const n=this.getEffectiveSpellSlotCount(); const s=(this.spell_slots||[]).slice(0,n); while(s.length<n) s.push(null); return s; },
   getHerbalismPoints(){ return this.herbalism_points||0; },
   getHerbalismLevel(){ return Balance.herbalismLevelForPoints(this.getHerbalismPoints()); },
   
@@ -3966,16 +4131,23 @@ const PS = {
     let total=0;
     for(const slot of IF.EQUIPPED_SLOT_KEYS){
       const inst=this.equipped[slot];
-      
-      
-      
-      
-      
-      
-      
-      
-      
-      if(inst && this.canEquipGear(inst)) total+=IF.affixTotal(inst,stat);
+
+
+
+
+
+
+
+
+
+      if(inst && this.canEquipGear(inst)){
+        total+=IF.affixTotal(inst,stat);
+        // v0.23.6: class-exclusive armor's inherent attribute-scaling bonus -- same formula
+        // for every wearer, reads THIS character's own attribute (not class-conditional),
+        // and stacks additively with any rolled affix of the same stat above.
+        const inherent=IF.inherentScalingFor(inst);
+        if(inherent && inherent.stat===stat) total+=(this.getTotalAttr(inherent.attr)/50)*inherent.per50;
+      }
     }
     return total;
   },
@@ -4675,7 +4847,14 @@ const PS = {
   },
   // v0.23.0 (Part B2): CB.MANA_REGEN_PER_SEC-equivalent (Balance.MANA_REGEN_PER_SEC) plus the
   // "mana_regen" gear affix -- mirrors getStaminaRegen() below/getRegen() exactly.
-  getManaRegen(){ return Balance.MANA_REGEN_PER_SEC + this.gearBonus("mana_regen"); },
+  // v0.23.6: Wizard Set 2pc -- multiplicative +5% on the TOTAL regen rate (base + gear), not a
+  // separate additive term, so it scales with however much mana_regen the character has already
+  // stacked from gear.
+  getManaRegen(){
+    let regen=Balance.MANA_REGEN_PER_SEC + this.gearBonus("mana_regen");
+    if(IF.setBonusesFor("wizard_set").count>=2) regen*=(1+Balance.WIZARD_SET_2PC_MANA_REGEN_PCT/100);
+    return regen;
+  },
   bestAvailableConsumable(kind){
     const field=({health:"heal_amount",stamina:"stamina_amount",mana:"mana_amount"})[kind]||"heal_amount";
     let bestId="", bestAmt=-1;
@@ -6331,7 +6510,7 @@ function spellSlotIconRow(){
     const spell=spellId?Balance.SPELLS[spellId]:null;
     const badge=spellIcon(spellId,24);
     badge.classList.add("tooltip");
-    badge.setAttribute("data-tip", spell?`Spell Slot ${i+1}: ${spell.name} (${getKeyboardShortcuts()[i===0?"spellSlot1":"spellSlot2"].toUpperCase()})`:`Spell Slot ${i+1}: empty. Visit Thistlewick, the Hollow Magus to learn and slot a spell.`);
+    badge.setAttribute("data-tip", spell?`Spell Slot ${i+1}: ${spell.name} (${getKeyboardShortcuts()[SPELL_SLOT_SHORTCUT_KEYS[i]||"spellSlot1"].toUpperCase()})`:`Spell Slot ${i+1}: empty. Visit Thistlewick, the Hollow Magus to learn and slot a spell.`);
     return badge;
   }));
 }
@@ -7071,7 +7250,7 @@ function hallOfHeroesEntryTile(entry,isVictor){
 function screenHallOfHeroes(){
   const root=h("div",{});
   root.appendChild(h("h2",{},["Hall of Heroes"]));
-  root.appendChild(h("div",{class:"lore"},["Every traveler who has stood before the Keeper of the Emerald and made their choice, remembered here either way."]));
+  root.appendChild(h("div",{class:"lore"},[`Every traveler who has stood before ${Balance.NPC_KEEPER_NAME}, Keeper of the Emerald, and made their choice, remembered here either way.`]));
   root.appendChild(h("button",{style:{marginBottom:"10px"},onClick:()=>GF.goto("mainMenuSlots")},["← Back"]));
 
   if(GF.hallOfHeroesTab==null) GF.hallOfHeroesTab="healers";
@@ -9027,7 +9206,13 @@ const KEYBOARD_SHORTCUT_STORAGE_KEY="wandrian_keyboard_shortcuts";
 // v0.23.0 (Part B3): "l" was verified unused by any other keyboard shortcut default (c/v/h/j/k
 // above) and by both fixed movement schemes (WASD/ZQSD, see KEYBIND_SCHEMES above) before being
 // picked for the new Mana Potion hotkey.
-const KEYBOARD_SHORTCUT_DEFAULTS={characterSheet:"c", venture:"v", healthPotion:"h", staminaPotion:"j", antidote:"k", manaPotion:"l", spellSlot1:"q", spellSlot2:"e"};
+// v0.23.6: spellSlot3 added -- only reachable at Wizard Set 6pc (PS.getEffectiveSpellSlotCount()),
+// but a default lives here unconditionally like every other binding (Settings just doesn't gate
+// rows on unlocked content elsewhere either).
+const KEYBOARD_SHORTCUT_DEFAULTS={characterSheet:"c", venture:"v", healthPotion:"h", staminaPotion:"j", antidote:"k", manaPotion:"l", spellSlot1:"q", spellSlot2:"e", spellSlot3:"r"};
+// v0.23.6: ordered lookup so spell-slot tooltip/label code can index by slot position instead
+// of hardcoding a 2-way ternary that silently mislabels a 3rd slot as slot 2's own hotkey.
+const SPELL_SLOT_SHORTCUT_KEYS=["spellSlot1","spellSlot2","spellSlot3"];
 function getKeyboardShortcuts(){
   let parsed=null;
   try{ parsed=JSON.parse(Storage_.getItem(KEYBOARD_SHORTCUT_STORAGE_KEY)||"null"); }catch(e){ parsed=null; }
@@ -9151,6 +9336,10 @@ function screenSettings(){
     // no-op with a toast if that slot is empty.
     keyboardShortcutRow("spellSlot1","Cast Spell Slot 1","Casts whichever spell is in your first spell slot. Only works in combat."),
     keyboardShortcutRow("spellSlot2","Cast Spell Slot 2","Casts whichever spell is in your second spell slot. Only works in combat."),
+    // v0.23.6: 3rd spell slot only exists with Wizard Set 6pc equipped -- the row still shows
+    // unconditionally (Settings doesn't gate other rows on unlocked content either), it's just
+    // inert until then.
+    keyboardShortcutRow("spellSlot3","Cast Spell Slot 3","Casts whichever spell is in your third spell slot (Wizard Set 6-piece bonus). Only works in combat."),
   ]));
   return root;
 }
@@ -9223,6 +9412,9 @@ window.addEventListener("keydown",(e)=>{
     // same way as H/J/K/L just above, only ever active while GF.screen==="combat".
     if(keyLower===shortcuts.spellSlot1){ e.preventDefault(); GF._combatUI.castSpell1(); return; }
     if(keyLower===shortcuts.spellSlot2){ e.preventDefault(); GF._combatUI.castSpell2(); return; }
+    // v0.23.6: 3rd spell slot hotkey, only meaningful with Wizard Set 6pc active (an empty
+    // slot is a no-op toast, same as slots 1/2 already handle via castSlotted()).
+    if(keyLower===shortcuts.spellSlot3){ e.preventDefault(); GF._combatUI.castSpell3(); return; }
     return;
   }
 
@@ -10298,7 +10490,7 @@ function screenCombat(){
     const size=64;
     const badge=spellIcon(spellId,size);
     badge.classList.add("tooltip");
-    const keyLabel=getKeyboardShortcuts()[slotIndex===0?"spellSlot1":"spellSlot2"].toUpperCase();
+    const keyLabel=getKeyboardShortcuts()[SPELL_SLOT_SHORTCUT_KEYS[slotIndex]||"spellSlot1"].toUpperCase();
     badge.setAttribute("data-tip", spell?`${spell.name} (${keyLabel} to cast)\n${spellShopSubtext(spellId)}`:`Spell Slot ${slotIndex+1}: empty. Visit Thistlewick, the Hollow Magus to learn and slot a spell.`);
     // v0.23.1 (#6): purely a client-side ESTIMATE for this visual -- GF.spellCooldownUntil is
     // stamped from "now + this spell's own cooldown_ms" the instant castSpellInCombat() sees a
@@ -10343,6 +10535,8 @@ function screenCombat(){
     // if that slot is empty, exactly like castSlotted() itself already guards.
     castSpell1:()=>castSlotted(0),
     castSpell2:()=>castSlotted(1),
+    // v0.23.6: 3rd slot, only populated once PS.getEffectiveSpellSlotCount()>=3 (Wizard Set 6pc).
+    castSpell3:()=>castSlotted(2),
     attemptFlee:attemptFlee,
   };
   return root;
@@ -12579,7 +12773,10 @@ function magicianSpellCard(spellId){
       actions.push(h("span",{class:"muted"},[`Slotted in ${slottedAt+1}`]));
       actions.push(h("button",{disabled:busy,onClick:(e)=>{ e.stopPropagation(); magicianSlotSpell(slottedAt,null); }},["Unslot"]));
     } else {
-      for(let i=0;i<Balance.SPELL_SLOT_COUNT;i++){
+      // v0.23.6: iterates PS.getEffectiveSpellSlotCount() (2, or 3 with Wizard Set 6pc active)
+      // instead of the flat Balance.SPELL_SLOT_COUNT, so a 6pc Wizard actually gets a "Slot in
+      // 3" button here.
+      for(let i=0;i<PS.getEffectiveSpellSlotCount();i++){
         actions.push(h("button",{disabled:busy,onClick:(e)=>{ e.stopPropagation(); magicianSlotSpell(i,spellId); }},[`Slot in ${i+1}`]));
       }
     }
@@ -12629,7 +12826,7 @@ function screenMagician(){
   root.appendChild(h("button",{style:{marginBottom:"8px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
   const t=toastBox(); if(t) root.appendChild(t);
 
-  root.appendChild(h("div",{class:"muted",style:{marginBottom:"10px",fontSize:".9em"}},[`Every class can learn and slot every spell. You have ${Balance.SPELL_SLOT_COUNT} spell slots, shown below your mana bar and usable in combat with your Q/E hotkeys (configurable in Settings).`]));
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"10px",fontSize:".9em"}},[`Every class can learn and slot every spell. You have ${PS.getEffectiveSpellSlotCount()} spell slots, shown below your mana bar and usable in combat with your Q/E hotkeys (configurable in Settings).`]));
 
   // v0.23.1 (#3): card grid instead of a plain row list -- same responsive
   // repeat(auto-fill,minmax(...)) technique as screenGraveyard()'s tile grid.
@@ -13301,6 +13498,9 @@ function screenKeeperChoice(){
     h("div",{},["You stand at the heart of the world. The corruption is broken, the forest breathes."]),
     h("div",{style:{marginTop:"10px"}},["Before you lies the Emerald, the stone that keeps balance. And beside it, the Crown, a symbol of your triumph, your victory, your name remembered forever."]),
     h("div",{style:{marginTop:"10px"}},[h("i",{},[`"You have climbed higher than any before. Now choose: will you heal the world, or claim it?"`])]),
+    // v0.23.6 (Item 5): NPC naming pass -- gives the Keeper a proper name (mirrors the camp
+    // Elder's own italic-signature line on the Create Your Hero screen).
+    h("div",{class:"muted",style:{marginTop:"8px",fontStyle:"italic"}},[`${Balance.NPC_KEEPER_NAME}, Keeper of the Emerald`]),
   ]));
 
   const t=toastBox(); if(t) root.appendChild(t);
@@ -13856,6 +14056,13 @@ function legacyGearSection(){
 
 
 const CHANGELOG=[
+  { version:"v0.23.6", date:"2026-08-03 15:15", notes:[
+    "Rebalanced monster scaling: monster HP now grows a bit faster with area level while monster damage grows more slowly, so fights at higher levels last longer without hitting as hard per swing.",
+    "Reworked weapon access: every class now uses exactly two weapon types (instead of some classes having far more options than others), and the Dagger is no longer usable by every class, it's now restricted like every other weapon type. Check the Itemization Guide's Weapon Class Requirements table for your class's two types.",
+    "Added class-exclusive armor: a small number of armor pieces are now gated to a specific class chain (any tier within that chain can equip them) and carry an inherent attribute bonus tied to their base type, on top of their normal rolled affixes.",
+    "New item framework: Set items. Sets are a new rarity tier with a fixed group of pieces that grant extra bonuses the more of the set you have equipped. The first is the Wizard's Regalia (six pieces), granting bonuses at two, three, four, and all six pieces equipped, including a third spell slot at the full set.",
+    "The Keeper of the Emerald now has a name: Amarald.",
+  ]},
   { version:"v0.23.5", date:"2026-08-03 14:14", notes:[
     "New endgame feature: the Keeper of the Emerald. Any character who reaches Level 100 as a Tier-5 class, and has climbed all the way to Ashveil Sanctum, may seek an audience with the Keeper there for a permanent, one-time choice. Choosing the Emerald plants it at the heart of the restored forest and earns you the Protector title; claiming the Crown of Victory instead grants a large gold reward, but the corruption seeps back into the world. Every eligible character can make this choice for themselves, not just the first to arrive.",
     "New public Hall of Heroes page (linked from the main menu), listing every character who has ever stood before the Keeper, split into a Hall of Healers and a Hall of Victors.",
