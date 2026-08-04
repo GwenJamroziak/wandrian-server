@@ -228,6 +228,55 @@ a.back-link,.linklike{color:#cbd9a0;cursor:pointer;text-decoration:underline;}
 .mz-roamer-aura{position:absolute;width:calc(34px * 1.5);height:calc(34px * 1.5);border-radius:50%;
   left:50%;top:50%;transform:translate(-50%,-50%);animation:mztorchpulse 2.4s ease-in-out infinite;}
 
+/* v0.24: Class walkers -- 15 per-class maze figures replacing the single hooded-traveler
+   MAZE_PLAYER_SVG. Ported from the approved wandrian_class_walkers.html concept gallery: a
+   compact CSS-limb rig (.mzw-*) at the gallery's native 70x100 size, scaled down to fit the
+   34px maze tile via .mzw-scale (anchor is center-bottom/feet, matching the marker's own
+   flex-centered positioning). All class names are prefixed mzw- to avoid clashing with any
+   unrelated site CSS. See mazeWalkerFor()/MZW_* near MAZE_PLAYER_SVG for the JS side.
+   Gait animations are infinite (continuous idle gait, confirmed by Gwen) -- no separate
+   "only while moving" state to manage. */
+.mzw-scale{position:absolute;left:50%;bottom:0;transform:translateX(-50%) scale(.42);transform-origin:50% 100%;}
+.mzw-flip{transform-origin:50% 100%;}
+.mzw-walker{position:relative;width:70px;height:100px;transform:rotate(var(--mzwlean,0deg));}
+.mzw-fig{position:absolute;left:0;top:0;width:70px;height:100px;animation:mzwbobwalk var(--mzwgait) ease-in-out infinite;}
+.mzw-float .mzw-fig{animation:mzwhover var(--mzwgait) ease-in-out infinite;}
+@keyframes mzwbobwalk{0%,100%{transform:translateY(0);}50%{transform:translateY(calc(-1px*var(--mzwbob)));}}
+@keyframes mzwhover{0%,100%{transform:translateY(0);}50%{transform:translateY(calc(-1px*var(--mzwbob)));}}
+.mzw-shadow{position:absolute;bottom:18px;left:50%;width:36px;height:8px;border-radius:50%;background:#0006;transform:translateX(-50%);animation:mzwshad var(--mzwgait) ease-in-out infinite;}
+@keyframes mzwshad{0%,100%{transform:translateX(-50%) scaleX(1);opacity:.45;}50%{transform:translateX(-50%) scaleX(.78);opacity:.28;}}
+.mzw-limb{position:absolute;transform-origin:top center;}
+.mzw-leg{width:8px;height:28px;border-radius:5px;left:31px;top:50px;background:linear-gradient(180deg,var(--mzwb2),#0004);}
+.mzw-leg.mzw-back{background:linear-gradient(180deg,var(--mzwb2),#0006);filter:brightness(.8);animation:mzwstep var(--mzwgait) ease-in-out infinite;}
+.mzw-leg.mzw-front{animation:mzwstep var(--mzwgait) ease-in-out infinite;animation-delay:calc(var(--mzwgait)/-2);}
+.mzw-float .mzw-leg{animation:mzwdangle var(--mzwgait) ease-in-out infinite !important;top:52px;height:22px;}
+.mzw-float .mzw-leg.mzw-front{animation-delay:calc(var(--mzwgait)/-2)!important;}
+@keyframes mzwstep{0%{transform:rotate(calc(1deg*var(--mzwstride)));}50%{transform:rotate(calc(-1deg*var(--mzwstride)));}100%{transform:rotate(calc(1deg*var(--mzwstride)));}}
+@keyframes mzwdangle{0%,100%{transform:rotate(6deg);}50%{transform:rotate(-6deg);}}
+.mzw-arm{width:7px;height:22px;border-radius:5px;left:31px;top:34px;background:linear-gradient(180deg,var(--mzwb1),var(--mzwb2));z-index:3;}
+.mzw-arm.mzw-back{filter:brightness(.75);animation:mzwswingB var(--mzwgait) ease-in-out infinite;z-index:0;}
+.mzw-arm.mzw-front{animation:mzwswingF var(--mzwgait) ease-in-out infinite;}
+.mzw-float .mzw-arm{animation:mzwarmfloat var(--mzwgait) ease-in-out infinite!important;}
+@keyframes mzwswingF{0%{transform:rotate(calc(-1deg*var(--mzwswing)));}50%{transform:rotate(calc(1deg*var(--mzwswing)));}100%{transform:rotate(calc(-1deg*var(--mzwswing)));}}
+@keyframes mzwswingB{0%{transform:rotate(calc(1deg*var(--mzwswing)));}50%{transform:rotate(calc(-1deg*var(--mzwswing)));}100%{transform:rotate(calc(1deg*var(--mzwswing)));}}
+@keyframes mzwarmfloat{0%,100%{transform:rotate(18deg);}50%{transform:rotate(26deg);}}
+.mzw-torso{position:absolute;left:23px;top:30px;width:24px;height:30px;border-radius:12px 12px 8px 8px;background:linear-gradient(180deg,var(--mzwb1),var(--mzwb2));z-index:2;box-shadow:inset 0 -4px 6px #0003;}
+.mzw-robe{position:absolute;left:18px;top:52px;width:34px;height:26px;border-radius:0 0 16px 16px;background:linear-gradient(180deg,var(--mzwb2),var(--mzwbt));z-index:2;clip-path:polygon(15% 0,85% 0,100% 100%,0 100%);}
+.mzw-head{position:absolute;left:27px;top:16px;width:18px;height:18px;border-radius:50%;background:#e8c9a0;z-index:4;box-shadow:inset -2px -2px 3px #0002;}
+.mzw-gear{position:absolute;left:15px;top:2px;width:40px;height:34px;z-index:5;overflow:visible;}
+.mzw-gear svg{width:40px;height:34px;overflow:visible;}
+.mzw-prop{position:absolute;z-index:6;}
+.mzw-aura{position:absolute;inset:0;z-index:1;pointer-events:none;}
+.mzw-pulse-aura{border-radius:50%;left:50%;top:38px;width:52px;height:52px;transform:translateX(-50%);animation:mzwpaura 2.6s ease-in-out infinite;}
+@keyframes mzwpaura{0%,100%{opacity:.25;transform:translateX(-50%) scale(.9);}50%{opacity:.5;transform:translateX(-50%) scale(1.05);}}
+.mzw-spark{position:absolute;width:3px;height:3px;border-radius:50%;animation:mzwspark 2.2s linear infinite;}
+@keyframes mzwspark{0%{opacity:0;transform:translateY(0);}30%{opacity:1;}100%{opacity:0;transform:translateY(-16px);}}
+.mzw-windtrail{position:absolute;height:2px;border-radius:2px;background:linear-gradient(90deg,var(--mzwwind,#8fd0c4),transparent);animation:mzwtrail var(--mzwgait) linear infinite;}
+@keyframes mzwtrail{0%{opacity:0;transform:translateX(6px) scaleX(.4);}40%{opacity:.8;}100%{opacity:0;transform:translateX(-14px) scaleX(1.2);}}
+.mzw-flick{animation:mzwflick 1.1s ease-in-out infinite;transform-origin:bottom center;}
+@keyframes mzwflick{0%,100%{transform:scaleY(1);opacity:1;}50%{transform:scaleY(1.2);opacity:.85;}}
+.mzw-fallback{width:100%;height:100%;display:flex;align-items:center;justify-content:center;}
+
 .side-panel{min-width:260px;display:flex;flex-direction:column;gap:8px;}
 
 .maze-mobile-arrows{display:none;}
@@ -1833,7 +1882,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.23.6-web",
+  GAME_VERSION:"v0.24-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   
@@ -2066,14 +2115,65 @@ const Balance = {
   // and resolves a cast; this feeds the Magician's buy list and combat's spell-slot icons.
   // Every class can buy/use every spell (no per-class gating). SPELL_SLOT_COUNT is a flat
   // constant, not class-dependent.
+  // v0.24: retiered from one fixed price/level_req/magnitude per spell into 5 separately-bought
+  // tiers (I-V), byte-identical to server.js's own SPELLS -- gated by the same ladder gear
+  // itemization uses (T1=lvl1, T2=lvl5, T3=lvl10, T4=lvl15, T5=lvl20). See server.js's SPELLS
+  // comment for the full shape rationale; spellAtTier() below mirrors server.js's identical
+  // helper exactly.
   SPELLS:{
-    heal_1:{id:"heal_1", name:"Heal", price:300, level_req:3, mana_cost:15, cooldown_ms:3000, effect:"heal", heal_amount:50},
-    fireflies:{id:"fireflies", name:"Fireflies", price:600, level_req:6, mana_cost:25, cooldown_ms:5000, effect:"fireflies", hit_count:6, hit_min:8, hit_max:12, duration_ms:2000},
-    entangle:{id:"entangle", name:"Entangle", price:1200, level_req:10, mana_cost:50, cooldown_ms:10000, effect:"entangle", duration_ms:4000},
+    heal_1:{
+      id:"heal_1", name:"Heal", effect:"heal",
+      tiers:[
+        {tier:1, level_req:1, price:300, mana_cost:15, cooldown_ms:3000, heal_amount:50},
+        {tier:2, level_req:5, price:600, mana_cost:30, cooldown_ms:3000, heal_amount:100},
+        {tier:3, level_req:10, price:1200, mana_cost:45, cooldown_ms:3000, heal_amount:150},
+        {tier:4, level_req:15, price:2400, mana_cost:60, cooldown_ms:3000, heal_amount:200},
+        {tier:5, level_req:20, price:4800, mana_cost:75, cooldown_ms:3000, heal_amount:250},
+      ],
+    },
+    fireflies:{
+      id:"fireflies", name:"Fireflies", effect:"fireflies", hit_count:6, duration_ms:2000,
+      tiers:[
+        {tier:1, level_req:1, price:600, mana_cost:25, cooldown_ms:5000, hit_min:8, hit_max:12},
+        {tier:2, level_req:5, price:1200, mana_cost:35, cooldown_ms:5000, hit_min:19, hit_max:28},
+        {tier:3, level_req:10, price:2400, mana_cost:45, cooldown_ms:5000, hit_min:36, hit_max:55},
+        {tier:4, level_req:15, price:4800, mana_cost:55, cooldown_ms:5000, hit_min:65, hit_max:90},
+        {tier:5, level_req:20, price:9600, mana_cost:65, cooldown_ms:5000, hit_min:142, hit_max:180},
+      ],
+    },
+    entangle:{
+      id:"entangle", name:"Entangle", effect:"entangle", dot_hit_count:6, dot_duration_ms:2000,
+      tiers:[
+        {tier:1, level_req:1, price:1200, mana_cost:50, cooldown_ms:10000, duration_ms:4000, dot_min:4, dot_max:6},
+        {tier:2, level_req:5, price:2400, mana_cost:55, cooldown_ms:10000, duration_ms:5000, dot_min:9, dot_max:14},
+        {tier:3, level_req:10, price:4800, mana_cost:60, cooldown_ms:10000, duration_ms:6000, dot_min:18, dot_max:27},
+        {tier:4, level_req:15, price:9600, mana_cost:65, cooldown_ms:10000, duration_ms:7000, dot_min:32, dot_max:45},
+        {tier:5, level_req:20, price:19200, mana_cost:70, cooldown_ms:10000, duration_ms:8000, dot_min:71, dot_max:90},
+      ],
+    },
     // v0.23.1 (#2): 4th spell, byte-identical to server.js's own SPELLS.verdant_siphon entry.
-    verdant_siphon:{id:"verdant_siphon", name:"Verdant Siphon", price:900, level_req:12, mana_cost:30, cooldown_ms:6000, effect:"drain", hit_count:6, hit_min:5, hit_max:9, duration_ms:2000, heal_pct:0.5},
+    verdant_siphon:{
+      id:"verdant_siphon", name:"Verdant Siphon", effect:"drain", hit_count:6, duration_ms:2000, heal_pct:0.5,
+      tiers:[
+        {tier:1, level_req:1, price:900, mana_cost:30, cooldown_ms:6000, hit_min:5, hit_max:9},
+        {tier:2, level_req:5, price:1800, mana_cost:40, cooldown_ms:6000, hit_min:13, hit_max:20},
+        {tier:3, level_req:10, price:3600, mana_cost:50, cooldown_ms:6000, hit_min:26, hit_max:40},
+        {tier:4, level_req:15, price:7200, mana_cost:60, cooldown_ms:6000, hit_min:46, hit_max:66},
+        {tier:5, level_req:20, price:14400, mana_cost:70, cooldown_ms:6000, hit_min:95, hit_max:133},
+      ],
+    },
   },
   SPELL_SLOT_COUNT:2,
+  // v0.24: flattens a spell + tier (1-5) into the old single-tier flat shape -- mirrors
+  // server.js's identical spellAtTier() exactly. Returns null for an unknown spell id or an
+  // out-of-range tier.
+  spellAtTier(spellId, tier){
+    const base=this.SPELLS[spellId];
+    if(!base || !Number.isInteger(tier) || tier<1 || tier>5) return null;
+    const t=base.tiers[tier-1];
+    if(!t) return null;
+    return Object.assign({}, base, t);
+  },
   // Quest System (new): display-only copy of server.js's QUEST_DEFS -- must stay
   // byte-identical (IDS/NAMES/LEVEL_REQ/TOWN_REWARD_MULT/TARGETS/ELDER_BAND/
   // CAULDRON_ATTR_POTION_REQUIRED/ATTR_POTION_IDS/REWARDS/SHRINE_XP_BUFF_MULT/
@@ -3632,8 +3732,9 @@ const Net = {
     return json;
   },
   // v0.23.0 (Part B4/B6): Magician buy/slot -- mirrors the Blacksmith reroll fetch/error shape.
-  async buySpell(slot, spellId){
-    const res=await fetch(this.apiBase()+"/api/magician/buy",{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({slot,spell_id:spellId})});
+  // v0.24: buySpell now takes the tier being bought (tiers are purchased in order).
+  async buySpell(slot, spellId, tier){
+    const res=await fetch(this.apiBase()+"/api/magician/buy",{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({slot,spell_id:spellId,tier})});
     const json=await res.json().catch(()=>({}));
     if(!res.ok) throw new Error(json.error||"Could not buy that spell.");
     return json;
@@ -3977,7 +4078,10 @@ const PS = {
   // there's only the one skill. All three persist through bridge/ladder resets exactly like
   // weapon_skills already does (never touched by resetForNewTrial()/applyLadderReset()-style
   // code, same as that field).
-  owned_spells:[], spell_slots:[null,null], spellcasting_skill:{hits:0},
+  // v0.24: owned_spell_tiers ({spellId: highestTierOwned}) is now the source of truth for
+  // ownership -- owned_spells (the old flat array) is kept around only as a migration source
+  // (see migrateOwnedSpellTiers() below) and is no longer read for gating.
+  owned_spells:[], owned_spell_tiers:{}, spell_slots:[null,null], spellcasting_skill:{hits:0},
 
   herbalism_points:0,
 
@@ -4048,7 +4152,16 @@ const PS = {
     return pct;
   },
   getSpellEffectivenessMult(){ return 1 + this.getSpellPowerPct()/100 + this.getSpellcastingSkillLevel()*Balance.WEAPON_SKILL_DAMAGE_PCT_PER_LEVEL; },
-  ownsSpell(spellId){ return (this.owned_spells||[]).includes(spellId); },
+  // v0.24: migrates the old flat owned_spells array into owned_spell_tiers, grandfathering
+  // every already-owned spell as Tier I for free -- mirrors server.js's identical
+  // migrateSpellTiers() exactly. Idempotent; safe to call on every load.
+  migrateOwnedSpellTiers(){
+    if(!this.owned_spell_tiers || typeof this.owned_spell_tiers!=="object") this.owned_spell_tiers={};
+    for(const id of (this.owned_spells||[])) if(!this.owned_spell_tiers[id]) this.owned_spell_tiers[id]=1;
+  },
+  // v0.24: returns the highest tier (1-5) owned of a spell, or 0 if unowned.
+  getSpellTier(spellId){ return (this.owned_spell_tiers&&this.owned_spell_tiers[spellId])||0; },
+  ownsSpell(spellId){ return this.getSpellTier(spellId)>0; },
   // v0.23.6: Wizard Set 6pc grants +WIZARD_SET_6PC_BONUS_SPELL_SLOTS on top of the flat
   // Balance.SPELL_SLOT_COUNT every class starts with.
   getEffectiveSpellSlotCount(){
@@ -5218,7 +5331,7 @@ const PS = {
       attributes:this.attributes,unspent_stat_points:this.unspent_stat_points,
       bonus_hp_from_attributes:this.bonus_hp_from_attributes,bonus_stamina_from_attributes:this.bonus_stamina_from_attributes,
       weapon_skills:this.weapon_skills,
-      owned_spells:this.owned_spells||[], spell_slots:this.getSpellSlots(), spellcasting_skill:this.spellcasting_skill||{hits:0},
+      owned_spells:this.owned_spells||[], owned_spell_tiers:this.owned_spell_tiers||{}, spell_slots:this.getSpellSlots(), spellcasting_skill:this.spellcasting_skill||{hits:0},
       herbalism_points:this.herbalism_points||0,
       
       
@@ -5324,6 +5437,8 @@ const PS = {
     this.weapon_skills=parsed.weapon_skills||{};
     this.ensureWeaponSkills();
     this.owned_spells=parsed.owned_spells||[];
+    this.owned_spell_tiers=parsed.owned_spell_tiers||{};
+    this.migrateOwnedSpellTiers();
     this.spell_slots=parsed.spell_slots||[null,null];
     this.spellcasting_skill=parsed.spellcasting_skill||{hits:0};
     
@@ -8226,7 +8341,9 @@ function generateMaze(depth, isNight){
   // so continuing the same delve (advancing through the exit, falling through a trapdoor,
   // "Try a Different Route") stays consistent even if the player later flips the town toggle
   // for their NEXT venture. See mazeEyesightRadius()/screenTown()'s "Night delve" checkbox.
-  const maze={size, sizeH, cells, depth, playerIdx:0, stronghold, roamers, isNight:!!isNight};
+  // v0.24: facingDir (1=right,-1=left) drives the class walker's left/right mirror in
+  // screenMaze() -- set by onStepMaze() on horizontal movement, defaults to facing right.
+  const maze={size, sizeH, cells, depth, playerIdx:0, stronghold, roamers, isNight:!!isNight, facingDir:1};
   revealAround(maze,0,mazeEyesightRadius(maze));
 
 
@@ -8525,6 +8642,104 @@ function mazeRoamerSVG(color){
   <circle cx="25" cy="32" r="1.2" fill="#111"/><circle cx="35" cy="32" r="1.2" fill="#111"/>
   <path d="M24 40 l3 -3 3 3 3 -3 3 3" stroke="#111" stroke-width="1.4" fill="none"/></g></svg>`;
 }
+// v0.24: Class walkers -- 15 per-class maze figures, one per class_id, replacing the single
+// MAZE_PLAYER_SVG hooded traveler for the player's own marker (roamers are untouched, see
+// mazeRoamerSVG above). Ported byte-for-byte in spirit from the approved
+// wandrian_class_walkers.html concept gallery: MZW_HEADS/MZW_PROPS/aura builders + a per-
+// class gait-vars config (MZW_CLASS_CONFIG), grouped by chain palette (MZW_CHAIN_PALETTES).
+// mazeWalkerFor(classId) is the single entry point; falls back to the old MAZE_PLAYER_SVG
+// markup for any unrecognized class_id (e.g. a not-yet-classed character, or future-proofing).
+const MZW_HEADS={
+ // pointed star hat (wizard)
+ wizhat:c=>`<svg viewBox="0 0 40 34"><path d="M20 1 L30 26 Q20 21 10 26 Z" fill="${c.a}"/><path d="M10 26 Q20 21 30 26 L28 30 Q20 26 12 30 Z" fill="${c.d}"/><circle cx="20" cy="4" r="2" fill="#f4d94a"/></svg>`,
+ tallhat:c=>`<svg viewBox="0 0 40 34"><path d="M20 -2 L31 27 Q20 22 9 27 Z" fill="${c.a}"/><path d="M9 27 Q20 22 31 27 L29 31 Q20 27 11 31 Z" fill="${c.d}"/><circle cx="20" cy="2" r="2.4" fill="#bfe0ff"/></svg>`,
+ hood:c=>`<svg viewBox="0 0 40 34"><path d="M11 30 Q9 8 20 6 Q31 8 29 30 Q20 24 11 30 Z" fill="${c.a}"/><path d="M14 27 Q20 22 26 27" stroke="${c.d}" stroke-width="1.5" fill="none"/></svg>`,
+ hornhat:c=>`<svg viewBox="0 0 40 34"><path d="M20 2 L29 26 Q20 21 11 26 Z" fill="${c.a}"/><path d="M11 12 Q4 8 5 2 Q11 5 13 12M29 12 Q36 8 35 2 Q29 5 27 12" fill="${c.d}"/></svg>`,
+ grandhat:c=>`<svg viewBox="0 0 40 34"><path d="M20 -3 L33 26 Q20 20 7 26 Z" fill="${c.a}"/><path d="M7 26 Q20 20 33 26 L31 31 Q20 26 9 31 Z" fill="#caa23a"/><circle cx="20" cy="14" r="3" fill="#f5e28a"/><circle cx="20" cy="1" r="2.4" fill="#f5e28a"/></svg>`,
+ // thornguard
+ leafcrown:c=>`<svg viewBox="0 0 40 34"><path d="M12 16 Q20 6 28 16 Q20 12 12 16Z" fill="${c.leaf2}"/><polygon points="15,14 17,4 19,14" fill="${c.leaf}"/><polygon points="20,14 22,2 24,14" fill="${c.leaf}"/><polygon points="25,14 27,5 29,14" fill="${c.leaf2}"/></svg>`,
+ helm:c=>`<svg viewBox="0 0 40 34"><path d="M11 18 Q11 6 20 6 Q29 6 29 18 Z" fill="#6a6e66"/><rect x="11" y="16" width="18" height="3" fill="#4a4e46"/><rect x="19" y="6" width="2" height="12" fill="#4a4e46"/></svg>`,
+ antler:c=>`<svg viewBox="0 0 40 34"><path d="M15 14 Q9 6 6 -1 Q10 3 12 8 Q9 3 8 -2M25 14 Q31 6 34 -1 Q30 3 28 8 Q31 3 32 -2" fill="none" stroke="${c.leaf2}" stroke-width="2"/><ellipse cx="20" cy="14" rx="9" ry="4" fill="${c.leaf2}"/></svg>`,
+ rootcrown:c=>`<svg viewBox="0 0 40 34"><ellipse cx="20" cy="14" rx="11" ry="5" fill="${c.leaf2}"/><path d="M12 14 Q10 6 14 3M20 13 Q20 4 20 2M28 14 Q30 6 26 3" fill="none" stroke="${c.leaf}" stroke-width="2"/></svg>`,
+ embercrown:c=>`<svg viewBox="0 0 40 34"><path d="M12 15 Q20 8 28 15 Z" fill="#7a4a20"/><path class="mzw-flick" d="M15 13 Q16 5 18 12M20 13 Q21 3 23 12M25 13 Q26 6 27 12" fill="none" stroke="#f0932a" stroke-width="2"/></svg>`,
+ // windrider
+ feathood:c=>`<svg viewBox="0 0 40 34"><path d="M12 30 Q10 10 20 8 Q30 10 28 30 Q20 25 12 30Z" fill="${c.hood}"/><path d="M28 12 Q36 8 34 18 Q30 15 27 16Z" fill="${c.a}"/></svg>`,
+ bigfeat:c=>`<svg viewBox="0 0 40 34"><path d="M12 30 Q10 9 20 7 Q30 9 28 30 Q20 25 12 30Z" fill="${c.hood}"/><path d="M27 11 Q37 5 35 17 Q30 14 26 15ZM26 15 Q34 12 33 21 Q29 18 25 19Z" fill="${c.a}"/></svg>`,
+ shadowhood:c=>`<svg viewBox="0 0 40 34"><path d="M11 30 Q9 8 20 6 Q31 8 29 30 Q20 22 11 30Z" fill="#2a3a4a"/><path d="M14 26 Q20 20 26 26" stroke="#48627a" stroke-width="1.4" fill="none"/></svg>`,
+ druidcrown:c=>`<svg viewBox="0 0 40 34"><path d="M14 14 Q9 6 7 0 Q11 4 13 9M26 14 Q31 6 33 0 Q29 4 27 9" fill="none" stroke="${c.hood}" stroke-width="2"/><ellipse cx="20" cy="14" rx="9" ry="4" fill="${c.leaf2}"/><circle cx="20" cy="12" r="2" fill="${c.wind}"/></svg>`,
+ galemantle:c=>`<svg viewBox="0 0 40 34"><path d="M11 30 Q9 8 20 6 Q31 8 29 30 Q20 23 11 30Z" fill="${c.hood}"/><path d="M4 20 Q0 14 6 12M36 20 Q40 14 34 12" stroke="${c.wind}" stroke-width="2.5" fill="none"/></svg>`,
+};
+const MZW_PROPS={
+ orb:c=>`<div class="mzw-prop" style="left:2px;top:44px;width:12px;height:12px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#dff0ff,${c.a});box-shadow:0 0 8px ${c.a}"></div>`,
+ staff:c=>`<div class="mzw-prop" style="left:56px;top:26px;width:4px;height:56px;border-radius:2px;background:linear-gradient(180deg,#7a5a30,#4a3620);"><div style="position:absolute;left:-4px;top:-6px;width:12px;height:12px;border-radius:50%;background:radial-gradient(circle,${c.a},transparent)"></div></div>`,
+ axe:c=>`<div class="mzw-prop" style="left:56px;top:30px;width:4px;height:48px;border-radius:2px;background:#5a3f28;"><div style="position:absolute;left:-8px;top:-2px;width:16px;height:16px;background:#9aa0a6;clip-path:polygon(0 50%,100% 0,100% 100%);border-radius:2px"></div></div>`,
+ bow:c=>`<div class="mzw-prop" style="left:4px;top:30px;width:12px;height:46px;border-right:3px solid ${c.hood};border-radius:0 60% 60% 0/0 50% 50% 0;"></div>`,
+ dagger:c=>`<div class="mzw-prop" style="left:57px;top:48px;width:4px;height:20px;border-radius:2px;background:linear-gradient(180deg,#cfd6dd,#7a828a);"></div>`,
+};
+function mzwAuraSpark(color){ let s=""; for(let i=0;i<4;i++){ s+=`<span class="mzw-spark" style="left:${18+i*10}px;top:${44+(i%2)*10}px;background:${color};animation-delay:${i*0.5}s"></span>`;} return `<div class="mzw-aura">${s}</div>`; }
+function mzwAuraWind(){ let s=""; for(let i=0;i<3;i++){ s+=`<span class="mzw-windtrail" style="left:-6px;top:${40+i*12}px;width:${16+i*4}px;animation-delay:${i*0.15}s"></span>`;} return `<div class="mzw-aura">${s}</div>`; }
+function mzwAuraPulse(color){ return `<div class="mzw-aura"><div class="mzw-pulse-aura" style="background:radial-gradient(circle,${color}55,transparent 70%)"></div></div>`; }
+function mzwAuraLeaf(color){ let s=""; for(let i=0;i<3;i++){ s+=`<span class="mzw-spark" style="left:${20+i*9}px;top:${40+(i%2)*12}px;width:4px;height:5px;border-radius:40% 40% 60% 60%;background:${color};animation-delay:${i*0.6}s"></span>`;} return `<div class="mzw-aura">${s}</div>`; }
+// Chain-keyed palettes (b1/b2/bt = body gradient + trim, a/d = headgear accent/detail,
+// leaf/leaf2/hood/wind = chain-specific accessory colors), lifted straight from the gallery's
+// CHAINS[].pal, keyed by CLASSES[classId].chain instead of a gallery-only "wiz/thn/wnd" key.
+const MZW_CHAIN_PALETTES={
+ wizard:{b1:"#6f86d8",b2:"#3f56a8",bt:"#33478a",a:"#5a6fc0",d:"#33478a",leaf:"",leaf2:"",hood:"",wind:""},
+ thornguard:{b1:"#7a5636",b2:"#4b3524",bt:"#3a2c1c",a:"#3f6b3f",d:"#2e4526",leaf:"#4fae4f",leaf2:"#3f6b3f",hood:"",wind:""},
+ windrider:{b1:"#4f9a5e",b2:"#2e6a3e",bt:"#255530",a:"#5f9f68",d:"#255530",leaf:"#4fae4f",leaf2:"#3f6b3f",hood:"#3f7d4e",wind:"#8fd0c4"},
+};
+// Per-class headgear/prop/aura/gait config, lifted from the gallery's CHAINS[].classes[].
+const MZW_CLASS_CONFIG={
+ wizard:{head:"wizhat",prop:"orb",aura:()=>"",gait:{gait:"0.95s",bob:3,stride:20,swing:16,lean:0}},
+ sorcerer:{head:"tallhat",prop:"orb",aura:()=>mzwAuraSpark("#bfe0ff"),gait:{gait:"1.0s",bob:5,stride:12,swing:14,lean:0,float:true}},
+ warlock:{head:"hood",prop:"staff",aura:()=>mzwAuraPulse("#7a4ab0"),gait:{gait:"1.2s",bob:2,stride:16,swing:12,lean:-3}},
+ necromancer:{head:"hornhat",prop:"orb",aura:()=>mzwAuraSpark("#a86fe0"),gait:{gait:"1.1s",bob:6,stride:6,swing:10,lean:0,float:true}},
+ archmage:{head:"grandhat",prop:"staff",aura:()=>mzwAuraPulse("#8fb4ff"),gait:{gait:"1.3s",bob:7,stride:4,swing:8,lean:0,float:true}},
+ thornguard:{head:"leafcrown",prop:"axe",aura:()=>"",gait:{gait:"1.0s",bob:4,stride:24,swing:18,lean:0}},
+ stonewarden:{head:"helm",prop:"axe",aura:()=>"",gait:{gait:"1.1s",bob:7,stride:28,swing:20,lean:0}},
+ treesinger:{head:"antler",prop:"staff",aura:()=>mzwAuraLeaf("#4fae4f"),gait:{gait:"1.2s",bob:3,stride:20,swing:14,lean:0}},
+ rootbinder:{head:"rootcrown",prop:"staff",aura:()=>mzwAuraLeaf("#3f6b3f"),gait:{gait:"1.45s",bob:4,stride:22,swing:12,lean:0}},
+ emberpriest:{head:"embercrown",prop:"staff",aura:()=>mzwAuraPulse("#e0932f"),gait:{gait:"1.05s",bob:5,stride:26,swing:16,lean:0}},
+ windrider:{head:"feathood",prop:"bow",aura:()=>"",gait:{gait:"0.62s",bob:3,stride:28,swing:22,lean:6}},
+ galestrider:{head:"bigfeat",prop:"bow",aura:()=>mzwAuraWind(),gait:{gait:"0.55s",bob:6,stride:32,swing:24,lean:5}},
+ shadowbloom:{head:"shadowhood",prop:"dagger",aura:()=>mzwAuraPulse("#3a4a5a"),gait:{gait:"0.5s",bob:4,stride:30,swing:20,lean:8}},
+ druid:{head:"druidcrown",prop:"staff",aura:()=>mzwAuraLeaf("#6fca8a"),gait:{gait:"0.65s",bob:5,stride:28,swing:18,lean:4}},
+ galeshaper:{head:"galemantle",prop:"bow",aura:()=>mzwAuraWind(),gait:{gait:"0.52s",bob:4,stride:16,swing:16,lean:7,float:true}},
+};
+// mazeWalkerFor(classId) -> {html, isFloat} -- the sole entry point for rendering the
+// player's own class-specific maze figure. Falls back to the original MAZE_PLAYER_SVG hooded
+// traveler (wrapped for centering) if classId isn't a recognized/configured class.
+function mazeWalkerFor(classId){
+  const cls=CLASSES[classId];
+  const cfg=cls?MZW_CLASS_CONFIG[classId]:null;
+  const pal=cfg&&cls?MZW_CHAIN_PALETTES[cls.chain]:null;
+  if(!cfg||!pal){
+    return {html:`<div class="mzw-fallback">${MAZE_PLAYER_SVG}</div>`,isFloat:false};
+  }
+  const g=cfg.gait;
+  const vars=`--mzwb1:${pal.b1};--mzwb2:${pal.b2};--mzwbt:${pal.bt};--mzwwind:${pal.wind||"#8fd0c4"};`+
+    `--mzwgait:${g.gait};--mzwbob:${g.bob};--mzwstride:${g.stride};--mzwswing:${g.swing};--mzwlean:${g.lean||0}deg;`;
+  const isFloat=!!g.float;
+  const headSvg=MZW_HEADS[cfg.head](pal);
+  const prop=MZW_PROPS[cfg.prop]?MZW_PROPS[cfg.prop](pal):"";
+  const aura=cfg.aura?cfg.aura(pal):"";
+  const html=`<div class="mzw-walker${isFloat?" mzw-float":""}" style="${vars}">
+      <div class="mzw-shadow"></div>
+      ${aura}
+      <div class="mzw-fig">
+        <div class="mzw-limb mzw-arm mzw-back"></div>
+        <div class="mzw-limb mzw-leg mzw-back"></div>
+        <div class="mzw-limb mzw-leg mzw-front"></div>
+        <div class="mzw-robe"></div>
+        <div class="mzw-torso"></div>
+        <div class="mzw-limb mzw-arm mzw-front"></div>
+        <div class="mzw-head"></div>
+        <div class="mzw-gear">${headSvg}</div>
+        ${prop}
+      </div>
+    </div>`;
+  return {html,isFloat};
+}
 // v0.23.2: Night delve -- tighter torch/reveal radius while a delve's maze.isNight flag is
 // set (see the "Night delve" toggle on the venture card in screenTown() and generateMaze()'s
 // isNight param). Floored at 1 so a base radius-1 character can still see their own tile plus
@@ -8658,10 +8873,17 @@ function screenMaze(){
       }
     }
 
-    // Player token: hooded traveler with a torch + warm glow, replacing the old plain marker.
+    // v0.24: Player token is now the class-specific walker (mazeWalkerFor()), replacing the
+    // single hooded-traveler MAZE_PLAYER_SVG -- the warm torch glow stays for every class.
+    // maze.facingDir (1=right,-1=left, set by onStepMaze() on horizontal movement, defaults
+    // to 1) flips the walker via a CSS scaleX on the inner .mzw-flip wrapper; the outer
+    // .mzw-scale wrapper anchors+shrinks the gallery's native 70x100 rig to the 34px tile.
+    const walker=mazeWalkerFor(PS.class_id);
     grid.appendChild(h("div",{id:"maze-player-marker",class:"maze-mover maze-mover-player",style:{left:(px*35)+"px",top:(py*35)+"px"}},[
       h("div",{class:"mz-player-glow"}),
-      h("div",{class:"mz-bob",style:{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center"},html:MAZE_PLAYER_SVG}),
+      h("div",{class:"mzw-scale"},[
+        h("div",{class:"mzw-flip",style:{transform:"scaleX("+(maze.facingDir||1)+")"},html:walker.html}),
+      ]),
     ]));
     if(maze.roamers){
       for(const r of maze.roamers){
@@ -8907,6 +9129,11 @@ function onStepMaze(maze,targetIdx){
   const prevRoamerPositions={};
   if(maze.roamers) for(const r of maze.roamers) prevRoamerPositions[r.roamerId]=r.idx;
   const cell=maze.cells[targetIdx];
+  // v0.24 (class walkers): flip facing on horizontal movement only -- vertical-only steps
+  // (same column) keep whichever direction was last faced, per the confirmed spec.
+  const prevPx=prevPlayerIdx%maze.size, newPx=targetIdx%maze.size;
+  if(newPx>prevPx) maze.facingDir=1;
+  else if(newPx<prevPx) maze.facingDir=-1;
   maze.playerIdx=targetIdx; cell.discovered=true; cell.visited=true;
   PS.spendStamina(Balance.STAMINA_COST_PER_STEP);
   
@@ -10382,7 +10609,9 @@ function screenCombat(){
   // resolving-flag/try-catch/autosave/render shape immediately above.
   async function castSpellInCombat(spellId){
     if(GF.combatResolving) return;
-    const spell=Balance.SPELLS[spellId];
+    // v0.24: resolves against the character's currently-OWNED tier -- cooldown_ms/mana_cost/
+    // name below all come from that tier's own flattened numbers via Balance.spellAtTier().
+    const spell=Balance.spellAtTier(spellId, PS.getSpellTier(spellId));
     if(!spell){ setToast("You don't have a spell in that slot."); render(); return; }
     GF.combatResolving=true; render();
     try{
@@ -10396,7 +10625,9 @@ function screenCombat(){
       (result.spell_dot_ticks||[]).forEach(t=>{
         cb.hp=Math.max(0,(cb.hp||0)-t.damage);
         const dotSpell=Balance.SPELLS[t.spell_id];
-        const verb=t.spell_id==="verdant_siphon"?"drains":"burns";
+        // v0.24: Entangle's own new crushing-vine DOT ticks land through this exact same
+        // generic array/loop, so it gets its own thematic verb alongside Fireflies'/Siphon's.
+        const verb=t.spell_id==="verdant_siphon"?"drains":(t.spell_id==="entangle"?"crushes":"burns");
         combatLog(cb,`${dotSpell?dotSpell.name:"Spell"} ${verb} the ${cb.name} for ${t.damage} damage${t.heal?`, healing you for ${t.heal} HP`:""}.`);
         spawnFloat("monster",`-${t.damage} HP`,"float-text-dmg");
         if(t.heal) spawnFloat("player",`+${t.heal} HP`,"float-text-heal");
@@ -10436,7 +10667,9 @@ function screenCombat(){
           // cosmetic, doesn't touch the damage floats/combat log above.
           if(spellId==="fireflies") spawnFireflyBurst();
         } else if(c.rooted_until!=null){
-          combatLog(cb,`You cast Entangle, rooting the ${cb.name} in place! It can't act, and you can flee freely.`);
+          // v0.24: the vines now also crush for scaling damage while the root holds, landing
+          // through the same generic spell_dot_ticks path as Fireflies/Verdant Siphon above.
+          combatLog(cb,`You cast Entangle, rooting the ${cb.name} in crushing vines! It can't act, and you can flee freely.`);
           spawnFloat("monster","Rooted!","float-text-block");
         }
       }
@@ -10491,7 +10724,7 @@ function screenCombat(){
     const badge=spellIcon(spellId,size);
     badge.classList.add("tooltip");
     const keyLabel=getKeyboardShortcuts()[SPELL_SLOT_SHORTCUT_KEYS[slotIndex]||"spellSlot1"].toUpperCase();
-    badge.setAttribute("data-tip", spell?`${spell.name} (${keyLabel} to cast)\n${spellShopSubtext(spellId)}`:`Spell Slot ${slotIndex+1}: empty. Visit Thistlewick, the Hollow Magus to learn and slot a spell.`);
+    badge.setAttribute("data-tip", spell?`${spell.name} (${keyLabel} to cast)\n${spellShopSubtext(spellId, PS.getSpellTier(spellId))}`:`Spell Slot ${slotIndex+1}: empty. Visit Thistlewick, the Hollow Magus to learn and slot a spell.`);
     // v0.23.1 (#6): purely a client-side ESTIMATE for this visual -- GF.spellCooldownUntil is
     // stamped from "now + this spell's own cooldown_ms" the instant castSpellInCombat() sees a
     // successful cast (see there), never trusted for anything else. The server remains the
@@ -12713,16 +12946,18 @@ function merchantSellTab(){
 
 // v0.23.0 (Part B4/B6): Magician buy/slot handlers -- mirror rerollBlacksmithItem()'s exact
 // busy-flag/try-catch/_save_seq/autosave shape.
-async function magicianBuySpell(spellId){
+// v0.24: buySpell now takes the specific tier being bought (Tier I the first time, then
+// Tiers II-V as upgrades, always in order -- the server rejects any other sequence).
+async function magicianBuySpell(spellId,tier){
   if(GF.magicianBusy) return;
   GF.magicianBusy=true; render();
   try{
-    const result=await Net.buySpell(PS.current_slot, spellId);
+    const result=await Net.buySpell(PS.current_slot, spellId, tier);
     PS._saveSeqFloor=Math.max(PS._saveSeqFloor||0, result._save_seq||0);
-    PS.owned_spells=result.owned_spells;
+    PS.owned_spell_tiers=result.owned_spell_tiers;
     if(typeof result.account_gold==="number") Net.setAuthoritativeGold(result.account_gold);
     autosave();
-    setToast(`Learned ${Balance.SPELLS[spellId].name}!`);
+    setToast(`Learned ${Balance.SPELLS[spellId].name} (Tier ${tierRomanNumeral(tier)})!`);
   }catch(e){
     setToast("Could not learn that spell: "+e.message);
   }
@@ -12749,22 +12984,31 @@ async function magicianSlotSpell(slotIndex,spellId){
 // instead renders dimmed with a red reason line, reusing the same red-tint-for-invalid
 // treatment as UNEQUIPPABLE_TINT (see .spell-card-disabled in <style>) rather than inventing a
 // new disabled look.
+// v0.24: reworked for the 5-tier system -- an unowned spell's whole card still buys Tier I on
+// click (same affordance as before); an owned spell instead shows its current tier plus a
+// separate "Upgrade to Tier N" row/button so slotting (also on this card) isn't confused with
+// the tier purchase. Tiers are bought strictly in order (server-enforced too).
 function magicianSpellCard(spellId){
-  const spell=Balance.SPELLS[spellId];
-  const owned=PS.ownsSpell(spellId);
-  const meetsLevel=PS.level>=spell.level_req;
-  const affordable=PS.gold>=spell.price;
+  const spellDef=Balance.SPELLS[spellId];
+  const ownedTier=PS.getSpellTier(spellId);
+  const owned=ownedTier>0;
+  const maxed=ownedTier>=5;
+  const nextTier=ownedTier+1;
+  const nextTierData=maxed?null:Balance.spellAtTier(spellId,nextTier);
+  const meetsLevel=nextTierData?PS.level>=nextTierData.level_req:true;
+  const affordable=nextTierData?PS.gold>=nextTierData.price:true;
   const slots=PS.getSpellSlots();
   const slottedAt=slots.indexOf(spellId);
   const busy=!!GF.magicianBusy;
-  const buyable=!owned && meetsLevel && affordable;
-  const disabled=!owned && !buyable;
+  const buyable=!maxed && meetsLevel && affordable;
+  const disabledReason=(!maxed && !buyable)?(!meetsLevel?`Requires Level ${nextTierData.level_req}`:"Not enough gold"):null;
 
-  const statRow=h("div",{class:"muted row gap",style:{fontSize:".78em",flexWrap:"wrap"}},[
-    h("span",{},[`Lv ${spell.level_req}`]),
-    h("span",{},[`${spell.mana_cost} mana`]),
-    h("span",{},[`${spell.cooldown_ms/1000}s cooldown`]),
-  ]);
+  const currentTierData=owned?Balance.spellAtTier(spellId,ownedTier):null;
+  const statRow=h("div",{class:"muted row gap",style:{fontSize:".78em",flexWrap:"wrap"}},
+    currentTierData
+      ?[h("span",{},[`Tier ${tierRomanNumeral(ownedTier)}`]), h("span",{},[`${currentTierData.mana_cost} mana`]), h("span",{},[`${currentTierData.cooldown_ms/1000}s cooldown`])]
+      :[h("span",{},[`Lv ${nextTierData.level_req}`]), h("span",{},[`${nextTierData.mana_cost} mana`]), h("span",{},[`${nextTierData.cooldown_ms/1000}s cooldown`])]
+  );
 
   let stateArea;
   if(owned){
@@ -12781,41 +13025,55 @@ function magicianSpellCard(spellId){
       }
     }
     stateArea=h("div",{class:"col gap",style:{marginTop:"2px"}},[
-      h("div",{style:{color:"#8fce6a",fontWeight:"bold",fontSize:".85em"}},["✓ Owned"]),
+      h("div",{style:{color:"#8fce6a",fontWeight:"bold",fontSize:".85em"}},[`✓ Owned (Tier ${tierRomanNumeral(ownedTier)})`]),
       h("div",{class:"row gap",style:{flexWrap:"wrap"}},actions),
     ]);
-  } else if(disabled){
-    stateArea=h("div",{style:{fontSize:".85em",color:"#e07a7a",fontWeight:"bold",marginTop:"2px"}},[
-      !meetsLevel?`Requires Level ${spell.level_req}`:"Not enough gold",
-    ]);
   } else {
-    stateArea=h("div",{class:"muted",style:{fontSize:".85em",marginTop:"2px"}},["Click to learn this spell."]);
+    stateArea=h("div",{class:"muted",style:{fontSize:".85em",marginTop:"2px"}},["Click to learn this spell (Tier I)."]);
+  }
+
+  let upgradeArea=null;
+  if(maxed){
+    upgradeArea=h("div",{style:{fontSize:".85em",color:"#8fce6a",fontWeight:"bold",marginTop:"6px"}},["Max tier reached."]);
+  } else if(owned){
+    upgradeArea=h("div",{style:{marginTop:"6px"}},[
+      buyable
+        ?h("button",{disabled:busy,onClick:(e)=>{ e.stopPropagation(); magicianBuySpell(spellId,nextTier); }},[`Upgrade to Tier ${tierRomanNumeral(nextTier)} (${nextTierData.price}g)`])
+        :h("div",{style:{fontSize:".85em",color:"#e07a7a",fontWeight:"bold"}},[disabledReason]),
+    ]);
+  } else if(disabledReason){
+    upgradeArea=h("div",{style:{fontSize:".85em",color:"#e07a7a",fontWeight:"bold",marginTop:"2px"}},[disabledReason]);
   }
 
   return h("div",{
-    class:"tile spell-card"+(buyable?" spell-card-buyable":"")+(disabled?" spell-card-disabled":"")+(owned?" spell-card-owned":""),
-    onClick:buyable?()=>magicianBuySpell(spellId):null,
+    class:"tile spell-card"+(buyable&&!owned?" spell-card-buyable":"")+(!buyable&&!owned&&!maxed?" spell-card-disabled":"")+(owned?" spell-card-owned":""),
+    onClick:(!owned&&buyable)?()=>magicianBuySpell(spellId,1):null,
   },[
     h("div",{class:"row gap",style:{alignItems:"center"}},[
       spellIcon(spellId,44),
       h("div",{style:{flex:"1",minWidth:"0"}},[
-        h("div",{style:{fontWeight:"bold"}},[spell.name]),
+        h("div",{style:{fontWeight:"bold"}},[spellDef.name]),
         statRow,
       ]),
-      h("div",{class:"gold-text",style:{fontWeight:"bold",flex:"none"}},[`${spell.price}g`]),
+      !maxed?h("div",{class:"gold-text",style:{fontWeight:"bold",flex:"none"}},[`${nextTierData.price}g`]):null,
     ]),
-    h("div",{class:"muted",style:{fontSize:".85em"}},[spellShopSubtext(spellId)]),
+    h("div",{class:"muted",style:{fontSize:".85em"}},[spellShopSubtext(spellId, owned?ownedTier:1)]),
     stateArea,
+    upgradeArea,
   ]);
 }
-// v0.23.0 (Part B5): short shop-list description per spell, mirroring DL.itemShopSubtext()'s
-// role for consumables -- kept out of Balance.SPELLS since that object is shared verbatim
-// with server.js and the server has no display layer.
-function spellShopSubtext(spellId){
-  if(spellId==="heal_1") return "Restores 50 HP. 15 mana, 3s cooldown.";
-  if(spellId==="fireflies") return "6 stinging motes strike for 8-12 damage each over 2 seconds. 25 mana, 5s cooldown.";
-  if(spellId==="entangle") return "Roots the monster in place for 4 seconds and guarantees your next flee attempt succeeds. 50 mana, 10s cooldown.";
-  if(spellId==="verdant_siphon") return "Channels 6 draining pulses of 5-9 nature damage each over 2 seconds, healing you for half the damage dealt on each pulse. 30 mana, 6s cooldown.";
+// v0.23.0 (Part B5); retiered v0.24: short shop-list description per spell AT A GIVEN TIER,
+// mirroring DL.itemShopSubtext()'s role for consumables -- kept out of Balance.SPELLS since
+// that object is shared verbatim with server.js and the server has no display layer. `tier`
+// defaults to 1 (used e.g. for an unowned spell's Tier I preview).
+function spellShopSubtext(spellId,tier){
+  const s=Balance.spellAtTier(spellId, tier||1);
+  if(!s) return "";
+  if(spellId==="heal_1") return `Restores ${s.heal_amount} HP. ${s.mana_cost} mana, ${s.cooldown_ms/1000}s cooldown.`;
+  if(spellId==="fireflies") return `${s.hit_count} stinging motes strike for ${s.hit_min}-${s.hit_max} damage each over ${s.duration_ms/1000} seconds. ${s.mana_cost} mana, ${s.cooldown_ms/1000}s cooldown.`;
+  // v0.24: Entangle now also carries a scaled crushing-vine DOT (Option B) alongside its root.
+  if(spellId==="entangle") return `Roots the monster in place for ${s.duration_ms/1000} seconds and guarantees your next flee attempt succeeds, while ${s.dot_hit_count} crushing pulses of ${s.dot_min}-${s.dot_max} damage strike over ${s.dot_duration_ms/1000} seconds. ${s.mana_cost} mana, ${s.cooldown_ms/1000}s cooldown.`;
+  if(spellId==="verdant_siphon") return `Channels ${s.hit_count} draining pulses of ${s.hit_min}-${s.hit_max} nature damage each over ${s.duration_ms/1000} seconds, healing you for half the damage dealt on each pulse. ${s.mana_cost} mana, ${s.cooldown_ms/1000}s cooldown.`;
   return "";
 }
 function screenMagician(){
@@ -12826,7 +13084,9 @@ function screenMagician(){
   root.appendChild(h("button",{style:{marginBottom:"8px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
   const t=toastBox(); if(t) root.appendChild(t);
 
-  root.appendChild(h("div",{class:"muted",style:{marginBottom:"10px",fontSize:".9em"}},[`Every class can learn and slot every spell. You have ${PS.getEffectiveSpellSlotCount()} spell slots, shown below your mana bar and usable in combat with your Q/E hotkeys (configurable in Settings).`]));
+  // v0.24: every spell now has 5 separately-bought tiers (I-V), gated by the same level ladder
+  // gear itemization uses, each tier an upgrade over the last.
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"10px",fontSize:".9em"}},[`Every class can learn and slot every spell, and upgrade each one through 5 tiers separately. You have ${PS.getEffectiveSpellSlotCount()} spell slots, shown below your mana bar and usable in combat with your Q/E hotkeys (configurable in Settings).`]));
 
   // v0.23.1 (#3): card grid instead of a plain row list -- same responsive
   // repeat(auto-fill,minmax(...)) technique as screenGraveyard()'s tile grid.
@@ -14056,6 +14316,11 @@ function legacyGearSection(){
 
 
 const CHANGELOG=[
+  { version:"v0.24", date:"2026-08-04 10:24", notes:[
+    "Every class now has its own distinct traveler sprite in the maze, replacing the single hooded wanderer. Each class's look draws on its own robes, armor, and gear, with a walking gait animation and a left/right flip as you move.",
+    "Spells now have five tiers each (I through V), purchased one after another as you level up, instead of a single fixed version. Each tier costs its own gold price and unlocks at its own level, and upgrades the spell's mana cost, cooldown, and magnitude along the way. Anyone who already owned a spell keeps it for free at Tier I.",
+    "Entangle's tiers now also apply a scaling crushing vine effect that deals damage over time on top of its root, growing stronger at higher tiers.",
+  ]},
   { version:"v0.23.6", date:"2026-08-03 15:15", notes:[
     "Rebalanced monster scaling: monster HP now grows a bit faster with area level while monster damage grows more slowly, so fights at higher levels last longer without hitting as hard per swing.",
     "Reworked weapon access: every class now uses exactly two weapon types (instead of some classes having far more options than others), and the Dagger is no longer usable by every class, it's now restricted like every other weapon type. Check the Itemization Guide's Weapon Class Requirements table for your class's two types.",

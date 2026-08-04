@@ -495,6 +495,10 @@ app.get("/api/characters", requireAuth, (req, res) => {
     // up on gold credited by an Auction House sale that completed while they were offline
     // or playing a different character -- see Net.refreshCharacters() client-side.
     data.gold = accountGold;
+    // v0.24: lazily migrate the old flat owned_spells array into owned_spell_tiers (Tier I,
+    // free) here too, so a character who hasn't touched the Magician since before v0.24 still
+    // sees correct tier ownership the moment they load into the game.
+    migrateSpellTiers(data);
     bySlot[row.slot] = { data, updated_at: row.updated_at };
   }
   const slots = [];
@@ -3479,7 +3483,7 @@ function combatMonsterAllowedForAreaLevel(monster, areaLevel) {
 function loadCharacterRow(accountId, slot) {
   const row = db.prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?").get(accountId, slot);
   if (!row) return null;
-  try { return JSON.parse(row.data); } catch (e) { return null; }
+  try { return migrateSpellTiers(JSON.parse(row.data)); } catch (e) { return null; }
 }
 function saveCharacterRow(accountId, slot, data) {
   data._save_seq = (data._save_seq || 0) + 1;
@@ -3667,24 +3671,106 @@ function combatHandleHardcoreDeath(accountId, username, slot, data, session) {
   return { hardcoreKilled: true };
 }
 
-/* ---------------- v0.23.0 (Part B4-B9): Spells ----------------
+/* ---------------- v0.23.0 (Part B4-B9); retiered v0.24 -----------------
    Server-authoritative spell definitions (SPELLS) used for validation/resolution --
-   index.html's SPELLS is a display-only copy that must stay byte-identical (name/price/
-   level_req/mana_cost/cooldown_ms). Every class can buy/use every spell (no class_id gate);
-   every class has exactly SPELL_SLOT_COUNT=2 active spell slots, a flat constant. */
+   index.html's SPELLS is a display-only copy that must stay byte-identical. Every class can
+   buy/use every spell (no class_id gate); every class has exactly SPELL_SLOT_COUNT=2 active
+   spell slots, a flat constant.
+
+   v0.24: reworked from one fixed price/level_req/magnitude per spell into 5 separately-bought
+   TIERS per spell (I-V), gated by the same ladder gear itemization already uses (T1=lvl1,
+   T2=lvl5, T3=lvl10, T4=lvl15, T5=lvl20) instead of each spell's own old fixed level_req.
+   Tiers must be bought in order (owning tier N-1 is required to buy tier N; see
+   POST /api/magician/buy) -- each purchase is an "upgrade" per Gwen's exact framing, not an
+   independent unlock. Shared/effect-invariant fields (name, effect, and for the queued-DOT
+   spells the fixed hit_count/duration_ms cadence) live on the outer spell object; every
+   per-tier field (level_req, price, mana_cost, cooldown_ms, and that effect's magnitude
+   field(s)) lives in .tiers[tier-1]. spellAtTier() below flattens a spell+tier into the same
+   shape the old single-tier SPELLS[spellId] objects had, so every existing effect-resolution
+   branch in POST /api/combat/:sessionId/cast keeps reading spell.heal_amount/hit_min/hit_max/
+   mana_cost/cooldown_ms/level_req unchanged -- only WHICH tier's numbers get merged in changes.
+   Entangle (v0.24, Option B per Gwen's lean): root duration_ms and cooldown_ms (locked at
+   10000ms every tier, so the max 8s root at T5 always leaves a real gap) are still NEVER
+   scaled by combatGetSpellEffectivenessMult() -- pure utility, no magnitude. It now ALSO
+   carries a scaled crushing-vine damage-over-time (dot_min/dot_max per tier, roughly half of
+   Fireflies' own curve since Entangle also locks the target), queued via the same
+   combatSettleSpellDots() mechanism Fireflies/Verdant Siphon already use, on a fixed 6-hit/2s
+   cadence (dot_hit_count/dot_duration_ms, shared across tiers like Fireflies' own hit_count/
+   duration_ms) -- see the effect:"entangle" branch in the cast endpoint below. */
 const SPELLS = {
-  heal_1: { id: "heal_1", name: "Heal", price: 300, level_req: 3, mana_cost: 15, cooldown_ms: 3000, effect: "heal", heal_amount: 50 },
-  fireflies: { id: "fireflies", name: "Fireflies", price: 600, level_req: 6, mana_cost: 25, cooldown_ms: 5000, effect: "fireflies", hit_count: 6, hit_min: 8, hit_max: 12, duration_ms: 2000 },
-  entangle: { id: "entangle", name: "Entangle", price: 1200, level_req: 10, mana_cost: 50, cooldown_ms: 10000, effect: "entangle", duration_ms: 4000 },
+  heal_1: {
+    id: "heal_1", name: "Heal", effect: "heal",
+    tiers: [
+      { tier: 1, level_req: 1, price: 300, mana_cost: 15, cooldown_ms: 3000, heal_amount: 50 },
+      { tier: 2, level_req: 5, price: 600, mana_cost: 30, cooldown_ms: 3000, heal_amount: 100 },
+      { tier: 3, level_req: 10, price: 1200, mana_cost: 45, cooldown_ms: 3000, heal_amount: 150 },
+      { tier: 4, level_req: 15, price: 2400, mana_cost: 60, cooldown_ms: 3000, heal_amount: 200 },
+      { tier: 5, level_req: 20, price: 4800, mana_cost: 75, cooldown_ms: 3000, heal_amount: 250 },
+    ],
+  },
+  fireflies: {
+    id: "fireflies", name: "Fireflies", effect: "fireflies", hit_count: 6, duration_ms: 2000,
+    tiers: [
+      { tier: 1, level_req: 1, price: 600, mana_cost: 25, cooldown_ms: 5000, hit_min: 8, hit_max: 12 },
+      { tier: 2, level_req: 5, price: 1200, mana_cost: 35, cooldown_ms: 5000, hit_min: 19, hit_max: 28 },
+      { tier: 3, level_req: 10, price: 2400, mana_cost: 45, cooldown_ms: 5000, hit_min: 36, hit_max: 55 },
+      { tier: 4, level_req: 15, price: 4800, mana_cost: 55, cooldown_ms: 5000, hit_min: 65, hit_max: 90 },
+      { tier: 5, level_req: 20, price: 9600, mana_cost: 65, cooldown_ms: 5000, hit_min: 142, hit_max: 180 },
+    ],
+  },
+  entangle: {
+    id: "entangle", name: "Entangle", effect: "entangle", dot_hit_count: 6, dot_duration_ms: 2000,
+    tiers: [
+      { tier: 1, level_req: 1, price: 1200, mana_cost: 50, cooldown_ms: 10000, duration_ms: 4000, dot_min: 4, dot_max: 6 },
+      { tier: 2, level_req: 5, price: 2400, mana_cost: 55, cooldown_ms: 10000, duration_ms: 5000, dot_min: 9, dot_max: 14 },
+      { tier: 3, level_req: 10, price: 4800, mana_cost: 60, cooldown_ms: 10000, duration_ms: 6000, dot_min: 18, dot_max: 27 },
+      { tier: 4, level_req: 15, price: 9600, mana_cost: 65, cooldown_ms: 10000, duration_ms: 7000, dot_min: 32, dot_max: 45 },
+      { tier: 5, level_req: 20, price: 19200, mana_cost: 70, cooldown_ms: 10000, duration_ms: 8000, dot_min: 71, dot_max: 90 },
+    ],
+  },
   // v0.23.1 (#2): a 4th spell, usable by every class like the 3 above (no class_id gate).
   // effect:"drain" is handled by the SAME queued-DOT branch as fireflies below (reuses the
   // exact combatSettleSpellDots() tick-queueing/catch-up-safe mechanism), just with heal_pct
   // set so each tick also heals the caster for 50% of THAT tick's own realized damage. Duration
   // (2000ms/6 ticks) and cooldown are never scaled by combatGetSpellEffectivenessMult(), same
   // as Fireflies' own duration/cooldown.
-  verdant_siphon: { id: "verdant_siphon", name: "Verdant Siphon", price: 900, level_req: 12, mana_cost: 30, cooldown_ms: 6000, effect: "drain", hit_count: 6, hit_min: 5, hit_max: 9, duration_ms: 2000, heal_pct: 0.5 },
+  verdant_siphon: {
+    id: "verdant_siphon", name: "Verdant Siphon", effect: "drain", hit_count: 6, duration_ms: 2000, heal_pct: 0.5,
+    tiers: [
+      { tier: 1, level_req: 1, price: 900, mana_cost: 30, cooldown_ms: 6000, hit_min: 5, hit_max: 9 },
+      { tier: 2, level_req: 5, price: 1800, mana_cost: 40, cooldown_ms: 6000, hit_min: 13, hit_max: 20 },
+      { tier: 3, level_req: 10, price: 3600, mana_cost: 50, cooldown_ms: 6000, hit_min: 26, hit_max: 40 },
+      { tier: 4, level_req: 15, price: 7200, mana_cost: 60, cooldown_ms: 6000, hit_min: 46, hit_max: 66 },
+      { tier: 5, level_req: 20, price: 14400, mana_cost: 70, cooldown_ms: 6000, hit_min: 95, hit_max: 133 },
+    ],
+  },
 };
 const SPELL_SLOT_COUNT = 2;
+// v0.24: flattens a spell + owned tier (1-5) into the same flat shape the old single-tier
+// SPELLS[spellId] objects had (id/name/effect/mana_cost/cooldown_ms/level_req/price plus that
+// effect's magnitude field(s)), so every existing effect-resolution branch can keep reading
+// spell.heal_amount/hit_min/hit_max/etc. unchanged. Returns null for an unknown spell id or an
+// out-of-range tier. Mirrors index.html's identical spellAtTier() exactly.
+function spellAtTier(spellId, tier) {
+  const base = SPELLS[spellId];
+  if (!base || !Number.isInteger(tier) || tier < 1 || tier > 5) return null;
+  const t = base.tiers[tier - 1];
+  if (!t) return null;
+  return Object.assign({}, base, t);
+}
+// v0.24: migrates the old flat owned_spells array (pre-tier system) into the new
+// owned_spell_tiers map the tier system actually reads, grandfathering every spell a character
+// already knew as Tier I for free -- per Gwen's exact answer ("grandfather existing spell
+// owners as Tier I, they can then buy Tiers II-V as upgrades"). Idempotent (an id already
+// present in owned_spell_tiers is left alone), so it's safe to call on every character load.
+// owned_spells itself is left untouched on the data object; owned_spell_tiers is the new
+// source of truth for ownership/casting everywhere below.
+function migrateSpellTiers(data) {
+  if (!data.owned_spell_tiers || typeof data.owned_spell_tiers !== "object") data.owned_spell_tiers = {};
+  const legacy = Array.isArray(data.owned_spells) ? data.owned_spells : [];
+  for (const id of legacy) if (!data.owned_spell_tiers[id]) data.owned_spell_tiers[id] = 1;
+  return data;
+}
 // v0.23.6 (Item 4): Wizard Set 6pc grants +WIZARD_SET_6PC_BONUS_SPELL_SLOTS on top of the flat
 // SPELL_SLOT_COUNT -- mirrors index.html's PS.getEffectiveSpellSlotCount().
 function combatGetEffectiveSpellSlotCount(data) {
@@ -3747,29 +3833,42 @@ function combatSettleSpellDots(session, data) {
 // endpoint's exact validate -> deduct gold -> mutate -> save -> respond shape (gold is
 // account-bound via getAccountGold/creditAccountGold, same pattern as every other
 // gold-spending route).
+// v0.24: buys ONE tier of a spell -- tiers are bought in strict order (tier N requires already
+// owning tier N-1; tier 1 requires owning nothing), each an "upgrade" purchase at that tier's
+// own price/level_req, per Gwen's exact spec. `req.body.tier` is now required (the old flat
+// "buy the spell outright" shape had no tier concept at all).
 app.post("/api/magician/buy", requireAuth, (req, res) => {
   const slot = Number(req.body?.slot);
   const spellId = req.body?.spell_id;
+  const tier = Number(req.body?.tier);
   if (!Number.isInteger(slot) || slot < 0 || slot >= MAX_CHARACTER_SLOTS) return res.status(400).json({ error: "Invalid slot." });
-  const spell = SPELLS[spellId];
-  if (!spell) return res.status(400).json({ error: "Unknown spell." });
+  const spellDef = SPELLS[spellId];
+  if (!spellDef) return res.status(400).json({ error: "Unknown spell." });
+  if (!Number.isInteger(tier) || tier < 1 || tier > 5) return res.status(400).json({ error: "Invalid spell tier." });
+  const tierData = spellDef.tiers[tier - 1];
 
   const row = db.prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?").get(req.account.id, slot);
   if (!row) return res.status(404).json({ error: "No character in that slot." });
   let data;
   try { data = JSON.parse(row.data); } catch (e) { return res.status(500).json({ error: "Corrupt character save." }); }
+  migrateSpellTiers(data);
 
-  const owned = Array.isArray(data.owned_spells) ? data.owned_spells.slice() : [];
-  if (owned.includes(spellId)) return res.status(400).json({ error: "You already know that spell." });
-  if ((data.level || 1) < spell.level_req) return res.status(400).json({ error: `Requires level ${spell.level_req} to learn this.` });
-  if (getAccountGold(req.account.id) < spell.price) return res.status(400).json({ error: `Not enough gold, this spell costs ${spell.price}g.` });
+  const currentTier = data.owned_spell_tiers[spellId] || 0;
+  if (currentTier >= tier) return res.status(400).json({ error: "You already know that tier." });
+  if (tier !== currentTier + 1) return res.status(400).json({ error: "Buy spell tiers in order." });
+  if ((data.level || 1) < tierData.level_req) return res.status(400).json({ error: `Requires level ${tierData.level_req} to learn this.` });
+  if (getAccountGold(req.account.id) < tierData.price) return res.status(400).json({ error: `Not enough gold, this tier costs ${tierData.price}g.` });
 
-  const accountGoldAfter = creditAccountGold(req.account.id, -spell.price);
-  owned.push(spellId);
-  data.owned_spells = owned;
+  const accountGoldAfter = creditAccountGold(req.account.id, -tierData.price);
+  data.owned_spell_tiers[spellId] = tier;
+  // Keep the legacy owned_spells array in sync too (belt-and-suspenders for any stray reader
+  // that hasn't been updated to owned_spell_tiers -- harmless either way, since
+  // migrateSpellTiers() never downgrades an entry already present in owned_spell_tiers).
+  if (!Array.isArray(data.owned_spells)) data.owned_spells = [];
+  if (!data.owned_spells.includes(spellId)) data.owned_spells.push(spellId);
   data._save_seq = (data._save_seq || 0) + 1;
   db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(JSON.stringify(data), nowIso(), req.account.id, slot);
-  res.json({ ok: true, owned_spells: data.owned_spells, account_gold: accountGoldAfter, _save_seq: data._save_seq });
+  res.json({ ok: true, owned_spell_tiers: data.owned_spell_tiers, account_gold: accountGoldAfter, _save_seq: data._save_seq });
 });
 
 // v0.23.0 (Part B6): sets/clears one of the SPELL_SLOT_COUNT flat spell slots. Slotting is a
@@ -3787,14 +3886,16 @@ app.post("/api/magician/slot", requireAuth, (req, res) => {
   if (!row) return res.status(404).json({ error: "No character in that slot." });
   let data;
   try { data = JSON.parse(row.data); } catch (e) { return res.status(500).json({ error: "Corrupt character save." }); }
+  migrateSpellTiers(data);
 
   // v0.23.6 (Item 4): bound check moved below the data load so it can use the EFFECTIVE slot
   // count (flat SPELL_SLOT_COUNT + Wizard Set 6pc bonus slot) instead of the flat constant.
   const effectiveSlotCount = combatGetEffectiveSpellSlotCount(data);
   if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex >= effectiveSlotCount) return res.status(400).json({ error: "Invalid spell slot index." });
 
-  const owned = Array.isArray(data.owned_spells) ? data.owned_spells : [];
-  if (spellId != null && !owned.includes(spellId)) return res.status(400).json({ error: "You don't own that spell." });
+  // v0.24: ownership is now tier-based -- any owned tier (>=1) is enough to slot the spell,
+  // since casting itself always resolves against whichever tier the character currently owns.
+  if (spellId != null && !(data.owned_spell_tiers[spellId] > 0)) return res.status(400).json({ error: "You don't own that spell." });
 
   const spellSlots = (Array.isArray(data.spell_slots) ? data.spell_slots.slice(0, effectiveSlotCount) : []);
   while (spellSlots.length < effectiveSlotCount) spellSlots.push(null);
@@ -4339,14 +4440,17 @@ app.post("/api/combat/:sessionId/cast", requireAuth, (req, res) => {
   if (!session) return res.status(404).json({ error: "That fight no longer exists." });
   if (session.status !== "active") return res.status(409).json({ error: "That fight has already ended." });
   const spellId = req.body?.spell_id;
-  const spell = SPELLS[spellId];
-  if (!spell) return res.status(400).json({ error: "Unknown spell." });
+  const spellDef = SPELLS[spellId];
+  if (!spellDef) return res.status(400).json({ error: "Unknown spell." });
 
   const data = loadCharacterRow(req.account.id, session.slot);
   if (!data) return res.status(404).json({ error: "No character in that slot." });
 
-  const owned = Array.isArray(data.owned_spells) ? data.owned_spells : [];
-  if (!owned.includes(spellId)) return res.status(400).json({ error: "You don't know that spell." });
+  // v0.24: casting resolves against the character's currently-OWNED tier of this spell (loadCharacterRow
+  // already ran migrateSpellTiers(), so a pre-v0.24 owner reads as Tier I here for free).
+  const ownedTier = data.owned_spell_tiers[spellId] || 0;
+  if (ownedTier < 1) return res.status(400).json({ error: "You don't know that spell." });
+  const spell = spellAtTier(spellId, ownedTier);
   const spellSlots = Array.isArray(data.spell_slots) ? data.spell_slots : [];
   if (!spellSlots.includes(spellId)) return res.status(400).json({ error: "That spell isn't slotted." });
   if ((data.level || 1) < spell.level_req) return res.status(400).json({ error: `Requires level ${spell.level_req}.` });
@@ -4414,9 +4518,19 @@ app.post("/api/combat/:sessionId/cast", requireAuth, (req, res) => {
     spellDots.push(dot);
     castResult.queued_hits = spell.hit_count;
   } else if (spell.effect === "entangle") {
-    // Not scaled by `mult` at all -- pure utility, no magnitude, per Gwen's exact spec.
+    // Root/cooldown are pure utility -- NEVER scaled by `mult`, per Gwen's exact spec.
     updateCombatSession(session.id, { rooted_until: now + spell.duration_ms, flee_override_until: now + spell.duration_ms });
     castResult.rooted_until = now + spell.duration_ms;
+    // v0.24 (Option B, Gwen's lean): Entangle also queues a scaled crushing-vine DOT on the
+    // same queued-tick mechanism Fireflies/Verdant Siphon use above, on its own fixed 6-hit/2s
+    // cadence (spellDef.dot_hit_count/dot_duration_ms, shared across every tier) -- only the
+    // per-tick dot_min/dot_max magnitude climbs by tier, and IS scaled by `mult` like any other
+    // damage magnitude (unlike the root duration/cooldown just above).
+    const dotHitCount = spellDef.dot_hit_count || 6;
+    const dotIntervalMs = Math.round((spellDef.dot_duration_ms || 2000) / dotHitCount);
+    const scaledDotMin = Math.round(spell.dot_min * mult), scaledDotMax = Math.round(spell.dot_max * mult);
+    spellDots.push({ spell_id: spellId, hits_remaining: dotHitCount, next_hit_at: now + dotIntervalMs, interval_ms: dotIntervalMs, dmg_min: scaledDotMin, dmg_max: scaledDotMax });
+    castResult.queued_hits = dotHitCount;
   }
 
   updateCombatSession(session.id, {
