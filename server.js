@@ -45,6 +45,9 @@ const VAULT_CAPACITY = 200;
 // "Admin Token" field in-game. Without it set, the admin endpoints below refuse to
 // run at all (rather than silently accepting an empty/guessable token).
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || null;
+// v0.24.2: the known-issues banner is meant to be one short line above the community XP
+// panel, not a changelog -- capped here rather than trusting the Dev Tools textarea.
+const ADMIN_ANNOUNCEMENT_MAX_LEN = 300;
 if (!ADMIN_TOKEN) {
   console.warn("ADMIN_TOKEN is not set -- leaderboard moderation endpoints are disabled until you set it.");
 }
@@ -118,6 +121,11 @@ db.exec(`
     message TEXT NOT NULL,
     created_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS admin_announcement (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    message TEXT NOT NULL DEFAULT '',
+    updated_at TEXT
+  );
   CREATE TABLE IF NOT EXISTS auction_listings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     seller_account_id INTEGER NOT NULL,
@@ -176,6 +184,7 @@ db.exec(`
   );
 `);
 db.prepare("INSERT OR IGNORE INTO season_state (id, winner_declared) VALUES (1, 0)").run();
+db.prepare("INSERT OR IGNORE INTO admin_announcement (id, message, updated_at) VALUES (1, '', NULL)").run();
 
 // Migrations for columns added after the table already existed on a live deployment --
 // SQLite's ALTER TABLE ADD COLUMN fails if the column is already there, so these are
@@ -229,9 +238,26 @@ for (const stmt of [
   // against the existing row on every save exactly like max_kill_streak above, for the
   // same reason (an out-of-order/retried save can never stomp a higher count back down).
   "ALTER TABLE leaderboard_bests ADD COLUMN total_kills INTEGER NOT NULL DEFAULT 0",
+  // v0.24.2: chat lines now carry a machine-readable kind so the client can style them
+  // without pattern matching their text. "chat" = a real player message, "system" = anything
+  // broadcastSystemMessage() emits, "death" = a character death notice, "admin" = an admin
+  // broadcast. Existing rows default to "chat"/"system" via the backfill right below.
+  "ALTER TABLE chat_messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'",
+  // v0.24.2: set exactly once by whichever path first announces a given character's death
+  // (the server-authoritative combat permadeath, or the client's own courtesy announce for
+  // deaths the server can't see, e.g. a lethal trap) so the same death can never be
+  // broadcast to global chat twice.
+  "ALTER TABLE leaderboard_bests ADD COLUMN death_announced INTEGER NOT NULL DEFAULT 0",
 ]) {
   try { db.exec(stmt); } catch (e) { /* column already exists, fine */ }
 }
+
+// v0.24.2 ONE-TIME BACKFILL: every chat line already in history predates the `kind` column
+// and got the "chat" default, which would render an old System announcement as if a player
+// had said it. Anything stored under the reserved "System" username is retroactively tagged
+// "system" (the generic style) -- old death/admin lines stay generic rather than being
+// guessed at from their wording, which is fine: only new ones need the richer styling.
+try { db.prepare("UPDATE chat_messages SET kind = 'system' WHERE username = 'System' AND kind = 'chat'").run(); } catch (e) { /* pre-migration schema, nothing to backfill */ }
 
 // v0.17 (#29) ONE-TIME MIGRATION: gold used to live per-character (inside each row's own
 // `data` JSON blob); it's now account-bound and shared. For every account that hasn't been
@@ -428,7 +454,10 @@ const app = express();
 app.use(express.json({ limit: "256kb" }));
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", CORS_ORIGIN);
-  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  // v0.24.2: X-Admin-Token added -- the admin routes have always read it, but it was never
+  // on this allowlist, so any deployment serving the client from a different origin than the
+  // API would have had every Dev Tools request fail its CORS preflight.
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Admin-Token");
   res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
@@ -578,6 +607,34 @@ app.put("/api/characters/:slot", requireAuth, (req, res) => {
         .get(incomingName, req.account.id, slot);
       if (conflict) {
         return res.status(409).json({ error: "That name is already taken -- choose another." });
+      }
+    }
+  }
+
+  // v0.24.2 BUG FIX (credit: Gwen -- "The Unbroken Chain stays 0/8", "Thin the Wanderers stays
+  // 0/10", "Ascendant Hunt step 1 stays 0/20"). Every one of those had the same cause, and it
+  // was here. Quest progress is mutated EXCLUSIVELY server-side: combatFinalizeMonsterKill()
+  // runs the kill trackers, the four report-* routes handle the client-attested quests, and the
+  // claim route grants rewards. But this route stored whatever `quests` blob the autosave sent
+  // along, and the client's own PS.quests was never refreshed from the kill response -- so the
+  // sequence was: kill a monster, server records 1/8, autosave fires a second later carrying
+  // the client's stale 0/8, and the server's own progress is erased. The board could never
+  // climb above zero no matter how many monsters died.
+  //
+  // The fix is to make this route stop accepting quest state at all. Whatever is already stored
+  // wins, unconditionally, for the five quest-owned fields. A brand new character (no stored row
+  // yet) is the one case where the incoming payload is genuinely the only source, so it is used
+  // as-is there; from the second save onward the server's copy is authoritative. The client
+  // still sends these fields (harmless, and it keeps older clients working unchanged) -- they
+  // are simply overwritten here before anything is persisted.
+  const storedRowForQuests = db.prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?").get(req.account.id, slot);
+  if (storedRowForQuests) {
+    let stored = null;
+    try { stored = JSON.parse(storedRowForQuests.data); } catch (e) { stored = null; }
+    if (stored) {
+      for (const field of ["quests", "quest_attr_bonus", "quest_bonus_hp", "unspent_quest_stat_points"]) {
+        if (stored[field] !== undefined) data[field] = stored[field];
+        else delete data[field];
       }
     }
   }
@@ -896,7 +953,13 @@ function applyTrialResolutionReset(data, classId, startingPoints, newTownTier) {
   data.unspent_stat_points = startingPoints;
   data.bonus_hp_from_attributes = 0;
   data.bonus_stamina_from_attributes = 0;
-  if (newTownTier != null) questRebuildBoardForTown(data, newTownTier);
+  // v0.24.2 (credit: Gwen): the quest board is now rebuilt on EVERY trial resolution, not just
+  // on a genuine tier change. A failed attempt drops the character back to level 1 with fresh
+  // attributes exactly like a promotion does, so leaving a half-finished board (and its earned
+  // quest_attr_bonus/quest_bonus_hp) standing meant a failure kept quest rewards a promotion
+  // would have cleared. When no new tier is given (a plain failure) the board is rebuilt for
+  // the tier the character is already in.
+  questRebuildBoardForTown(data, newTownTier != null ? newTownTier : (c && c.tier) || 1);
   // getMaxHp()'s (level-1)*hp_per_level term is 0 at level 1, and gear/attribute bonuses
   // are both freshly zeroed above -- so base_hp alone is the exact, correct level-1 max
   // (see this section's top-of-file SCOPE NOTE for why gear is deliberately excluded).
@@ -958,17 +1021,19 @@ function applyLadderReset(data) {
    quest_attr_bonus/quest_bonus_hp/unspent_quest_stat_points to zero on a town change with zero
    ambiguity about which points were whose -- no shared-pool bookkeeping needed at all. */
 
-// v-quest: gold/XP/HP rewards scale by this flat (not compounding) multiplier per town, index
-// 0 = town 1. +25%/town keeps town 5 a predictable, bounded 2x of town 1 instead of runaway
-// compounding -- lands inside the spec's own "+20-30%/town" guidance. Stat-point rewards are
-// listed per-town explicitly below instead (see QUEST_DEFS.REWARDS), NOT scaled by this
-// multiplier, since a stat point earned this town is permanent for the rest of the run and
-// must stay conservative -- see each reward table's own numbers.
-const QUEST_TOWN_REWARD_MULT = [1.0, 1.25, 1.5, 1.75, 2.0];
+// v0.24.2 (credit: Gwen): quest requirements and rewards no longer scale with the town/class
+// tier at all. Two players on the same quest were seeing different numbers (one asked for 4
+// stronghold guardians, another for 8) purely because they stood in different towns, which
+// reads as a bug rather than as progression. A quest's demands now depend only on its own
+// position in its own questline. The old per-town arrays (QUEST_TOWN_REWARD_MULT and every
+// [town1..town5] TARGETS/REWARDS array) are gone; each value below is a single fixed number,
+// taken from what town 1 used to ask for. Escalation now lives exclusively in the multi-step
+// questlines (WARDEN_TRIAL_STEPS and ASCENDANT_HUNT_STEPS), where the step number is shown to
+// the player so a rising target is legible as progress instead of as drift.
 
-// Single source of truth for the whole quest board -- towns are tunable purely by editing the
-// per-town array entries below (index 0 = town 1 .. index 4 = town 5), nothing scattered in
-// per-town `if` branches anywhere else in this file.
+// Single source of truth for the whole quest board -- every requirement and reward is tunable
+// purely by editing the values below, nothing scattered in per-town `if` branches anywhere
+// else in this file.
 const QUEST_DEFS = {
   IDS: ["explore", "wardens", "gatherer", "wanderers", "streak", "cauldron", "elder", "palisade", "pacifist"],
   NAMES: {
@@ -989,25 +1054,36 @@ const QUEST_DEFS = {
   // mid-late gate in every town's own arc (town 1 runs levels 1-10 before trial eligibility,
   // town 2 runs 1-20, town 3+ runs 1-30/40 -- see trialLevelRequirement()), not just town 1's.
   LEVEL_REQ: { explore: 1, wardens: 1, gatherer: 1, wanderers: 6, streak: 3, cauldron: 2, elder: 8, palisade: 1, pacifist: 1 },
+  // Fixed, town-independent. See the de-scaling note above this object.
   TARGETS: {
-    explore_area_level: [3, 6, 9, 12, 15],
-    // v-quest: town 1-2 = 1 stronghold's 4 guardians in one delve; town 3+ = 2 strongholds'
-    // worth (8 guardian kills) in one delve, modeled as a flat kill-count target rather than a
-    // separate strongholds-cleared counter -- see questTrackGuardianKill()'s own comment for
-    // why (no formal per-stronghold identity exists server-side to count against directly).
-    wardens_guardian_kills: [4, 4, 8, 8, 8],
-    gatherer_herbs: [12, 16, 20, 24, 28],
-    wanderers_roamers: [10, 14, 18, 22, 26],
-    streak_kills: [8, 10, 12, 14, 16],
-    // v0.24.1 (B6): "cauldron" no longer counts total brews -- see CAULDRON_DISTINCT_TARGET
-    // below, which replaces this per-town-scaled count with a single fixed "7 distinct
-    // recipes" target. Removed rather than left dead so nothing accidentally reads a stale
-    // per-town number here.
+    gatherer_herbs: 12,
+    wanderers_roamers: 10,
+    streak_kills: 8,
     // v-quest: "in the town" = a running total across the WHOLE town's play, never reset
     // between delves (unlike wardens/streak/explore, which require completion within one
     // continuous delve) -- see questTrackStrongholdChestReport() below.
-    palisade_chests: [1, 1, 2, 2, 3],
+    palisade_chests: 1,
   },
+  // v0.24.2 (credit: Gwen): "The Four Wardens" is now a 5-step questline, mirroring
+  // ASCENDANT_HUNT_STEPS' shape exactly -- each step is claimed at the board before
+  // the next unlocks, and the card shows "Step N/5" so a rising target reads as progression.
+  // Two changes to how a guardian kill counts, both per Gwen:
+  //   1. The old "within the first N area levels" band gate is gone entirely. A stronghold
+  //      guardian counts at ANY area level.
+  //   2. Every step must still be completed within ONE delve -- a single continuous run out of
+  //      town, across as many area levels as the player can chain, ending only when they
+  //      return to town or die (this is exactly the kill-streak run: see
+  //      questTrackGuardianKill()'s comment for how the delve boundary is detected). A
+  //      stronghold holds 4 guardians, so step 5's 20 guardians means roughly five strongholds
+  //      without going home. That difficulty is intentional; the rewards are sized for it.
+  // Total across all 5 steps: +20 stat points, 24,700 XP, 41,000 gold.
+  WARDEN_TRIAL_STEPS: [
+    { count: 4, stat_points: 2, xp: 300, gold: 500 },
+    { count: 8, stat_points: 3, xp: 900, gold: 1500 },
+    { count: 12, stat_points: 4, xp: 2500, gold: 4000 },
+    { count: 16, stat_points: 5, xp: 6000, gold: 10000 },
+    { count: 20, stat_points: 6, xp: 15000, gold: 25000 },
+  ],
   // v0.24.1 (B4): "elder" is now a 5-step questline through every band in order, replacing the
   // old single "kill N of band X" target -- each step must be individually claimed at the board
   // before the next one unlocks (see the claim endpoint's "elder" branch, which advances
@@ -1031,10 +1107,13 @@ const QUEST_DEFS = {
   // per-town TARGETS.cauldron_brews count entirely. See questTrackBrewReport() below for how
   // the entry's new `distinct_brewed` array (instead of a plain counter) is tracked.
   CAULDRON_DISTINCT_TARGET: 7,
-  // v-quest: from town 2 on, at least 1 of the distinct recipes brewed toward the target must
-  // be one of ATTR_POTION_IDS below -- see questTrackBrewReport()'s richer entry shape
-  // (progress/target PLUS attr_potion_brewed) for how this sub-requirement is modeled.
-  CAULDRON_ATTR_POTION_REQUIRED: [false, true, true, true, true],
+  // v0.24.2: this used to be a per-town array ([false, true, true, true, true]) requiring at
+  // least one attribute potion among the distinct recipes from town 2 onward. Under the
+  // de-scaling rule it takes town 1's value, false, so the sub-requirement is inactive
+  // everywhere and "brew 7 different potions" is the whole objective. Kept as a single flag
+  // rather than deleted so it can be switched back on for every town with a one-word edit,
+  // and so entry.attr_potion_brewed keeps being tracked either way.
+  CAULDRON_ATTR_POTION_REQUIRED: false,
   ATTR_POTION_IDS: ["potion_of_might", "potion_of_swiftness", "potion_of_intellect"],
   // v-quest: every valid brew RESULT item id (mirrors index.html's ALCHEMY_RECIPES result_item
   // list verbatim) -- COMBAT_CONSUMABLES above is deliberately narrower (only what combat's
@@ -1046,21 +1125,16 @@ const QUEST_DEFS = {
     "elixir_of_eyesight", "potion_of_might", "potion_of_swiftness", "potion_of_intellect", "potion_of_wardveil",
     "potion_of_renewal", "antidote", "elixir_of_clarity",
   ],
+  // Fixed, town-independent. See the de-scaling note above this object. "wardens" has no
+  // entry here at all any more -- its rewards live per-step in WARDEN_TRIAL_STEPS, the same
+  // way "elder" reads from ASCENDANT_HUNT_STEPS.
   REWARDS: {
-    explore: { hp: [50, 63, 75, 88, 100], gold: [500, 625, 750, 875, 1000] },
-    wardens: { stat_points: [2, 2, 3, 3, 4], xp: [200, 250, 300, 350, 400] },
-    // v-quest: town 1-2 grant a Clairvoyance elixir, town 3-4 switch to Eyesight (the
-    // "better elixir at higher towns" escalation), town 5 grants both.
-    gatherer: { elixirs: [["elixir_of_clarity"], ["elixir_of_clarity"], ["elixir_of_eyesight"], ["elixir_of_eyesight"], ["elixir_of_clarity", "elixir_of_eyesight"]] },
-    wanderers: { hp: [80, 100, 120, 140, 160], gold: [1800, 2250, 2700, 3150, 3600], xp: [400, 500, 600, 700, 800] },
-    streak: { gold: [600, 750, 900, 1050, 1200], xp: [250, 313, 375, 438, 500] },
-    cauldron: { elixirs: [["elixir_of_eyesight"], ["elixir_of_eyesight"], ["elixir_of_eyesight"], ["elixir_of_eyesight"], ["elixir_of_eyesight"]], stat_points: [1, 1, 2, 2, 2] },
-    // v0.24.1 (B4): "elder" reward moved to the fixed, non-town-scaled ASCENDANT_HUNT_STEPS
-    // table above (see the claim endpoint's "elder" branch) -- no per-town REWARDS entry here
-    // anymore, and no gear roll (the questline pays in stat points + XP only).
-    // key tier = town+1 (the NEXT tier's key), clamped to ITEM_TIER_MAX at town 5 (see the
-    // claim endpoint) -- not hardcoded here either.
-    palisade: { gold: [900, 1125, 1350, 1575, 1800] },
+    explore: { hp: 50, gold: 500 },
+    gatherer: { elixirs: ["elixir_of_clarity"] },
+    wanderers: { hp: 80, gold: 1800, xp: 400 },
+    streak: { gold: 600, xp: 250 },
+    cauldron: { elixirs: ["elixir_of_eyesight"], stat_points: 1 },
+    palisade: { gold: 900 },
   },
   // v0.24.1 (B5 "The Pacifist"): a single fixed reward, deliberately NOT town-scaled (like
   // ASCENDANT_HUNT_STEPS above) -- this is a one-time "did you ever pull off a pure-Thorns
@@ -1081,38 +1155,44 @@ function questTownIndex(town) { return cbClampi(town, 1, 5) - 1; }
 // Fresh `entries` for a given town -- level-gated quests start "locked", the rest start
 // "active" immediately. Mirrors the exact target numbers in QUEST_DEFS.TARGETS above.
 function questBuildEntriesForTown(town) {
-  const idx = questTownIndex(town);
   const entries = {};
-  for (const qid of QUEST_DEFS.IDS) {
-    let target = 1; // explore is a single boolean "fully explored this delve" report --
-    // the actual area-level requirement (QUEST_DEFS.TARGETS.explore_area_level) is validated
-    // against the report itself, not tracked as a running progress count.
-    if (qid === "wardens") target = QUEST_DEFS.TARGETS.wardens_guardian_kills[idx];
-    else if (qid === "gatherer") target = QUEST_DEFS.TARGETS.gatherer_herbs[idx];
-    else if (qid === "wanderers") target = QUEST_DEFS.TARGETS.wanderers_roamers[idx];
-    else if (qid === "streak") target = QUEST_DEFS.TARGETS.streak_kills[idx];
-    // v0.24.1 (B6): "cauldron" no longer reads a per-town count -- fixed 7-distinct-recipes
-    // target, same at every town (see CAULDRON_DISTINCT_TARGET's own comment).
-    else if (qid === "cauldron") target = QUEST_DEFS.CAULDRON_DISTINCT_TARGET;
-    else if (qid === "palisade") target = QUEST_DEFS.TARGETS.palisade_chests[idx];
-    let entry;
-    if (qid === "elder") {
-      // v0.24.1 (B4): "elder" is now step-based -- see ASCENDANT_HUNT_STEPS. Not town-scaled;
-      // every town starts this questline fresh at step 1 (band difficulty IS the escalation).
-      entry = { step: 1, progress: 0, target: QUEST_DEFS.ASCENDANT_HUNT_STEPS[0].count, status: QUEST_DEFS.LEVEL_REQ[qid] <= 1 ? "active" : "locked" };
-    } else {
-      entry = { progress: 0, target, status: QUEST_DEFS.LEVEL_REQ[qid] <= 1 ? "active" : "locked" };
-    }
-    // v0.24.1 (B6): distinct_brewed replaces the old plain brew-count progress semantics --
-    // `progress` is now simply `distinct_brewed.length` (kept in sync by report-brew below) so
-    // every OTHER piece of code that already reads entry.progress/target (the board UI, the
-    // claim endpoint's readiness check) keeps working unmodified.
-    if (qid === "cauldron") { entry.attr_potion_brewed = false; entry.distinct_brewed = []; }
-    if (qid === "wardens") entry._delve_streak_marker = 0; // internal bookkeeping, see questTrackGuardianKill()
-    entries[qid] = entry;
-  }
+  for (const qid of QUEST_DEFS.IDS) entries[qid] = questBuildEntry(qid);
   return entries;
 }
+
+// v0.24.2: extracted out of questBuildEntriesForTown() so questEnsureState() below can
+// BACKFILL a single missing entry without rebuilding (and thereby wiping) the whole board.
+// That gap is what made "The Pacifist" show as locked with the nonsensical "Unlocks at Level
+// 1" caption for every character created before it existed: questEnsureState() migrated the
+// reshaped "elder" and "cauldron" entries but had no path for a quest id that was simply
+// absent, so the board fell through to a hardcoded {status:"locked"} placeholder.
+// No town parameter any more -- no target here depends on the town (see the de-scaling note
+// above QUEST_DEFS).
+function questBuildEntry(qid) {
+  let target = 1; // explore is a single boolean "fully explored this delve" report.
+  if (qid === "gatherer") target = QUEST_DEFS.TARGETS.gatherer_herbs;
+  else if (qid === "wanderers") target = QUEST_DEFS.TARGETS.wanderers_roamers;
+  else if (qid === "streak") target = QUEST_DEFS.TARGETS.streak_kills;
+  else if (qid === "cauldron") target = QUEST_DEFS.CAULDRON_DISTINCT_TARGET;
+  else if (qid === "palisade") target = QUEST_DEFS.TARGETS.palisade_chests;
+  let entry;
+  if (qid === "elder") {
+    entry = { step: 1, progress: 0, target: QUEST_DEFS.ASCENDANT_HUNT_STEPS[0].count, status: questInitialStatus(qid) };
+  } else if (qid === "wardens") {
+    // v0.24.2: "wardens" is step-based now too, same shape as "elder" -- see WARDEN_TRIAL_STEPS.
+    entry = { step: 1, progress: 0, target: QUEST_DEFS.WARDEN_TRIAL_STEPS[0].count, status: questInitialStatus(qid) };
+  } else {
+    entry = { progress: 0, target, status: questInitialStatus(qid) };
+  }
+  if (qid === "cauldron") { entry.attr_potion_brewed = false; entry.distinct_brewed = []; }
+  if (qid === "wardens") entry._delve_streak_marker = 0; // internal bookkeeping, see questTrackGuardianKill()
+  return entry;
+}
+
+// v0.24.2: a LEVEL_REQ of 1 is not a gate at all (every character is level 1 or above from the
+// moment it exists), so such a quest must always start active. Centralised here rather than
+// repeated inline so the board and the unlock pass can never disagree about it.
+function questInitialStatus(qid) { return (QUEST_DEFS.LEVEL_REQ[qid] || 1) <= 1 ? "active" : "locked"; }
 
 // Rebuilds the ENTIRE quests object for `town`, and clears every town-scoped quest reward
 // pool alongside it (quest_attr_bonus/quest_bonus_hp/unspent_quest_stat_points) -- called
@@ -1145,8 +1225,12 @@ function questEnsureState(data) {
   if (typeof data.unspent_quest_stat_points !== "number") data.unspent_quest_stat_points = 0;
   const level = data.level || 1;
   for (const qid of QUEST_DEFS.IDS) {
+    // v0.24.2 BUG FIX (credit: Gwen, "The Pacifist" showing as locked): backfill any quest id
+    // that simply isn't on this character's board yet. Every quest added after a character was
+    // created hit this gap -- the migrations below only reshaped entries that already existed.
+    if (!data.quests.entries[qid]) data.quests.entries[qid] = questBuildEntry(qid);
     const entry = data.quests.entries[qid];
-    if (entry && entry.status === "locked" && level >= QUEST_DEFS.LEVEL_REQ[qid]) entry.status = "active";
+    if (entry.status === "locked" && level >= QUEST_DEFS.LEVEL_REQ[qid]) entry.status = "active";
   }
   // v0.24.1 (B4): migrate a legacy "elder" entry (pre-Ascendant-Hunt save, or one that somehow
   // lost its step field) onto the new step-based shape -- fresh start at step 1, since the old
@@ -1163,6 +1247,32 @@ function questEnsureState(data) {
   // anything" has no honest equivalent under "7 DIFFERENT recipes", so this resets progress to
   // 0 rather than carry over a count that may not represent 7 distinct items at all. A
   // "ready"/"claimed" legacy entry is reset to "active" too, same as the elder migration above.
+  // v0.24.2: migrate a legacy "wardens" entry (a flat progress/target count, pre-Warden-Trials)
+  // onto the new step-based shape. Starts fresh at step 1: the old count was a single one-off
+  // target with no meaningful position in the new 5-step chain, and every step must be earned
+  // within one delve anyway, so carrying a partial count forward would be inventing progress.
+  const wardensEntry = data.quests.entries.wardens;
+  if (wardensEntry && typeof wardensEntry.step !== "number") {
+    wardensEntry.step = 1;
+    wardensEntry.progress = 0;
+    wardensEntry.target = QUEST_DEFS.WARDEN_TRIAL_STEPS[0].count;
+    wardensEntry._delve_streak_marker = 0;
+    if (wardensEntry.status === "ready" || wardensEntry.status === "claimed") wardensEntry.status = "active";
+  }
+  // v0.24.2: every entry's target is re-pinned to today's fixed value on load, so a character
+  // saved under the old per-town scaling (e.g. a town-4 board asking for 22 roamers) is
+  // corrected in place instead of keeping a target no longer offered anywhere. Progress
+  // already made is kept, and clamped down if it now overshoots.
+  for (const qid of ["gatherer", "wanderers", "streak", "palisade"]) {
+    const e = data.quests.entries[qid];
+    if (!e) continue;
+    const fresh = questBuildEntry(qid);
+    if (e.target !== fresh.target) {
+      e.target = fresh.target;
+      e.progress = Math.min(e.progress || 0, e.target);
+      if (e.status === "active" && e.progress >= e.target) e.status = "ready";
+    }
+  }
   const cauldronEntry = data.quests.entries.cauldron;
   if (cauldronEntry && !Array.isArray(cauldronEntry.distinct_brewed)) {
     cauldronEntry.distinct_brewed = [];
@@ -1195,27 +1305,30 @@ function questTrackRoamerKill(data) {
   if (entry.progress >= entry.target) entry.status = "ready";
 }
 
-// v-quest (Q2 "wardens"): guardian kills ARE genuinely server-resolved (is_guardian kills
-// only ever happen through the validated combat attack endpoint), but WHICH stronghold a
-// given guardian belongs to is NOT known server-side -- maze/stronghold generation is still
-// entirely client-side (see the top-of-file BACKLOG note on server-authoritative maze
-// generation), so there's no real per-stronghold identity to count guardian kills against.
-// Best available proxy for "within one delve": data.kill_streak, which the client already
-// resets to 0 on every town return and combatIncrementKillStreak() bumps on every kill
-// (guardians included) -- a genuinely continuous delve therefore has a kill_streak that never
-// drops across all of that delve's guardian kills. We remember the kill_streak value at the
-// guardian kill that last advanced this quest's progress (_delve_streak_marker); if a LATER
-// guardian kill's kill_streak is lower than that marker, the streak must have reset in
-// between (town return, death, etc.) -- i.e. a new delve -- so progress restarts at 1 for
-// this kill instead of accumulating further. Also gated to the town-appropriate area-level
-// band (reuses that town's own explore_area_level target as the band ceiling, rather than a
-// separate magic number), mirroring "within the first 3 area levels" scaling per town.
+// v-quest / v0.24.2 (Q2 "wardens" -- "The Warden Trials"): guardian kills ARE genuinely
+// server-resolved (is_guardian kills only ever happen through the validated combat attack
+// endpoint), but WHICH stronghold a given guardian belongs to is NOT known server-side --
+// maze/stronghold generation is still entirely client-side (see the top-of-file BACKLOG note
+// on server-authoritative maze generation), so there's no real per-stronghold identity to
+// count guardian kills against. That is why every step of this line counts GUARDIANS rather
+// than strongholds cleared.
+//
+// "Within one delve" is detected via data.kill_streak, which the client resets to 0 on every
+// town return, death, and fresh venture, and combatIncrementKillStreak() bumps on every kill
+// (guardians included) -- so a genuinely continuous delve has a kill_streak that never drops
+// across all of that delve's guardian kills, no matter how many area levels it spans. We
+// remember the kill_streak value at the guardian kill that last advanced progress
+// (_delve_streak_marker); if a LATER guardian kill's kill_streak is lower than that marker,
+// the streak must have reset in between (town return, death) -- a new delve -- so progress
+// restarts at 1 for this kill instead of accumulating further.
+//
+// v0.24.2 (credit: Gwen): the old area-level band gate is REMOVED. This used to return early
+// unless areaLevel was within that town's explore_area_level target, which both hid progress
+// for no visible reason and was itself a form of the town scaling Gwen asked to be rid of.
+// Wardens count anywhere now.
 function questTrackGuardianKill(data, areaLevel) {
   const entry = data.quests.entries.wardens;
   if (!entry || entry.status !== "active") return;
-  const idx = questTownIndex(data.quests.town);
-  const maxBandLevel = QUEST_DEFS.TARGETS.explore_area_level[idx];
-  if ((areaLevel || 1) > maxBandLevel) return;
   const streak = data.kill_streak || 0;
   if (streak < (entry._delve_streak_marker || 0)) entry.progress = 0;
   entry._delve_streak_marker = streak;
@@ -1480,8 +1593,8 @@ app.post("/api/trial/attempt", requireAuth, (req, res) => {
       xp_to_next: data.xp_to_next,
       attributes: data.attributes,
       unspent_stat_points: data.unspent_stat_points,
-      current_hp: data.current_hp,
-      current_stamina: data.current_stamina,
+      current_hp: cbInt(data.current_hp),
+      current_stamina: cbInt(data.current_stamina),
       max_maze_depth_reached: data.max_maze_depth_reached,
       last_bridge_steps: data.last_bridge_steps,
       bridge_fail_streak: data.bridge_fail_streak,
@@ -1544,8 +1657,8 @@ app.post("/api/trial/attempt", requireAuth, (req, res) => {
     xp_to_next: data.xp_to_next,
     attributes: data.attributes,
     unspent_stat_points: data.unspent_stat_points,
-    current_hp: data.current_hp,
-    current_stamina: data.current_stamina,
+    current_hp: cbInt(data.current_hp),
+    current_stamina: cbInt(data.current_stamina),
     max_maze_depth_reached: data.max_maze_depth_reached,
     last_bridge_steps: data.last_bridge_steps,
     bridge_fail_streak: data.bridge_fail_streak,
@@ -1583,50 +1696,70 @@ app.post("/api/quests/:questId/claim", requireAuth, (req, res) => {
   // Re-derive readiness server-side -- never trust a client-sent status, mirrors every other
   // reward-granting route in this file (trial resolution, combat kills, Blacksmith crafts).
   if (!entry || entry.status !== "ready") return res.status(400).json({ error: "That quest isn't ready to claim." });
-  if (questId === "cauldron" && QUEST_DEFS.CAULDRON_ATTR_POTION_REQUIRED[questTownIndex(data.quests.town)] && !entry.attr_potion_brewed) {
+  if (questId === "cauldron" && QUEST_DEFS.CAULDRON_ATTR_POTION_REQUIRED && !entry.attr_potion_brewed) {
     return res.status(400).json({ error: "That quest isn't ready to claim." });
   }
 
-  const idx = questTownIndex(data.quests.town);
   const reward = { quest_id: questId };
 
   if (questId === "explore") {
-    data.quest_bonus_hp = (data.quest_bonus_hp || 0) + QUEST_DEFS.REWARDS.explore.hp[idx];
-    creditAccountGold(req.account.id, QUEST_DEFS.REWARDS.explore.gold[idx]);
-    reward.quest_bonus_hp = QUEST_DEFS.REWARDS.explore.hp[idx];
-    reward.gold = QUEST_DEFS.REWARDS.explore.gold[idx];
+    data.quest_bonus_hp = (data.quest_bonus_hp || 0) + QUEST_DEFS.REWARDS.explore.hp;
+    creditAccountGold(req.account.id, QUEST_DEFS.REWARDS.explore.gold);
+    reward.quest_bonus_hp = QUEST_DEFS.REWARDS.explore.hp;
+    reward.gold = QUEST_DEFS.REWARDS.explore.gold;
   } else if (questId === "wardens") {
-    data.unspent_quest_stat_points = (data.unspent_quest_stat_points || 0) + QUEST_DEFS.REWARDS.wardens.stat_points[idx];
-    const xpResult = combatAddXp(data, QUEST_DEFS.REWARDS.wardens.xp[idx]);
+    // v0.24.2: step-based, exactly like "elder" below -- fixed per-step reward off
+    // WARDEN_TRIAL_STEPS, and a mid-chain claim advances to the next step instead of
+    // terminating the quest.
+    const stepIdx = (entry.step || 1) - 1;
+    const stepDef = QUEST_DEFS.WARDEN_TRIAL_STEPS[stepIdx] || QUEST_DEFS.WARDEN_TRIAL_STEPS[0];
+    data.unspent_quest_stat_points = (data.unspent_quest_stat_points || 0) + stepDef.stat_points;
+    creditAccountGold(req.account.id, stepDef.gold);
+    const xpResult = combatAddXp(data, stepDef.xp);
     if (xpResult.leveled) maybeDeclareSeasonWinner(req.account.id, data);
-    reward.stat_points = QUEST_DEFS.REWARDS.wardens.stat_points[idx];
+    reward.stat_points = stepDef.stat_points;
+    reward.gold = stepDef.gold;
     reward.xp = xpResult.xpGained;
+    reward.step = entry.step || 1;
+    reward.step_count = QUEST_DEFS.WARDEN_TRIAL_STEPS.length;
+    if (stepIdx + 1 < QUEST_DEFS.WARDEN_TRIAL_STEPS.length) {
+      entry.step = stepIdx + 2;
+      entry.progress = 0;
+      entry.target = QUEST_DEFS.WARDEN_TRIAL_STEPS[stepIdx + 1].count;
+      // A fresh step must be earned in its own delve from scratch, so the marker resets too --
+      // otherwise the guardian kills already banked this delve would carry into the next step.
+      entry._delve_streak_marker = data.kill_streak || 0;
+      entry.status = "active";
+      reward.done = false;
+    } else {
+      reward.done = true;
+    }
   } else if (questId === "gatherer") {
-    for (const itemId of QUEST_DEFS.REWARDS.gatherer.elixirs[idx]) combatAddConsumable(data, itemId, 1);
+    for (const itemId of QUEST_DEFS.REWARDS.gatherer.elixirs) combatAddConsumable(data, itemId, 1);
     // Applies the SAME Experience Shrine buff the in-maze shrine grants (see
     // combatGetShrineXpPct()'s own comment for how these two fields are consumed).
     data.xp_buff_multiplier = QUEST_DEFS.SHRINE_XP_BUFF_MULT;
     data.xp_buff_encounters_left = (data.xp_buff_encounters_left || 0) + QUEST_DEFS.SHRINE_XP_BUFF_ENCOUNTERS;
-    reward.elixirs = QUEST_DEFS.REWARDS.gatherer.elixirs[idx];
+    reward.elixirs = QUEST_DEFS.REWARDS.gatherer.elixirs;
   } else if (questId === "wanderers") {
-    data.quest_bonus_hp = (data.quest_bonus_hp || 0) + QUEST_DEFS.REWARDS.wanderers.hp[idx];
-    creditAccountGold(req.account.id, QUEST_DEFS.REWARDS.wanderers.gold[idx]);
-    const xpResult = combatAddXp(data, QUEST_DEFS.REWARDS.wanderers.xp[idx]);
+    data.quest_bonus_hp = (data.quest_bonus_hp || 0) + QUEST_DEFS.REWARDS.wanderers.hp;
+    creditAccountGold(req.account.id, QUEST_DEFS.REWARDS.wanderers.gold);
+    const xpResult = combatAddXp(data, QUEST_DEFS.REWARDS.wanderers.xp);
     if (xpResult.leveled) maybeDeclareSeasonWinner(req.account.id, data);
-    reward.quest_bonus_hp = QUEST_DEFS.REWARDS.wanderers.hp[idx];
-    reward.gold = QUEST_DEFS.REWARDS.wanderers.gold[idx];
+    reward.quest_bonus_hp = QUEST_DEFS.REWARDS.wanderers.hp;
+    reward.gold = QUEST_DEFS.REWARDS.wanderers.gold;
     reward.xp = xpResult.xpGained;
   } else if (questId === "streak") {
-    creditAccountGold(req.account.id, QUEST_DEFS.REWARDS.streak.gold[idx]);
-    const xpResult = combatAddXp(data, QUEST_DEFS.REWARDS.streak.xp[idx]);
+    creditAccountGold(req.account.id, QUEST_DEFS.REWARDS.streak.gold);
+    const xpResult = combatAddXp(data, QUEST_DEFS.REWARDS.streak.xp);
     if (xpResult.leveled) maybeDeclareSeasonWinner(req.account.id, data);
-    reward.gold = QUEST_DEFS.REWARDS.streak.gold[idx];
+    reward.gold = QUEST_DEFS.REWARDS.streak.gold;
     reward.xp = xpResult.xpGained;
   } else if (questId === "cauldron") {
-    for (const itemId of QUEST_DEFS.REWARDS.cauldron.elixirs[idx]) combatAddConsumable(data, itemId, 1);
-    data.unspent_quest_stat_points = (data.unspent_quest_stat_points || 0) + QUEST_DEFS.REWARDS.cauldron.stat_points[idx];
-    reward.elixirs = QUEST_DEFS.REWARDS.cauldron.elixirs[idx];
-    reward.stat_points = QUEST_DEFS.REWARDS.cauldron.stat_points[idx];
+    for (const itemId of QUEST_DEFS.REWARDS.cauldron.elixirs) combatAddConsumable(data, itemId, 1);
+    data.unspent_quest_stat_points = (data.unspent_quest_stat_points || 0) + QUEST_DEFS.REWARDS.cauldron.stat_points;
+    reward.elixirs = QUEST_DEFS.REWARDS.cauldron.elixirs;
+    reward.stat_points = QUEST_DEFS.REWARDS.cauldron.stat_points;
   } else if (questId === "elder") {
     // v0.24.1 (B4): fixed per-step reward off ASCENDANT_HUNT_STEPS -- deliberately NOT scaled
     // by town idx (see that constant's own comment). No gear roll; this questline pays in
@@ -1652,11 +1785,11 @@ app.post("/api/quests/:questId/claim", requireAuth, (req, res) => {
       reward.done = true;
     }
   } else if (questId === "palisade") {
-    creditAccountGold(req.account.id, QUEST_DEFS.REWARDS.palisade.gold[idx]);
+    creditAccountGold(req.account.id, QUEST_DEFS.REWARDS.palisade.gold);
     const keyTier = cbClampi((data.quests.town || 1) + 1, 1, ITEM_TIER_MAX);
     const keyItemId = combatStrongholdKeyItemIdForTier(keyTier);
     combatAddConsumable(data, keyItemId, 1);
-    reward.gold = QUEST_DEFS.REWARDS.palisade.gold[idx];
+    reward.gold = QUEST_DEFS.REWARDS.palisade.gold;
     reward.key_item_id = keyItemId;
   } else if (questId === "pacifist") {
     // v0.24.1 (B5): single fixed non-town-scaled reward -- see PACIFIST_REWARD's own comment.
@@ -1674,17 +1807,18 @@ app.post("/api/quests/:questId/claim", requireAuth, (req, res) => {
     reward.potions = potions;
   }
 
-  // v0.24.1 (B4): a mid-chain "elder" claim already set entry.status = "active" (with the next
-  // step's progress/target) above -- do NOT stomp that back to "claimed" here. Every other
-  // quest, and a step-5 "elder" claim, still terminate normally.
-  if (!(questId === "elder" && entry.status === "active")) entry.status = "claimed";
+  // v0.24.1 (B4) / v0.24.2: a mid-chain "elder" or "wardens" claim already set entry.status =
+  // "active" (with the next step's progress/target) above -- do NOT stomp that back to
+  // "claimed" here. Every other quest, and a final-step claim on either questline, still
+  // terminate normally.
+  if (!((questId === "elder" || questId === "wardens") && entry.status === "active")) entry.status = "claimed";
   const saveSeq = saveCharacterRow(req.account.id, slot, data);
   res.json({
     ok: true, reward, quests: data.quests,
     quest_attr_bonus: data.quest_attr_bonus, quest_bonus_hp: data.quest_bonus_hp,
     unspent_quest_stat_points: data.unspent_quest_stat_points,
     level: data.level, xp: data.xp, xp_to_next: data.xp_to_next,
-    current_hp: data.current_hp, max_hp: combatGetMaxHp(data),
+    current_hp: cbInt(data.current_hp), max_hp: combatGetMaxHp(data),
     account_gold: getAccountGold(req.account.id), _save_seq: saveSeq,
   });
 });
@@ -1779,8 +1913,7 @@ app.post("/api/quests/report-brew", requireAuth, (req, res) => {
   if (!entry.distinct_brewed.includes(itemId)) entry.distinct_brewed.push(itemId);
   entry.progress = Math.min(entry.target, entry.distinct_brewed.length);
   if (QUEST_DEFS.ATTR_POTION_IDS.includes(itemId)) entry.attr_potion_brewed = true;
-  const idx = questTownIndex(data.quests.town);
-  const subReqMet = !QUEST_DEFS.CAULDRON_ATTR_POTION_REQUIRED[idx] || entry.attr_potion_brewed;
+  const subReqMet = !QUEST_DEFS.CAULDRON_ATTR_POTION_REQUIRED || entry.attr_potion_brewed;
   if (entry.progress >= entry.target && subReqMet) entry.status = "ready";
   const saveSeq = saveCharacterRow(req.account.id, slot, data);
   res.json({ ok: true, quests: data.quests, _save_seq: saveSeq });
@@ -2753,8 +2886,10 @@ const CB = {
   // that used to belong to guardians. Must stay in sync with Balance.STRONGHOLD_GUARDIAN_HP_MULT/
   // XP_MULT/DAMAGE_MULT and Balance.ROAMING_MOB_HP_MULT/DAMAGE_MULT/XP_MULT in index.html.
   STRONGHOLD_GUARDIAN_HP_MULT: 4.0, STRONGHOLD_GUARDIAN_XP_MULT: 2.0, STRONGHOLD_GUARDIAN_DAMAGE_MULT: 1.5,
-  // v0.21 (#5): doubled per Gwen's exact request (was 0.15) -- mirrors Balance.STRONGHOLD_KEY_DROP_CHANCE in index.html.
-  STRONGHOLD_KEY_DROP_CHANCE: 0.30,
+  // v0.24.2: cut from 0.30 to 0.05 per Gwen -- a Stronghold Key is now a genuinely rare
+  // per-guardian drop rather than something most guardians hand over. Mirrors
+  // Balance.STRONGHOLD_KEY_DROP_CHANCE in index.html.
+  STRONGHOLD_KEY_DROP_CHANCE: 0.05,
   ROAMING_MOB_HP_MULT: 3.0, ROAMING_MOB_DAMAGE_MULT: 1.0, ROAMING_MOB_XP_MULT: 1.5,
   // v0.20.1 (#10): every kill now gets a shot at a SECOND (and rarely third) loot drop, on
   // top of the always-resolved first drop above -- base chance is deliberately small so it
@@ -2861,6 +2996,15 @@ const COMBAT_ITEM_SETS = {
   windrider_set: { display_name: "", pieces: {}, bonuses: [] },
 };
 
+// v0.24.2 (credit: Gwen): there is no such thing as half a point of Health, Stamina, Mana or
+// damage in this game, so nothing fractional may ever reach the client. Damage, Thorns, DOT
+// ticks, monster HP and every max-pool figure are already rounded at their own source (see
+// combatMonsterHp()/combatGetMaxHp()). Regen is the one exception that must stay fractional
+// INTERNALLY: it accrues at rates well below 1 per tick, and rounding the stored value each
+// tick would floor those increments away and stop slow regen from ever accumulating at all.
+// So regen keeps its precision in the saved row and gets rounded here, once, on its way out --
+// every combat response's player payload goes through this.
+function cbInt(v) { return Math.round(v || 0); }
 function cbClampf(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 function cbClampi(v, lo, hi) { return Math.max(lo, Math.min(hi, Math.round(v))); }
 function cbRandRange(a, b) { return a + Math.random() * (b - a); }
@@ -2887,7 +3031,15 @@ function combatLevelDiffXpMult(charLevel, areaLevel) {
 function combatLateGameGrowthMult(areaLevel) {
   return 1.0;
 }
-function combatMonsterHp(baseHp, areaLevel) { return baseHp * CB.MONSTER_HP_MULT * Math.pow(1.0 + CB.AREA_HP_GROWTH, areaLevel) * combatLateGameGrowthMult(areaLevel); }
+// v0.24.2 BUG FIX (credit: Gwen): this used to return a raw float, and that single fact was
+// the source of every long decimal players saw in the combat log. Damage is clamped to the
+// monster's REMAINING hp on a killing blow (Math.min(hp, ...) in combatSettleSpellDots() and
+// the Thorns reflect in combatResolveMonsterTurn()), so the last hit of a fight reported the
+// fractional leftover verbatim -- "Fireflies burns the Roaming Sprout for 17.90123917247
+// damage" was literally the monster's remaining HP. Rounding at the source means every clamp
+// downstream can only ever produce a whole number. Floor of 1 so a very weak monster at a very
+// low area level can never spawn already dead.
+function combatMonsterHp(baseHp, areaLevel) { return Math.max(1, Math.round(baseHp * CB.MONSTER_HP_MULT * Math.pow(1.0 + CB.AREA_HP_GROWTH, areaLevel) * combatLateGameGrowthMult(areaLevel))); }
 function combatMonsterDamage(baseDmg, areaLevel) { return baseDmg * CB.MONSTER_DAMAGE_MULT * Math.pow(1.0 + CB.AREA_DAMAGE_GROWTH, areaLevel) * combatLateGameGrowthMult(areaLevel); }
 function combatMobBlockChance(areaLevel) { return CB.MOB_BLOCK_CHANCE_BASE + CB.MOB_BLOCK_CHANCE_PER_LEVEL * Math.max(0, (areaLevel || 1) - 1); }
 function combatItemTierForAreaLevel(areaLevel) { return cbClampi(1 + Math.floor((areaLevel || 1) / CB.ITEM_TIER_BRACKET_WIDTH), 1, ITEM_TIER_MAX); }
@@ -3143,11 +3295,14 @@ function combatVitHpBonus(classData, vit) { return (vit || 0) * (classData.hp_pe
 function combatVitStaminaBonus(classData, vit) { return (vit || 0) * (classData.hp_per_level || 5) * CB.VIT_STAMINA_PER_POINT_RATIO; }
 function combatGetMaxHp(data) {
   const c = COMBAT_CLASSES[data.class_id] || {};
-  // v-quest: quest_attr_bonus.vit is added here explicitly (rather than via
-  // combatGetTotalAttr()) because HP intentionally reads the raw attribute directly, bypassing
-  // gear vitality entirely (see the v0.20 #9.7 comment this line already carried) -- adding the
-  // quest bonus at combatGetTotalAttr()'s choke point alone would silently miss HP.
-  const vit = ((data.attributes && data.attributes.vit) || 0) + ((data.quest_attr_bonus && data.quest_attr_bonus.vit) || 0);
+  // v0.24.2 BUG FIX (credit: Gwen): this used to read data.attributes.vit directly, on purpose,
+  // which meant gear Vitality contributed NOTHING to max HP -- swapping in a +Vitality piece
+  // visibly changed the Character Sheet's Vitality number while the health bar stayed exactly
+  // where it was. Vitality grants HP for every class, so it has to count from wherever it
+  // comes. Now reads combatGetTotalAttr(data, "vit"), the same choke point Strength/Dexterity/
+  // Intelligence already flow through for damage/armor/block, which folds in base attributes,
+  // the quest_attr_bonus layer, gear affixes AND active attribute potions in one place.
+  const vit = combatGetTotalAttr(data, "vit");
   // v0.23.0 (Part A4): +CB.LEVEL_UP_HP_BONUS_PER_LEVEL per level above 1, computed live from
   // the current level (never a stored accumulator) so it naturally zeroes out on a level-1
   // reset -- mirrors hp_per_level's own (level-1) term right beside it.
@@ -3155,12 +3310,20 @@ function combatGetMaxHp(data) {
   // v-quest: quest_bonus_hp is the Quest System's town-scoped permanent max-HP reward (e.g.
   // the "explore"/"wanderers" quests) -- added as its own flat term, cleared on a town change
   // by questRebuildBoardForTown() alongside quest_attr_bonus/unspent_quest_stat_points.
-  return (c.base_hp || 50) + (c.hp_per_level || 5) * ((data.level || 1) - 1) + levelUpBonus + combatGearBonus(data, "hp") + combatVitHpBonus(c, vit) + (data.quest_bonus_hp || 0);
+  const flat = (c.base_hp || 50) + (c.hp_per_level || 5) * ((data.level || 1) - 1) + levelUpBonus + combatGearBonus(data, "hp") + combatVitHpBonus(c, vit) + (data.quest_bonus_hp || 0);
+  // v0.24.2 BUG FIX (credit: Gwen): "Max Health %" (max_health_pct) rolled on gear and showed
+  // in tooltips but had no consumer anywhere -- a +1.35% piece did literally nothing. It is a
+  // MULTIPLIER on the finished flat total (so it scales with everything that fed into it),
+  // applied last, exactly once. Rounded because HP is only ever a whole number -- see the
+  // integer-only note on combatMonsterHp().
+  return Math.round(flat * (1 + combatGearBonus(data, "max_health_pct") / 100.0));
 }
 function combatGetMaxStamina(data) {
   const c = COMBAT_CLASSES[data.class_id] || {};
-  const vit = (data.attributes && data.attributes.vit) || 0;
-  return CB.STAMINA_MAX_BASE + combatGearBonus(data, "stamina_max") + combatVitStaminaBonus(c, vit);
+  // v0.24.2: same fix as combatGetMaxHp() just above -- gear/quest/potion Vitality now counts
+  // toward the Stamina pool too, instead of base attributes only.
+  const vit = combatGetTotalAttr(data, "vit");
+  return Math.round(CB.STAMINA_MAX_BASE + combatGearBonus(data, "stamina_max") + combatVitStaminaBonus(c, vit));
 }
 // v0.23.0 (Part A4): the level-derived half of the future Mana resource (base per-class amount,
 // current_mana tracking, and regen land with Part B) -- lands now so Part B's mana pool inherits
@@ -3171,7 +3334,7 @@ function combatGetMaxStamina(data) {
 function combatGetMaxMana(data) {
   const c = COMBAT_CLASSES[data.class_id] || {};
   const levelUpBonus = CB.LEVEL_UP_MANA_BONUS_PER_LEVEL * ((data.level || 1) - 1);
-  return (c.base_mana || 0) + levelUpBonus + combatGearBonus(data, "mana");
+  return Math.round((c.base_mana || 0) + levelUpBonus + combatGearBonus(data, "mana"));
 }
 // v0.22 (batch2 #5): Health Regen (the "regen" affix key, unchanged internally -- only its
 // Tier-1 max and display label changed) and the new sibling "stamina_regen" affix. Mirrors
@@ -3201,7 +3364,7 @@ function combatGetManaRegen(data) {
 function combatGetCurrentMana(data) {
   const maxMana = combatGetMaxMana(data);
   if (data.current_mana == null) { data.current_mana = maxMana; return maxMana; }
-  return Math.min(data.current_mana, maxMana);
+  return Math.round(Math.min(data.current_mana, maxMana));
 }
 function combatGetEquippedWeaponType(data) { return combatWeaponTypeForInstance(data.equipped && data.equipped.weapon); }
 function combatWeaponSkillCumulativeHitsForLevel(level) { return CB.WEAPON_SKILL_HIT_STEP * level * (level + 1) / 2; }
@@ -3439,7 +3602,7 @@ function combatTickCombatRoundBuffs(data) {
   // just above -- combatGetCurrentMana(data) both lazily hydrates a legacy character's missing
   // current_mana to full AND clamps it, so this can never push current_mana above max.
   const manaRegen = combatGetManaRegen(data);
-  if (manaRegen > 0) data.current_mana = Math.min(combatGetMaxMana(data), combatGetCurrentMana(data) + manaRegen);
+  if (manaRegen > 0) data.current_mana = Math.round(Math.min(combatGetMaxMana(data), combatGetCurrentMana(data) + manaRegen));
 }
 // v0.24.1 (C3): HP/Mana/Stamina regen must visibly tick DURING combat, not just once per
 // "round" (attack/failed-flee, see combatTickCombatRoundBuffs() above) -- most of a real fight
@@ -3481,7 +3644,7 @@ function combatRoundBuffsPayload(data) {
     invuln_rounds_left: data.invuln_rounds_left || 0,
     quad_dmg_rounds_left: data.quad_dmg_rounds_left || 0,
     magic_find_rounds_left: data.magic_find_rounds_left || 0,
-    current_mana: combatGetCurrentMana(data),
+    current_mana: cbInt(combatGetCurrentMana(data)),
     max_mana: combatGetMaxMana(data),
   };
 }
@@ -3517,17 +3680,19 @@ function combatQueueHeal(existingHeal, amount, headroom, durationMs) {
   const pending = Math.min(headroom, amount);
   return { rate, remainingMs: rate > 0 ? pending / rate : 0, lastSettledAt: now };
 }
+// v0.24.2: every settlement below rounds, so a heal-over-time delivering a fractional slice of
+// its total can never leave current_hp/stamina/mana sitting on a decimal.
 function combatSettleAllHeals(data) {
   const maxHp = combatGetMaxHp(data);
   if (data.srv_heal) {
     const { delivered, heal } = combatSettleHeal(data.srv_heal);
-    data.current_hp = Math.min(maxHp, (data.current_hp || 0) + delivered);
+    data.current_hp = Math.round(Math.min(maxHp, (data.current_hp || 0) + delivered));
     data.srv_heal = heal;
   }
   const maxStamina = combatGetMaxStamina(data);
   if (data.srv_stamina_heal) {
     const { delivered, heal } = combatSettleHeal(data.srv_stamina_heal);
-    data.current_stamina = Math.min(maxStamina, (data.current_stamina || 0) + delivered);
+    data.current_stamina = Math.round(Math.min(maxStamina, (data.current_stamina || 0) + delivered));
     data.srv_stamina_heal = heal;
   }
   // v0.23.0 (Part B3): mana potions use the exact same lazy heal-over-time settlement as
@@ -3535,7 +3700,7 @@ function combatSettleAllHeals(data) {
   const maxMana = combatGetMaxMana(data);
   if (data.srv_mana_heal) {
     const { delivered, heal } = combatSettleHeal(data.srv_mana_heal);
-    data.current_mana = Math.min(maxMana, combatGetCurrentMana(data) + delivered);
+    data.current_mana = Math.round(Math.min(maxMana, combatGetCurrentMana(data) + delivered));
     data.srv_mana_heal = heal;
   } else {
     combatGetCurrentMana(data); // lazily hydrate/clamp even when no heal is in flight
@@ -3722,7 +3887,9 @@ function combatResolveMonsterTurn(data, session, invulnActiveThisRound) {
     });
     session.player_poison_dots = JSON.stringify(dots);
     session.sting_lockout_until = Date.now() + CB.POISON_STING_LOCKOUT_MS;
-    const thornsSting = combatGearBonus(data, "thorns");
+    // v0.24.2: rounded -- Thorns sums gear affix rolls, which carry 2 decimals, and set/inherent
+    // scaling can add more. HP has no fractional part, so neither can the damage that removes it.
+    const thornsSting = Math.round(combatGearBonus(data, "thorns"));
     let thornsStingDamage = 0;
     if (thornsSting > 0 && session.hp > 0) {
       thornsStingDamage = Math.min(session.hp, thornsSting);
@@ -3730,7 +3897,9 @@ function combatResolveMonsterTurn(data, session, invulnActiveThisRound) {
     }
     return { invulnerable: false, blocked: false, damage: null, crit, crit_mult: critMult, fatal: false, poison_sting: true, poison_total: Math.round(mdmg), thorns_damage: thornsStingDamage };
   }
-  data.current_hp = (data.current_hp || 0) - mdmg;
+  // v0.24.2: mdmg is already rounded into the returned payload below; round what actually
+  // leaves the health bar too, so the player's own HP can never drift fractional either.
+  data.current_hp = (data.current_hp || 0) - Math.round(mdmg);
   let fatal = false;
   if (data.current_hp < 1) { data.current_hp = 0; fatal = true; }
   // v0.22.7 (#1): Thorns is now a flat value (no longer a %) -- exactly that much damage
@@ -3741,7 +3910,8 @@ function combatResolveMonsterTurn(data, session, invulnActiveThisRound) {
   // session.hp` and the elapsed-time catch-up path) -- this lets a landed monster hit
   // potentially finish off the monster even on a round where the player's own swing was
   // blocked or hasn't happened yet.
-  const thorns = combatGearBonus(data, "thorns");
+  // v0.24.2: rounded, same reasoning as the Poison Sting branch above.
+  const thorns = Math.round(combatGearBonus(data, "thorns"));
   let thornsDamage = 0;
   if (thorns > 0 && session.hp > 0) {
     thornsDamage = Math.min(session.hp, thorns);
@@ -3827,6 +3997,24 @@ function combatCatchUpMonsterHits(session, data, invulnActiveThisRound) {
 // for crash-safety: a mid-sequence process crash can never leave the graveyard/leaderboard/
 // characters tables inconsistent with each other, even though ordinary (non-crash) execution
 // is already atomic just from being synchronous.
+// v0.24.2: claims the exclusive right to announce a given character's death. Returns true to
+// exactly one caller: the UPDATE only touches a row whose death_announced is still 0, so the
+// server-authoritative combat permadeath and the client's courtesy /api/announce/death call
+// (which is the only path that can report a death the server never resolved itself, e.g. a
+// lethal trap) can both fire freely and only the first one through actually broadcasts.
+// node:sqlite runs synchronously on one thread, so there is no race window between the write
+// and reading its own changes count.
+function markDeathAnnounced(accountId, characterName) {
+  const result = db
+    .prepare("UPDATE leaderboard_bests SET death_announced = 1 WHERE account_id = ? AND character_name = ? AND death_announced = 0")
+    .run(accountId, characterName);
+  // No leaderboard row at all (a character that died before ever being saved to it) means
+  // nothing can dedupe against it either -- announce rather than swallow the death silently.
+  if (result.changes > 0) return true;
+  const exists = db.prepare("SELECT 1 FROM leaderboard_bests WHERE account_id = ? AND character_name = ?").get(accountId, characterName);
+  return !exists;
+}
+
 function combatHandleHardcoreDeath(accountId, username, slot, data, session) {
   if (!data || !data.hardcore) return { hardcoreKilled: false };
   const characterName = data.character_name || "Hero";
@@ -3866,7 +4054,18 @@ function combatHandleHardcoreDeath(accountId, username, slot, data, session) {
   // above. Reuses the exact same function/message shape as the pre-existing
   // POST /api/announce/death route (self-reported client announcements for other death
   // causes, e.g. trap deaths) so this reads identically in global chat either way.
-  broadcastSystemMessage(`${characterName} (Lv ${level} ${className}) has ${cause}.`);
+  // v0.24.2 BUG FIX (credit: Gwen): this used to build its line as `has ${cause}` off the
+  // graveyard cause string above, which starts with a capitalised "Slain by" -- producing the
+  // ungrammatical "X has Slain by a Roaming Ancient Treant". The client's own courtesy
+  // announce (see applyDeathAndRedirect() in index.html) sent the correct "has been slain by"
+  // wording, so both fired and global chat showed the same death twice, once broken and once
+  // right. Two changes: the wording here now matches the correct form, and
+  // markDeathAnnounced() below makes whichever path gets there first the ONLY one that
+  // broadcasts. The graveyard `cause` string itself is deliberately unchanged -- it reads
+  // correctly as a standalone tombstone caption, which is where it's actually displayed.
+  if (markDeathAnnounced(accountId, characterName)) {
+    broadcastSystemMessage(`${characterName} (Lv ${level} ${className}) has been slain by a ${monsterName} (Area Level ${areaLevel}).`, "death");
+  }
   return { hardcoreKilled: true };
 }
 
@@ -4023,7 +4222,7 @@ function combatSettleSpellDots(session, data) {
       if (d.heal_pct && data) {
         const healAmt = Math.round(dmg * d.heal_pct);
         if (healAmt > 0) {
-          data.current_hp = Math.min(maxHp, (data.current_hp || 0) + healAmt);
+          data.current_hp = Math.min(maxHp, (data.current_hp || 0) + Math.round(healAmt));
           tick.heal = healAmt;
         }
       }
@@ -4201,7 +4400,9 @@ app.post("/api/combat/start", requireAuth, (req, res) => {
   const hpMult = isGuardian ? CB.STRONGHOLD_GUARDIAN_HP_MULT : isRoamer ? CB.ROAMING_MOB_HP_MULT : 1;
   const dmgMult = isGuardian ? CB.STRONGHOLD_GUARDIAN_DAMAGE_MULT : isRoamer ? CB.ROAMING_MOB_DAMAGE_MULT : 1;
   const xpMult = isGuardian ? CB.STRONGHOLD_GUARDIAN_XP_MULT : isRoamer ? CB.ROAMING_MOB_XP_MULT : 1;
-  const maxHp = combatMonsterHp(monster.base_hp, areaLevel) * hpMult;
+  // v0.24.2: rounded again after the guardian/roamer multiplier, so an elite's inflated pool is
+  // a whole number too (combatMonsterHp() alone can't know about hpMult).
+  const maxHp = Math.max(1, Math.round(combatMonsterHp(monster.base_hp, areaLevel) * hpMult));
   // v0.22.1 (Part A1): monster damage is now a single flat base_damage (the average of the
   // old min/max pair) instead of an independent per-hit range.
   // v0.22.2 (#1): dmgMin/dmgMax are no longer forced equal -- they're a tight symmetric band
@@ -4240,7 +4441,7 @@ app.post("/api/combat/start", requireAuth, (req, res) => {
     const critMult = crit ? combatRollMonsterCritMultiplier(combatGetMonsterCritFloor(areaLevel), combatGetMonsterCritCeiling(areaLevel)) : null;
     if (crit) mdmg *= critMult;
     mdmg = Math.max(0, mdmg - combatGetArmor(data));
-    data.current_hp = Math.max(1, (data.current_hp || 0) - mdmg);
+    data.current_hp = Math.max(1, (data.current_hp || 0) - Math.round(mdmg));
     firstStrike = { damage: Math.round(mdmg), crit, crit_mult: critMult };
     log.push(`The ${name} strikes first, hitting you for ${Math.round(mdmg)} damage${crit ? ` (Critical! x${critMult.toFixed(2)})` : ""} before you can react!`);
     const thorns = combatGearBonus(data, "thorns");
@@ -4278,7 +4479,7 @@ app.post("/api/combat/start", requireAuth, (req, res) => {
   res.json({
     ok: true, session_id: id,
     monster: { name, hp: startingHp, max_hp: maxHp, attack_speed: monsterAttackSpeed },
-    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data), attack_speed: playerAttackSpeed, ...combatRoundBuffsPayload(data) },
+    player: { current_hp: cbInt(data.current_hp), max_hp: combatGetMaxHp(data), current_stamina: cbInt(data.current_stamina), max_stamina: combatGetMaxStamina(data), attack_speed: playerAttackSpeed, ...combatRoundBuffsPayload(data) },
     first_strike: firstStrike, log, _save_seq: saveSeq,
   });
 });
@@ -4394,6 +4595,21 @@ function combatFinalizeMonsterKill(req, session, data, extraSessionFields) {
     loot, bonus_loot: bonusLoot, key_drop: keyDrop, kill_streak: data.kill_streak, max_kill_streak: data.max_kill_streak,
     total_kills: data.total_kills,
     is_guardian: !!session.is_guardian, is_roamer: !!session.is_roamer,
+    // v0.24.2 BUG FIX (credit: Gwen): the quest trackers above just moved this character's
+    // board forward, but nothing ever told the client about it -- so PS.quests stayed frozen at
+    // whatever it held when the screen last loaded, and the next autosave pushed that stale copy
+    // back (see PUT /api/characters/:slot, which no longer accepts it). Riding the authoritative
+    // board back on the kill payload itself, rather than on each individual response body, means
+    // every call site that can land a kill carries it for free: the attack/cast/use-item/flee
+    // routes AND the server-clock WebSocket pusher, which is the only path a Thorns or spell-DOT
+    // killing blow ever travels.
+    quests: data.quests,
+    quest_attr_bonus: data.quest_attr_bonus,
+    quest_bonus_hp: data.quest_bonus_hp,
+    unspent_quest_stat_points: data.unspent_quest_stat_points,
+    // The Pacifist and several gear-driven fixes can change the HP ceiling mid-fight, so hand
+    // back the recomputed pools alongside it.
+    max_hp: combatGetMaxHp(data),
   };
   updateCombatSession(session.id, Object.assign({ hp: 0, status: "won" }, extraSessionFields || {}));
   return kill;
@@ -4445,7 +4661,7 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
       ok: true, mob_blocked: false, player_hit: null, weapon_skill: null,
       monster: { hp: session.hp, max_hp: session.max_hp, defeated: false },
       kill: null, monster_turn: null, monster_ticks: catchUp.ticks, spell_dot_ticks: spellDotResult.ticks,
-      player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), ...combatRoundBuffsPayload(data) },
+      player: { current_hp: cbInt(data.current_hp), max_hp: combatGetMaxHp(data), ...combatRoundBuffsPayload(data) },
       fatal: true, hardcore_killed: hcResult.hardcoreKilled, _save_seq: saveSeq,
     });
   }
@@ -4534,7 +4750,7 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
     // current_hp was) -- combatTickCombatRoundBuffs() above may have applied a Stamina Regen
     // gear-affix tick this round, and the client must adopt the server's post-tick value the
     // same way it already does for current_hp, or its own copy silently desyncs.
-    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
+    player: { current_hp: cbInt(data.current_hp), max_hp: combatGetMaxHp(data), current_stamina: cbInt(data.current_stamina), max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
     fatal, _save_seq: saveSeq,
   });
 });
@@ -4560,7 +4776,7 @@ app.post("/api/combat/:sessionId/flee", requireAuth, (req, res) => {
     const saveSeq = hcResult.hardcoreKilled ? null : saveCharacterRow(req.account.id, session.slot, data);
     return res.json({
       ok: true, failed: null, monster_turn: null, monster_ticks: catchUp.ticks, fatal: true,
-      player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), ...combatRoundBuffsPayload(data) },
+      player: { current_hp: cbInt(data.current_hp), max_hp: combatGetMaxHp(data), ...combatRoundBuffsPayload(data) },
       hardcore_killed: hcResult.hardcoreKilled, _save_seq: saveSeq,
     });
   }
@@ -4576,7 +4792,7 @@ app.post("/api/combat/:sessionId/flee", requireAuth, (req, res) => {
     return res.json({
       ok: true, failed: null, monster_turn: null, monster_ticks: catchUp.ticks, fatal: false,
       monster: { hp: 0, max_hp: session.max_hp, defeated: true }, kill,
-      player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
+      player: { current_hp: cbInt(data.current_hp), max_hp: combatGetMaxHp(data), current_stamina: cbInt(data.current_stamina), max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
       hardcore_killed: false, _save_seq: saveSeq,
     });
   }
@@ -4618,7 +4834,7 @@ app.post("/api/combat/:sessionId/flee", requireAuth, (req, res) => {
     // v0.22 (batch2 #5): see the identical comment on /attack's success response above --
     // a failed flee still ticks combat-round buffs (including regen), so current_stamina must
     // be echoed here too.
-    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
+    player: { current_hp: cbInt(data.current_hp), max_hp: combatGetMaxHp(data), current_stamina: cbInt(data.current_stamina), max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
     hardcore_killed: hcResult.hardcoreKilled, _save_seq: saveSeq,
   });
 });
@@ -4649,7 +4865,7 @@ app.post("/api/combat/:sessionId/use-item", requireAuth, (req, res) => {
     const saveSeq = hcResult.hardcoreKilled ? null : saveCharacterRow(req.account.id, session.slot, data);
     return res.json({
       ok: true, monster_ticks: catchUp.ticks, fatal: true,
-      player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
+      player: { current_hp: cbInt(data.current_hp), max_hp: combatGetMaxHp(data), current_stamina: cbInt(data.current_stamina), max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
       hardcore_killed: hcResult.hardcoreKilled, _save_seq: saveSeq,
     });
   }
@@ -4666,7 +4882,7 @@ app.post("/api/combat/:sessionId/use-item", requireAuth, (req, res) => {
     return res.json({
       ok: true, monster_ticks: catchUp.ticks, fatal: false,
       monster: { hp: 0, max_hp: session.max_hp, defeated: true }, kill,
-      player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
+      player: { current_hp: cbInt(data.current_hp), max_hp: combatGetMaxHp(data), current_stamina: cbInt(data.current_stamina), max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
       _save_seq: saveSeq,
     });
   }
@@ -4718,7 +4934,7 @@ app.post("/api/combat/:sessionId/use-item", requireAuth, (req, res) => {
   const saveSeq = saveCharacterRow(req.account.id, session.slot, data);
   res.json({
     ok: true, monster_ticks: catchUp.ticks,
-    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
+    player: { current_hp: cbInt(data.current_hp), max_hp: combatGetMaxHp(data), current_stamina: cbInt(data.current_stamina), max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
     _save_seq: saveSeq,
   });
 });
@@ -4758,7 +4974,7 @@ app.post("/api/combat/:sessionId/tick", requireAuth, (req, res) => {
     return res.json({
       ok: true, monster_ticks: catchUp.ticks, spell_dot_ticks: spellDotResult.ticks, fatal: false,
       monster: { hp: 0, max_hp: session.max_hp, defeated: true }, kill,
-      player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
+      player: { current_hp: cbInt(data.current_hp), max_hp: combatGetMaxHp(data), current_stamina: cbInt(data.current_stamina), max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
       hardcore_killed: false, _save_seq: saveSeq,
     });
   }
@@ -4770,7 +4986,7 @@ app.post("/api/combat/:sessionId/tick", requireAuth, (req, res) => {
   res.json({
     ok: true, monster_ticks: catchUp.ticks, spell_dot_ticks: spellDotResult.ticks, fatal: catchUp.fatal,
     monster: { hp: session.hp, max_hp: session.max_hp },
-    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
+    player: { current_hp: cbInt(data.current_hp), max_hp: combatGetMaxHp(data), current_stamina: cbInt(data.current_stamina), max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
     hardcore_killed: hcResult.hardcoreKilled, _save_seq: saveSeq,
   });
 });
@@ -4842,7 +5058,7 @@ app.post("/api/combat/:sessionId/cast", requireAuth, (req, res) => {
     const saveSeq = hcResult.hardcoreKilled ? null : saveCharacterRow(req.account.id, session.slot, data);
     return res.json({
       ok: true, monster_ticks: catchUp.ticks, spell_dot_ticks: dotResult.ticks, fatal: true,
-      player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), ...combatRoundBuffsPayload(data) },
+      player: { current_hp: cbInt(data.current_hp), max_hp: combatGetMaxHp(data), ...combatRoundBuffsPayload(data) },
       hardcore_killed: hcResult.hardcoreKilled, _save_seq: saveSeq,
     });
   }
@@ -4858,7 +5074,7 @@ app.post("/api/combat/:sessionId/cast", requireAuth, (req, res) => {
     return res.json({
       ok: true, monster_ticks: catchUp.ticks, spell_dot_ticks: dotResult.ticks, fatal: false,
       monster: { hp: 0, max_hp: session.max_hp, defeated: true }, kill,
-      player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_mana: data.current_mana, max_mana: combatGetMaxMana(data), ...combatRoundBuffsPayload(data) },
+      player: { current_hp: cbInt(data.current_hp), max_hp: combatGetMaxHp(data), current_mana: cbInt(data.current_mana), max_mana: combatGetMaxMana(data), ...combatRoundBuffsPayload(data) },
       _save_seq: saveSeq,
     });
   }
@@ -4875,7 +5091,7 @@ app.post("/api/combat/:sessionId/cast", requireAuth, (req, res) => {
   if (spell.effect === "heal") {
     const maxHp = combatGetMaxHp(data);
     const amount = Math.round(spell.heal_amount * mult);
-    data.current_hp = Math.min(maxHp, (data.current_hp || 0) + amount);
+    data.current_hp = Math.min(maxHp, (data.current_hp || 0) + Math.round(amount));
     castResult.heal_amount = amount;
   } else if (spell.effect === "fireflies" || spell.effect === "drain") {
     const scaledMin = Math.round(spell.hit_min * mult), scaledMax = Math.round(spell.hit_max * mult);
@@ -4924,7 +5140,7 @@ app.post("/api/combat/:sessionId/cast", requireAuth, (req, res) => {
     // landed swing, which delays the next auto-attack tick by the same attack-speed interval.
     // This flag just confirms to the client that it should do so.
     consumed_attack_beat: true,
-    player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_mana: data.current_mana, max_mana: combatGetMaxMana(data), ...combatRoundBuffsPayload(data) },
+    player: { current_hp: cbInt(data.current_hp), max_hp: combatGetMaxHp(data), current_mana: cbInt(data.current_mana), max_mana: combatGetMaxMana(data), ...combatRoundBuffsPayload(data) },
     _save_seq: saveSeq,
   });
 });
@@ -5615,9 +5831,31 @@ app.post("/api/admin/broadcast", requireAuth, requireAdmin, (req, res) => {
   const message = String(req.body?.message || "").trim();
   if (!message) return res.status(400).json({ error: "Message can't be empty." });
   const trimmed = message.length > ADMIN_BROADCAST_MAX_LEN ? message.slice(0, ADMIN_BROADCAST_MAX_LEN) : message;
-  broadcastSystemMessage(trimmed);
+  // v0.24.2: tagged "admin" so the client can give it its own blue treatment, distinct from
+  // ordinary system lines (logins, trial results, new characters).
+  broadcastSystemMessage(trimmed, "admin");
   console.log(`[admin] ${req.account.username} broadcast a system message: "${trimmed}"`);
   res.json({ ok: true });
+});
+
+// v0.24.2: the known-issues banner. GET is deliberately public and unauthenticated -- it is
+// read on the login screen too, before any token exists, and carries nothing private. Only
+// the setter is admin-gated.
+app.get("/api/announcement", (req, res) => {
+  res.json(getAdminAnnouncement());
+});
+
+app.get("/api/admin/announcement", requireAuth, requireAdmin, (req, res) => {
+  res.json(getAdminAnnouncement());
+});
+
+// Sending an empty message is the documented way to CLEAR the banner, not an error -- the
+// Dev Tools panel's Clear button posts exactly that.
+app.post("/api/admin/announcement", requireAuth, requireAdmin, (req, res) => {
+  const message = String(req.body?.message || "").trim();
+  const result = setAdminAnnouncement(message);
+  console.log(`[admin] ${req.account.username} set the known-issues banner to: "${result.message}"`);
+  res.json(Object.assign({ ok: true }, result));
 });
 
 /* ---------------- v0.19.1 (#26): "Legacy Gear" admin review + manual rescale tool ----------------
@@ -6042,13 +6280,37 @@ app.get("/api/health", (req, res) => res.json({ ok: true, time: nowIso() }));
 // These are self-reported by the client (consistent with this phase's "not cheat-proof yet"
 // trust model, see the top-of-file note) but are flavor-only chat text, no economy impact.
 
-function broadcastSystemMessage(message) {
+// v0.24.2: `kind` rides along on both the stored row and the live push so the client can
+// style a death notice (grey + tombstone) or an admin broadcast (blue) without pattern
+// matching the message text the way the old promotion-line regex had to. Defaults to
+// "system", so every existing call site keeps its exact previous behaviour untouched.
+function broadcastSystemMessage(message, kind) {
   const created_at = nowIso();
-  db.prepare("INSERT INTO chat_messages (username, message, created_at) VALUES (?, ?, ?)").run("System", message, created_at);
-  const payload = JSON.stringify({ type: "chat", username: "System", message, created_at });
+  const k = kind || "system";
+  db.prepare("INSERT INTO chat_messages (username, message, created_at, kind) VALUES (?, ?, ?, ?)").run("System", message, created_at, k);
+  const payload = JSON.stringify({ type: "chat", username: "System", message, created_at, kind: k });
   for (const client of chatClients) {
     if (client.readyState === client.OPEN) client.send(payload);
   }
+}
+
+// v0.24.2: the admin-editable known-issues banner. Stored as a single row (same shape as
+// season_state) so it survives a process restart, and pushed live over the chat socket the
+// moment it changes -- a player already mid-session sees a newly posted known issue without
+// reloading. An empty string means "nothing to announce"; the client hides the banner entirely.
+function getAdminAnnouncement() {
+  const row = db.prepare("SELECT message, updated_at FROM admin_announcement WHERE id = 1").get();
+  return { message: (row && row.message) || "", updated_at: (row && row.updated_at) || null };
+}
+function setAdminAnnouncement(message) {
+  const msg = (message || "").toString().slice(0, ADMIN_ANNOUNCEMENT_MAX_LEN);
+  const updated_at = msg ? nowIso() : null;
+  db.prepare("UPDATE admin_announcement SET message = ?, updated_at = ? WHERE id = 1").run(msg, updated_at);
+  const payload = JSON.stringify({ type: "announcement", message: msg, updated_at });
+  for (const client of chatClients) {
+    if (client.readyState === client.OPEN) client.send(payload);
+  }
+  return { message: msg, updated_at };
 }
 
 app.post("/api/announce/trial", requireAuth, (req, res) => {
@@ -6068,7 +6330,13 @@ app.post("/api/announce/death", requireAuth, (req, res) => {
   if (!character_name || !class_name || !cause) {
     return res.status(400).json({ error: "Invalid announcement." });
   }
-  broadcastSystemMessage(`${character_name} (Lv ${level || 1} ${class_name}) has ${cause}.`);
+  // v0.24.2: gated behind the same markDeathAnnounced() claim combatHandleHardcoreDeath()
+  // uses, so a death the server already resolved and announced itself isn't repeated here.
+  // This route still matters for the deaths the server genuinely cannot see (a lethal maze
+  // trap is entirely client-resolved), which is why it isn't simply removed.
+  if (markDeathAnnounced(req.account.id, character_name)) {
+    broadcastSystemMessage(`${character_name} (Lv ${level || 1} ${class_name}) has ${cause}.`, "death");
+  }
   res.json({ ok: true });
 });
 
@@ -6337,7 +6605,7 @@ const chatClients = new Set();
 
 function loadRecentChat() {
   return db
-    .prepare("SELECT username, message, created_at FROM chat_messages ORDER BY id DESC LIMIT ?")
+    .prepare("SELECT username, message, created_at, kind FROM chat_messages ORDER BY id DESC LIMIT ?")
     .all(CHAT_HISTORY_LIMIT)
     .reverse();
 }
@@ -6355,6 +6623,9 @@ wss.on("connection", (ws, req) => {
   ws.accountId = account.id;
   chatClients.add(ws);
   ws.send(JSON.stringify({ type: "history", messages: loadRecentChat() }));
+  // v0.24.2: hand the freshly connected client the current known-issues banner immediately,
+  // so it renders on the very first paint instead of only after the next admin edit.
+  ws.send(JSON.stringify(Object.assign({ type: "announcement" }, getAdminAnnouncement())));
 
   const pending = db
     .prepare("SELECT message, created_at FROM mailbox_messages WHERE account_id = ? AND delivered = 0 ORDER BY id ASC")
@@ -6375,12 +6646,12 @@ wss.on("connection", (ws, req) => {
     const message = parsed.message.slice(0, 300).trim();
     if (!message) return;
     const created_at = nowIso();
-    db.prepare("INSERT INTO chat_messages (username, message, created_at) VALUES (?, ?, ?)").run(
+    db.prepare("INSERT INTO chat_messages (username, message, created_at, kind) VALUES (?, ?, ?, 'chat')").run(
       ws.username,
       message,
       created_at
     );
-    const payload = JSON.stringify({ type: "chat", username: ws.username, message, created_at });
+    const payload = JSON.stringify({ type: "chat", username: ws.username, message, created_at, kind: "chat" });
     for (const client of chatClients) {
       if (client.readyState === client.OPEN) client.send(payload);
     }
@@ -6436,9 +6707,9 @@ setInterval(() => {
         type: "combat_tick", session_id: session.id, monster_ticks: catchUp.ticks, spell_dot_ticks: spellDotResult.ticks, fatal: false,
         monster: { hp: 0, max_hp: session.max_hp, defeated: true }, kill,
         player: {
-          current_hp: data.current_hp, max_hp: combatGetMaxHp(data),
-          current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data),
-          current_mana: combatGetCurrentMana(data), max_mana: combatGetMaxMana(data),
+          current_hp: cbInt(data.current_hp), max_hp: combatGetMaxHp(data),
+          current_stamina: cbInt(data.current_stamina), max_stamina: combatGetMaxStamina(data),
+          current_mana: cbInt(combatGetCurrentMana(data)), max_mana: combatGetMaxMana(data),
         },
         hardcore_killed: false,
         _save_seq: saveSeq,
@@ -6457,12 +6728,12 @@ setInterval(() => {
       type: "combat_tick", session_id: session.id, monster_ticks: catchUp.ticks, spell_dot_ticks: spellDotResult.ticks, fatal: catchUp.fatal,
       monster: spellDotResult.dotsChanged ? { hp: spellDotResult.newHp } : undefined,
       player: {
-        current_hp: catchUp.fatal ? 0 : data.current_hp, max_hp: combatGetMaxHp(data),
-        current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data),
+        current_hp: catchUp.fatal ? 0 : cbInt(data.current_hp), max_hp: combatGetMaxHp(data),
+        current_stamina: cbInt(data.current_stamina), max_stamina: combatGetMaxStamina(data),
         // v0.23.0 (Part B2): Mana rides along on the WS-pushed combat tick too, so idle-in-combat
         // Mana regen/heal-over-time settlement (already computed above by combatSettleAllHeals())
         // is visible without waiting on a player-initiated attack/flee/use-item call.
-        current_mana: combatGetCurrentMana(data), max_mana: combatGetMaxMana(data),
+        current_mana: cbInt(combatGetCurrentMana(data)), max_mana: combatGetMaxMana(data),
       },
       hardcore_killed: hcResult.hardcoreKilled,
       _save_seq: saveSeq,
