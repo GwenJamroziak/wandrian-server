@@ -1035,7 +1035,9 @@ function applyLadderReset(data) {
 // purely by editing the values below, nothing scattered in per-town `if` branches anywhere
 // else in this file.
 const QUEST_DEFS = {
-  IDS: ["explore", "wardens", "gatherer", "wanderers", "streak", "cauldron", "elder", "palisade", "pacifist"],
+  // v0.25: two new questlines, both 5-step like "wardens"/"elder". "trader" gets trade moving
+  // by rewarding Auction House sales; "cleanse" is the season-long lifetime-kill chase.
+  IDS: ["explore", "wardens", "gatherer", "wanderers", "streak", "cauldron", "elder", "palisade", "pacifist", "trader", "cleanse"],
   NAMES: {
     explore: "Every Root and Hollow", wardens: "The Four Wardens", gatherer: "The Gatherer's Dozen",
     wanderers: "Thin the Wanderers", streak: "The Unbroken Chain", cauldron: "The Simmering Cauldron",
@@ -1046,6 +1048,7 @@ const QUEST_DEFS = {
     // mechanics -- see questObjectiveText's "pacifist" branch in index.html for the exact
     // player-facing copy, per Gwen's explicit instruction not to spell out the mechanism.
     pacifist: "The Pacifist",
+    trader: "The Long Road to Market", cleanse: "Cleanse the Forest",
   },
   // Level requirement (within the CURRENT town's own level arc) for a quest to flip from
   // "locked" to "active". Kept IDENTICAL across all 5 towns rather than scaled per town --
@@ -1053,7 +1056,7 @@ const QUEST_DEFS = {
   // applyTrialResolutionReset() above), so "must be level 8" is already a meaningfully
   // mid-late gate in every town's own arc (town 1 runs levels 1-10 before trial eligibility,
   // town 2 runs 1-20, town 3+ runs 1-30/40 -- see trialLevelRequirement()), not just town 1's.
-  LEVEL_REQ: { explore: 1, wardens: 1, gatherer: 1, wanderers: 6, streak: 3, cauldron: 2, elder: 8, palisade: 1, pacifist: 1 },
+  LEVEL_REQ: { explore: 1, wardens: 1, gatherer: 1, wanderers: 6, streak: 3, cauldron: 2, elder: 8, palisade: 1, pacifist: 1, trader: 1, cleanse: 1 },
   // Fixed, town-independent. See the de-scaling note above this object.
   TARGETS: {
     gatherer_herbs: 12,
@@ -1106,6 +1109,34 @@ const QUEST_DEFS = {
   // volume, doesn't get harder just because you're in a later town), replacing the old
   // per-town TARGETS.cauldron_brews count entirely. See questTrackBrewReport() below for how
   // the entry's new `distinct_brewed` array (instead of a plain counter) is tracked.
+  // v0.25 (credit: Gwen): "The Long Road to Market" -- 5 steps counting completed Auction
+  // House SALES, to get trade moving. Deliberately character-bound, not account-bound: the
+  // counter lives in the seller character's own save (data.auction_sales, incremented by
+  // POST /api/auction/:id/buy when a listing that character made actually sells), so each
+  // character earns its own way through this line even though the gold from a sale is
+  // account-shared. Step 1 is a single sale on purpose -- the whole point is getting a player
+  // to list something for the first time.
+  TRADER_STEPS: [
+    { count: 1, stat_points: 1, xp: 50 },
+    { count: 5, stat_points: 1, xp: 50 },
+    { count: 20, stat_points: 1, xp: 200 },
+    { count: 50, stat_points: 1, xp: 500 },
+    { count: 100, stat_points: 1, xp: 1000 },
+  ],
+  // v0.25 (credit: Gwen): "Cleanse the Forest" -- 5 steps against data.total_kills, the LIFETIME
+  // monster counter that already survives Broken Bridge promotions and ladder resets. Step 5's
+  // 100,000 kills is an intentionally season-long commitment, not something to be finished in a
+  // week. Because this reads a lifetime total rather than a per-town counter, its progress is
+  // deliberately NOT wiped by questRebuildBoardForTown() the way every other quest's is -- see
+  // questTrackTotalKills(), which re-derives progress from total_kills on every kill, so a board
+  // rebuild simply recomputes the same true number rather than losing it.
+  CLEANSE_STEPS: [
+    { count: 100, stat_points: 5, gold: 500 },
+    { count: 500, stat_points: 5, gold: 2500 },
+    { count: 3000, stat_points: 10, gold: 15000 },
+    { count: 10000, stat_points: 25, gold: 50000 },
+    { count: 100000, stat_points: 50, gold: 300000 },
+  ],
   CAULDRON_DISTINCT_TARGET: 7,
   // v0.24.2: this used to be a per-town array ([false, true, true, true, true]) requiring at
   // least one attribute potion among the distinct recipes from town 2 onward. Under the
@@ -1181,6 +1212,10 @@ function questBuildEntry(qid) {
   } else if (qid === "wardens") {
     // v0.24.2: "wardens" is step-based now too, same shape as "elder" -- see WARDEN_TRIAL_STEPS.
     entry = { step: 1, progress: 0, target: QUEST_DEFS.WARDEN_TRIAL_STEPS[0].count, status: questInitialStatus(qid) };
+  } else if (qid === "trader") {
+    entry = { step: 1, progress: 0, target: QUEST_DEFS.TRADER_STEPS[0].count, status: questInitialStatus(qid) };
+  } else if (qid === "cleanse") {
+    entry = { step: 1, progress: 0, target: QUEST_DEFS.CLEANSE_STEPS[0].count, status: questInitialStatus(qid) };
   } else {
     entry = { progress: 0, target, status: questInitialStatus(qid) };
   }
@@ -1259,6 +1294,17 @@ function questEnsureState(data) {
     wardensEntry._delve_streak_marker = 0;
     if (wardensEntry.status === "ready" || wardensEntry.status === "claimed") wardensEntry.status = "active";
   }
+  // v0.25: same step-shape migration as "wardens"/"elder" for the two new questlines. Both
+  // are new ids, so questEnsureState()'s backfill above normally builds them correctly -- this
+  // only catches an entry that somehow exists without a step field.
+  for (const qid of ["trader", "cleanse"]) {
+    const e = data.quests.entries[qid];
+    const steps = qid === "trader" ? QUEST_DEFS.TRADER_STEPS : QUEST_DEFS.CLEANSE_STEPS;
+    if (e && typeof e.step !== "number") {
+      e.step = 1; e.progress = 0; e.target = steps[0].count;
+      if (e.status === "ready" || e.status === "claimed") e.status = "active";
+    }
+  }
   // v0.24.2: every entry's target is re-pinned to today's fixed value on load, so a character
   // saved under the old per-town scaling (e.g. a town-4 board asking for 22 roamers) is
   // corrected in place instead of keeping a target no longer offered anywhere. Progress
@@ -1273,6 +1319,12 @@ function questEnsureState(data) {
       if (e.status === "active" && e.progress >= e.target) e.status = "ready";
     }
   }
+  // v0.25: both lifetime-counter questlines re-derive their progress here, on every
+  // quest-touching route, so they are correct even when the event that advanced them happened
+  // while the player was offline (an Auction House sale) or before the current board existed.
+  if (typeof data.auction_sales !== "number") data.auction_sales = 0;
+  questTrackTotalKills(data);
+  questTrackAuctionSales(data);
   const cauldronEntry = data.quests.entries.cauldron;
   if (cauldronEntry && !Array.isArray(cauldronEntry.distinct_brewed)) {
     cauldronEntry.distinct_brewed = [];
@@ -1348,6 +1400,36 @@ function questTrackEliteKill(data, monsterBand) {
   if (!step || monsterBand !== step.band) return;
   entry.progress = Math.min(entry.target, (entry.progress || 0) + 1);
   if (entry.progress >= entry.target) entry.status = "ready";
+}
+
+// v0.25 ("Cleanse the Forest"): reads the LIFETIME data.total_kills rather than counting up
+// from zero, so progress is always the true number no matter how many town/board resets have
+// happened since. That also makes it self-healing: a fresh board recomputes the same figure on
+// the very next kill instead of starting the player over on a 100,000-kill commitment.
+function questTrackTotalKills(data) {
+  const entry = data.quests.entries.cleanse;
+  if (!entry || entry.status !== "active") return;
+  const step = QUEST_DEFS.CLEANSE_STEPS[(entry.step || 1) - 1];
+  if (!step) return;
+  entry.target = step.count;
+  entry.progress = Math.min(step.count, data.total_kills || 0);
+  if (entry.progress >= step.count) entry.status = "ready";
+}
+
+// v0.25 ("The Long Road to Market"): same lifetime-counter shape as questTrackTotalKills()
+// above, against data.auction_sales -- incremented by POST /api/auction/:id/buy on the SELLER's
+// character row when one of its listings actually sells. Called from questEnsureState() rather
+// than from a kill hook, because a sale can complete while the seller is offline entirely: the
+// counter is already correct by the time they next load, and this simply reflects it onto the
+// board the next time any quest-touching route runs.
+function questTrackAuctionSales(data) {
+  const entry = data.quests.entries.trader;
+  if (!entry || entry.status !== "active") return;
+  const step = QUEST_DEFS.TRADER_STEPS[(entry.step || 1) - 1];
+  if (!step) return;
+  entry.target = step.count;
+  entry.progress = Math.min(step.count, data.auction_sales || 0);
+  if (entry.progress >= step.count) entry.status = "ready";
 }
 
 // v0.24.1 (B5 "The Pacifist"): called from combatFinalizeMonsterKill() exactly once, only when
@@ -1784,6 +1866,33 @@ app.post("/api/quests/:questId/claim", requireAuth, (req, res) => {
     } else {
       reward.done = true;
     }
+  } else if (questId === "trader" || questId === "cleanse") {
+    // v0.25: both new questlines share the exact step-advance shape "wardens"/"elder" use.
+    const steps = questId === "trader" ? QUEST_DEFS.TRADER_STEPS : QUEST_DEFS.CLEANSE_STEPS;
+    const stepIdx = (entry.step || 1) - 1;
+    const stepDef = steps[stepIdx] || steps[0];
+    data.unspent_quest_stat_points = (data.unspent_quest_stat_points || 0) + stepDef.stat_points;
+    reward.stat_points = stepDef.stat_points;
+    if (stepDef.gold) { creditAccountGold(req.account.id, stepDef.gold); reward.gold = stepDef.gold; }
+    if (stepDef.xp) {
+      const xpResult = combatAddXp(data, stepDef.xp);
+      if (xpResult.leveled) maybeDeclareSeasonWinner(req.account.id, data);
+      reward.xp = xpResult.xpGained;
+    }
+    reward.step = entry.step || 1;
+    reward.step_count = steps.length;
+    if (stepIdx + 1 < steps.length) {
+      entry.step = stepIdx + 2;
+      entry.target = steps[stepIdx + 1].count;
+      // Both count a LIFETIME total, so the next step's progress carries straight over rather
+      // than restarting at 0 -- a player at 120 kills who claims step 1 (100) is genuinely
+      // already 120/500 toward step 2, and showing 0/500 would be a lie.
+      entry.progress = Math.min(entry.target, questId === "trader" ? (data.auction_sales || 0) : (data.total_kills || 0));
+      entry.status = entry.progress >= entry.target ? "ready" : "active";
+      reward.done = false;
+    } else {
+      reward.done = true;
+    }
   } else if (questId === "palisade") {
     creditAccountGold(req.account.id, QUEST_DEFS.REWARDS.palisade.gold);
     const keyTier = cbClampi((data.quests.town || 1) + 1, 1, ITEM_TIER_MAX);
@@ -1811,7 +1920,7 @@ app.post("/api/quests/:questId/claim", requireAuth, (req, res) => {
   // "active" (with the next step's progress/target) above -- do NOT stomp that back to
   // "claimed" here. Every other quest, and a final-step claim on either questline, still
   // terminate normally.
-  if (!((questId === "elder" || questId === "wardens") && entry.status === "active")) entry.status = "claimed";
+  if (!(["elder", "wardens", "trader", "cleanse"].includes(questId) && (entry.status === "active" || entry.status === "ready"))) entry.status = "claimed";
   const saveSeq = saveCharacterRow(req.account.id, slot, data);
   res.json({
     ok: true, reward, quests: data.quests,
@@ -1828,6 +1937,39 @@ app.post("/api/quests/:questId/claim", requireAuth, (req, res) => {
 // spend-validation endpoint of its own yet, see this section's DATA-MODEL NOTE above) so
 // there is never any ambiguity about which points are which, and questRebuildBoardForTown()
 // can zero both fields out cleanly on a town change.
+// v0.25: reading a Scroll of Wisdom. Server-authoritative on purpose, unlike most consumable
+// use in this phase: this one hands out raw experience, and the level gate is the entire point
+// of the item, so neither the gate nor the grant may live in the client where a player could
+// simply skip them. Consumes the scroll and applies the XP in one synchronous step, so a
+// failure anywhere means the scroll is still in the bag.
+app.post("/api/scroll/read", requireAuth, (req, res) => {
+  const slot = Number(req.body?.slot);
+  const itemId = req.body?.item_id;
+  if (!Number.isInteger(slot) || slot < 0 || slot >= MAX_CHARACTER_SLOTS) return res.status(400).json({ error: "Invalid slot." });
+  const tier = scrollOfWisdomTierForItemId(itemId);
+  if (!tier) return res.status(400).json({ error: "That isn't a Scroll of Wisdom." });
+  const data = loadCharacterRow(req.account.id, slot);
+  if (!data) return res.status(404).json({ error: "No character in that slot." });
+  if (((data.consumables || {})[itemId] || 0) < 1) return res.status(400).json({ error: "You don't have that scroll." });
+  const requiredLevel = combatTierLevelRequirement(tier);
+  if ((data.level || 1) < requiredLevel) {
+    return res.status(400).json({ error: `This scroll's words are beyond you until Level ${requiredLevel}.` });
+  }
+  data.consumables[itemId] -= 1;
+  if (data.consumables[itemId] <= 0) delete data.consumables[itemId];
+  const xpResult = combatAddXp(data, SCROLL_OF_WISDOM_XP[tier] || 0);
+  if (xpResult.leveled) maybeDeclareSeasonWinner(req.account.id, data);
+  questEnsureState(data);
+  upsertLeaderboardBests(req.account.id, data);
+  const saveSeq = saveCharacterRow(req.account.id, slot, data);
+  res.json({
+    ok: true, xp_gained: xpResult.xpGained, leveled: xpResult.leveled,
+    level: data.level, xp: data.xp, xp_to_next: data.xp_to_next,
+    consumables: data.consumables, quests: data.quests,
+    current_hp: cbInt(data.current_hp), max_hp: combatGetMaxHp(data), _save_seq: saveSeq,
+  });
+});
+
 app.post("/api/quests/spend-stat-point", requireAuth, (req, res) => {
   const slot = Number(req.body?.slot);
   const stat = req.body?.stat;
@@ -2676,6 +2818,27 @@ const COMBAT_CONSUMABLES = {
   minor_mana_potion: { mana_amount: 20 }, mana_potion: { mana_amount: 40 }, medium_mana_potion: { mana_amount: 60 }, greater_mana_potion: { mana_amount: 90 }, supreme_mana_potion: { mana_amount: 140 },
   antidote: { cures_poison: true },
 };
+// v0.25 (credit: Gwen): Scrolls of Wisdom, a re-introduction of the retired scroll consumable
+// line. Five tiers, each granting a flat lump of experience. Two separate gates, deliberately
+// different from each other:
+//   - DROP gate: a scroll of tier T only ever drops from an area level at or above its own
+//     tier's bracket, exactly like gear tiers (combatItemTierForAreaLevel), so you cannot find
+//     a Scroll of Wisdom IV in the starting woods.
+//   - USE gate: the character must have REACHED the level that tier's bracket starts at before
+//     it can be consumed, so a low-level character who buys a Tier V scroll on the Auction
+//     House holds an asset they have to grow into rather than an instant shortcut past the
+//     early game. Both gates use combatTierLevelRequirement(), the same 1/5/10/15/20 ladder gear
+//     and spell tiers already run on, so there is one ladder in the game rather than three.
+// Tradeable on the Auction House by design; never sold by any NPC.
+const SCROLL_OF_WISDOM_XP = { 1: 100, 2: 300, 3: 500, 4: 1000, 5: 2000 };
+const SCROLL_OF_WISDOM_IDS = { 1: "scroll_of_wisdom_1", 2: "scroll_of_wisdom_2", 3: "scroll_of_wisdom_3", 4: "scroll_of_wisdom_4", 5: "scroll_of_wisdom_5" };
+function scrollOfWisdomTierForItemId(itemId) {
+  for (const t of [1, 2, 3, 4, 5]) if (SCROLL_OF_WISDOM_IDS[t] === itemId) return t;
+  return 0;
+}
+// Chance for a kill to additionally drop a scroll, on top of its normal loot. Kept low: this is
+// a bonus find and an Auction House trade good, not a competitive XP source.
+const SCROLL_OF_WISDOM_DROP_CHANCE = 0.02;
 const COMBAT_BAG_CAPACITY = { traveler_pouch: 8, woven_bag: 16, bramble_sack: 24, rootpack_ancient: 40 };
 const COMBAT_BASE_NAMES = {
   weapon: ["Twig Wand", "Bramblestaff", "Rootcarver", "Thornbow", "Charwood Axe", "Emberbrand", "Thornfang", "Bramblespike", "Quickthorn", "Goedendag"],
@@ -2791,6 +2954,9 @@ const COMBAT_RARITY_TABLE = [{ name: "Common", slots: 1, weight: 60 }, { name: "
 // Balance-equivalent constants combat needs, ported verbatim from index.html's Balance
 // object (see that file's own comments for the full rationale behind each number).
 const CB = {
+  // v0.25 (credit: Gwen): every class gains this much max Mana per point of total Intelligence.
+  // Mirrors Balance.MANA_PER_INTELLIGENCE in index.html.
+  MANA_PER_INTELLIGENCE: 2,
   // v0.22.7 (#18): player crit floor dropped from 1.75 to 1.5, mirroring index.html's
   // Balance.CRIT_MULTIPLIER. Monsters no longer use this constant as their own floor at all
   // (see combatGetMonsterCritFloor()/combatGetMonsterCritCeiling() below) -- CB.CRIT_MULTIPLIER
@@ -3334,7 +3500,12 @@ function combatGetMaxStamina(data) {
 function combatGetMaxMana(data) {
   const c = COMBAT_CLASSES[data.class_id] || {};
   const levelUpBonus = CB.LEVEL_UP_MANA_BONUS_PER_LEVEL * ((data.level || 1) - 1);
-  return Math.round((c.base_mana || 0) + levelUpBonus + combatGearBonus(data, "mana"));
+  // v0.25 (credit: Gwen): Intelligence now grants mana for EVERY class, from every source --
+  // level-derived points, manually assigned points, quest-granted points, gear affixes and
+  // Potion of Intellect alike. combatGetTotalAttr() is exactly the choke point that sums all
+  // of those, the same way combatGetMaxHp() reads Vitality through it.
+  const intMana = combatGetTotalAttr(data, "int") * CB.MANA_PER_INTELLIGENCE;
+  return Math.round((c.base_mana || 0) + levelUpBonus + intMana + combatGearBonus(data, "mana"));
 }
 // v0.22 (batch2 #5): Health Regen (the "regen" affix key, unchanged internally -- only its
 // Tier-1 max and display label changed) and the new sibling "stamina_regen" affix. Mirrors
@@ -4516,6 +4687,8 @@ function combatFinalizeMonsterKill(req, session, data, extraSessionFields) {
   // questTrackRoamerKill()/questTrackGuardianKill()/questTrackEliteKill()'s own comments.
   questEnsureState(data);
   questTrackKillStreak(data);
+  questTrackTotalKills(data); // v0.25: "Cleanse the Forest"
+
   if (session.is_roamer) questTrackRoamerKill(data);
   if (session.is_guardian) questTrackGuardianKill(data, session.area_level);
   // v0.19.1 (#19): this endpoint used to persist the raw characters-table row via
@@ -4578,6 +4751,18 @@ function combatFinalizeMonsterKill(req, session, data, extraSessionFields) {
     // "nothing" results simply contribute no entry -- same as the guaranteed roll can do.
   }
 
+  // v0.25: Scroll of Wisdom roll. Its tier is the highest one this area level can legitimately
+  // produce (the same bracket gear tiers use), so deeper areas hand out the bigger scrolls.
+  let scrollDrop = null;
+  if (Math.random() < SCROLL_OF_WISDOM_DROP_CHANCE) {
+    const scrollTier = combatItemTierForAreaLevel(session.area_level);
+    const scrollItemId = SCROLL_OF_WISDOM_IDS[scrollTier];
+    if (scrollItemId) {
+      combatAddConsumable(data, scrollItemId, 1);
+      scrollDrop = { tier: scrollTier, item_id: scrollItemId };
+    }
+  }
+
   let keyDrop = null;
   if (session.is_guardian) {
     const keyEligible = combatStrongholdKeyEligible(session.area_level, data.level);
@@ -4592,7 +4777,7 @@ function combatFinalizeMonsterKill(req, session, data, extraSessionFields) {
 
   const kill = {
     gold, gold_credited: goldCredited, xp_gained: xpResult.xpGained, leveled,
-    loot, bonus_loot: bonusLoot, key_drop: keyDrop, kill_streak: data.kill_streak, max_kill_streak: data.max_kill_streak,
+    loot, bonus_loot: bonusLoot, key_drop: keyDrop, scroll_drop: scrollDrop, kill_streak: data.kill_streak, max_kill_streak: data.max_kill_streak,
     total_kills: data.total_kills,
     is_guardian: !!session.is_guardian, is_roamer: !!session.is_roamer,
     // v0.24.2 BUG FIX (credit: Gwen): the quest trackers above just moved this character's
@@ -6575,6 +6760,32 @@ app.post("/api/auction/:id/buy", requireAuth, (req, res) => {
   // guard needed) fixes this completely -- the seller gets paid no matter what happened to
   // the specific character that originally listed the item.
   const sellerGoldAfter = creditAccountGold(listing.seller_account_id, listing.price);
+
+  // v0.25 ("The Long Road to Market"): count this sale against the SELLING CHARACTER, not the
+  // account -- the questline is per-character even though the gold is account-shared. Matched
+  // on the stored slot AND the stored character name together: character names are globally
+  // unique among LIVE characters (see PUT /api/characters/:slot's conflict check) but a name is
+  // released when its character is deleted or dies in hardcore, so slot alone could credit a
+  // completely different character that has since taken that slot, and name alone could credit
+  // a later namesake. Requiring both means a replacement character starts its own count at zero.
+  // Failing silently is correct here: a hardcore seller whose character died before the sale
+  // completed has no row left to credit, and the gold above has already been paid to the
+  // account regardless.
+  try {
+    const sellerCharRow = db
+      .prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?")
+      .get(listing.seller_account_id, listing.seller_slot);
+    if (sellerCharRow) {
+      const sellerData = JSON.parse(sellerCharRow.data);
+      if ((sellerData.character_name || "") === listing.seller_character_name) {
+        sellerData.auction_sales = (sellerData.auction_sales || 0) + 1;
+        questEnsureState(sellerData);
+        sellerData._save_seq = (sellerData._save_seq || 0) + 1;
+        db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?")
+          .run(JSON.stringify(sellerData), nowIso(), listing.seller_account_id, listing.seller_slot);
+      }
+    }
+  } catch (e) { /* corrupt row: the sale itself and its gold are unaffected */ }
 
   const label = listing.quantity > 1 ? `${listing.display_name} x${listing.quantity}` : listing.display_name;
   sendPrivateMessage(req.account.id, `You bought ${label} for ${listing.price} gold from ${listing.seller_character_name}.`, { gold: buyerGoldAfter });

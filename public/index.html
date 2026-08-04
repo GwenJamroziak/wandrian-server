@@ -32,7 +32,53 @@ body{
   color:var(--text); min-height:100vh;
 }
 
-#app{max-width:1100px;margin:0 auto;padding:28px 24px 60px;transition:opacity .18s ease;}
+#app{display:grid;grid-template-columns:288px 1fr;grid-template-rows:1fr auto;
+  height:100vh;height:100dvh;width:100%;max-width:none;margin:0;padding:0;transition:opacity .18s ease;}
+#hud-rail{grid-column:1;grid-row:1;overflow-y:auto;overflow-x:hidden;padding:14px 12px 18px;
+  border-right:1px solid var(--border);background:linear-gradient(180deg,#161911,#12140f);
+  display:flex;flex-direction:column;gap:10px;}
+#hud-main{grid-column:2;grid-row:1;overflow-y:auto;overflow-x:hidden;padding:16px 22px 26px;}
+#hud-footer{grid-column:1 / -1;grid-row:2;border-top:1px solid var(--border);
+  background:linear-gradient(180deg,#161911,#0d0f0b);display:flex;align-items:center;gap:22px;padding:10px 26px;}
+#hud-footer .hud-bars{flex:1;display:flex;flex-direction:column;gap:7px;min-width:0;}
+.hud-rail-title{font-family:Cinzel,Georgia,serif;font-size:12px;letter-spacing:.6px;color:var(--muted);
+  text-transform:uppercase;margin-bottom:4px;}
+.hud-idname{font-family:Cinzel,Georgia,serif;font-size:18px;line-height:1.2;}
+.hud-idsub{font-size:12px;color:var(--muted);margin-top:2px;}
+
+.hud-globe{position:relative;border-radius:50%;overflow:hidden;flex:0 0 auto;
+  box-shadow:0 0 0 3px #241a10, 0 0 0 6px #5c462c, 0 8px 26px rgba(0,0,0,.75), inset 0 0 26px rgba(0,0,0,.75);
+  background:radial-gradient(circle at 34% 28%, #2a2e24, #10120d 70%);cursor:help;}
+.hud-globe .gfill{position:absolute;left:0;right:0;bottom:0;transition:height .35s ease;}
+.hud-globe .gfill::after{content:"";position:absolute;left:0;right:0;top:0;height:6px;background:rgba(255,255,255,.28);}
+.hud-globe .ggloss{position:absolute;inset:0;border-radius:50%;pointer-events:none;
+  background:radial-gradient(circle at 33% 24%, rgba(255,255,255,.30), rgba(255,255,255,0) 46%),
+             radial-gradient(circle at 50% 108%, rgba(0,0,0,.55), rgba(0,0,0,0) 55%);}
+.hud-globe .glbl{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  font-family:Cinzel,Georgia,serif;text-shadow:0 2px 5px rgba(0,0,0,.95);pointer-events:none;}
+.hud-globe .glbl .gn{font-size:16px;line-height:1;}
+.hud-globe .glbl .gt{font-size:9px;letter-spacing:1.5px;color:rgba(255,255,255,.68);margin-top:3px;}
+.hud-globe.hp .gfill{background:linear-gradient(180deg,#e35b5b,#8e2020);}
+.hud-globe.hp.poisoned .gfill{background:linear-gradient(180deg,#8fd06a,#3f7a2a);}
+.hud-globe.mana .gfill{background:linear-gradient(180deg,#5ba2ea,#1d4a86);}
+
+.hud-bar{position:relative;border:1px solid var(--border);border-radius:5px;background:#0d0f0b;overflow:hidden;}
+.hud-bar .hb-fill{height:100%;transition:width .35s ease;}
+.hud-bar.stam .hb-fill{background:linear-gradient(90deg,#cfcabb,#eae6d9);}
+.hud-bar.xp .hb-fill{background:linear-gradient(90deg,#7b3fc0,#b06ff0);}
+.hud-bar .hb-ticks{position:absolute;inset:0;pointer-events:none;display:flex;}
+.hud-bar .hb-ticks i{flex:1;border-right:1px solid rgba(0,0,0,.55);box-shadow:1px 0 0 rgba(255,255,255,.09);}
+.hud-bar .hb-ticks i:last-child{border-right:none;box-shadow:none;}
+.hud-bar .hb-cap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-size:11px;letter-spacing:.4px;text-shadow:0 1px 3px rgba(0,0,0,.95);pointer-events:none;white-space:nowrap;}
+.hud-bar.stam .hb-cap{color:#20221a;}
+
+@media (max-width:1000px){
+  #app{grid-template-columns:1fr;grid-template-rows:auto 1fr auto;height:auto;min-height:100vh;}
+  #hud-rail{grid-column:1;grid-row:1;border-right:none;border-bottom:1px solid var(--border);overflow:visible;}
+  #hud-main{grid-column:1;grid-row:2;padding:12px 14px 20px;}
+  #hud-footer{grid-column:1;grid-row:3;gap:12px;padding:10px 12px;position:sticky;bottom:0;z-index:40;}
+}
 h1,h2,h3{margin:0 0 6px;}
 h1{font-size:2.4em;color:#fff;text-shadow:0 0 12px rgba(255,180,80,.35);}
 
@@ -133,14 +179,20 @@ input[type=checkbox]:checked::after{content:"✓";position:absolute;top:-3px;lef
 @keyframes mobFadeIn{from{opacity:0;transform:scale(.88);}to{opacity:1;transform:scale(1);}}
 .mob-fade-in{animation:mobFadeIn .55s ease-out both;}
 
-.chat-death-msg{color:#9c9c9c;background:rgba(140,140,140,.10);border-left:3px solid #6f6f6f;
-  padding:2px 6px;border-radius:3px;}
+.chat-death-msg{color:#9c9c9c;}
+.chat-birth-msg{color:#6fcf6f;}
 .chat-admin-msg{color:#7fb6ff;font-weight:bold;}
 
 .known-issues-banner{margin-bottom:8px;padding:8px 12px;border-radius:8px;font-size:.9em;font-weight:bold;
   color:#ffd489;background:rgba(214,150,40,.14);border:1px solid rgba(214,150,40,.55);
   display:flex;align-items:flex-start;gap:8px;}
 .known-issues-banner .kib-icon{flex:0 0 auto;}
+
+.bonfire-alert{border-color:#e0b23d !important;animation:bonfirePulse 1.9s ease-in-out infinite;}
+@keyframes bonfirePulse{
+  0%,100%{box-shadow:0 0 0 1px rgba(224,178,61,.40),0 0 12px rgba(224,178,61,.22);}
+  50%{box-shadow:0 0 0 1px rgba(224,178,61,.75),0 0 26px rgba(224,178,61,.50);}}
+.bonfire-alert-note{color:#e0b23d;font-weight:bold;font-size:11.5px;margin-top:3px;}
 @keyframes spellCooldownWipe{from{stroke-dashoffset:0;}to{stroke-dashoffset:100.53;}}
 
 .firefly-burst-layer{position:absolute;inset:0;overflow:visible;pointer-events:none;z-index:6;}
@@ -279,6 +331,15 @@ a.back-link,.linklike{color:#cbd9a0;cursor:pointer;text-decoration:underline;}
 .mzw-torso{position:absolute;left:23px;top:30px;width:24px;height:30px;border-radius:12px 12px 8px 8px;background:linear-gradient(180deg,var(--mzwb1),var(--mzwb2));z-index:2;box-shadow:inset 0 -4px 6px #0003;}
 .mzw-robe{position:absolute;left:18px;top:52px;width:34px;height:26px;border-radius:0 0 16px 16px;background:linear-gradient(180deg,var(--mzwb2),var(--mzwbt));z-index:2;clip-path:polygon(15% 0,85% 0,100% 100%,0 100%);}
 .mzw-head{position:absolute;left:27px;top:16px;width:18px;height:18px;border-radius:50%;background:#e8c9a0;z-index:4;box-shadow:inset -2px -2px 3px #0002;}
+
+.mzw-walker.mzw-back .mzw-gear{display:none;}
+.mzw-walker.mzw-back .mzw-prop{z-index:1 !important;}
+.mzw-walker.mzw-back .mzw-arm.mzw-front{z-index:2;}
+.mzw-walker.mzw-back .mzw-arm.mzw-back{z-index:6;}
+.mzw-back-head{position:absolute;left:26px;top:14px;width:20px;height:20px;border-radius:50% 50% 46% 46%;
+  background:var(--mzwbt,#3a2a1a);z-index:6;box-shadow:inset 0 -3px 5px rgba(0,0,0,.45);}
+.mzw-back-head::after{content:"";position:absolute;left:4px;top:11px;width:12px;height:8px;
+  border-radius:0 0 50% 50%;background:rgba(0,0,0,.22);}
 .mzw-gear{position:absolute;left:15px;top:2px;width:40px;height:34px;z-index:5;overflow:visible;}
 .mzw-gear svg{width:40px;height:34px;overflow:visible;}
 .mzw-prop{position:absolute;z-index:6;}
@@ -650,22 +711,22 @@ function monsterStarString(star,size){
 
 const ITEMS = {
 
-  minor_health_potion:{name:"Minor Health Potion",type:"consumable",heal_amount:20,sell_value:2},
-  health_potion:{name:"Health Potion",type:"consumable",heal_amount:40,sell_value:4},
-  medium_health_potion:{name:"Medium Health Potion",type:"consumable",heal_amount:75,sell_value:8},
-  greater_health_potion:{name:"Greater Health Potion",type:"consumable",heal_amount:120,sell_value:13},
-  supreme_health_potion:{name:"Supreme Health Potion",type:"consumable",heal_amount:180,sell_value:20},
-  minor_stamina_potion:{name:"Minor Stamina Potion",type:"consumable",stamina_amount:35,sell_value:3},
-  stamina_potion:{name:"Stamina Potion",type:"consumable",stamina_amount:60,sell_value:5},
-  medium_stamina_potion:{name:"Medium Stamina Potion",type:"consumable",stamina_amount:100,sell_value:9},
-  greater_stamina_potion:{name:"Greater Stamina Potion",type:"consumable",stamina_amount:150,sell_value:14},
-  supreme_stamina_potion:{name:"Supreme Stamina Potion",type:"consumable",stamina_amount:220,sell_value:20},
+  minor_health_potion:{name:"Minor Health Potion",type:"consumable",heal_amount:20,sell_value:2,buy_price:8},
+  health_potion:{name:"Health Potion",type:"consumable",heal_amount:40,sell_value:4,buy_price:24},
+  medium_health_potion:{name:"Medium Health Potion",type:"consumable",heal_amount:75,sell_value:8,buy_price:72},
+  greater_health_potion:{name:"Greater Health Potion",type:"consumable",heal_amount:120,sell_value:13,buy_price:216},
+  supreme_health_potion:{name:"Supreme Health Potion",type:"consumable",heal_amount:180,sell_value:20,buy_price:648},
+  minor_stamina_potion:{name:"Minor Stamina Potion",type:"consumable",stamina_amount:35,sell_value:3,buy_price:9},
+  stamina_potion:{name:"Stamina Potion",type:"consumable",stamina_amount:60,sell_value:5,buy_price:27},
+  medium_stamina_potion:{name:"Medium Stamina Potion",type:"consumable",stamina_amount:100,sell_value:9,buy_price:81},
+  greater_stamina_potion:{name:"Greater Stamina Potion",type:"consumable",stamina_amount:150,sell_value:14,buy_price:243},
+  supreme_stamina_potion:{name:"Supreme Stamina Potion",type:"consumable",stamina_amount:220,sell_value:20,buy_price:729},
 
-  minor_mana_potion:{name:"Minor Mana Potion",type:"consumable",mana_amount:20,sell_value:3},
-  mana_potion:{name:"Mana Potion",type:"consumable",mana_amount:40,sell_value:5},
-  medium_mana_potion:{name:"Medium Mana Potion",type:"consumable",mana_amount:60,sell_value:9},
-  greater_mana_potion:{name:"Greater Mana Potion",type:"consumable",mana_amount:90,sell_value:14},
-  supreme_mana_potion:{name:"Supreme Mana Potion",type:"consumable",mana_amount:140,sell_value:20},
+  minor_mana_potion:{name:"Minor Mana Potion",type:"consumable",mana_amount:20,sell_value:3,buy_price:14},
+  mana_potion:{name:"Mana Potion",type:"consumable",mana_amount:40,sell_value:5,buy_price:42},
+  medium_mana_potion:{name:"Medium Mana Potion",type:"consumable",mana_amount:60,sell_value:9,buy_price:126},
+  greater_mana_potion:{name:"Greater Mana Potion",type:"consumable",mana_amount:90,sell_value:14,buy_price:378},
+  supreme_mana_potion:{name:"Supreme Mana Potion",type:"consumable",mana_amount:140,sell_value:20,buy_price:1134},
 
   scroll_of_challenge_1:{name:"Scroll of Challenge I",type:"scroll",level_bonus:1,sell_value:100},
   scroll_of_challenge_2:{name:"Scroll of Challenge II",type:"scroll",level_bonus:2,sell_value:100},
@@ -690,6 +751,12 @@ const ITEMS = {
   antidote:{name:"Antidote",type:"consumable",cures_poison:true,sell_value:12},
 
   elixir_of_clarity:{name:"Elixir of Clairvoyance",type:"consumable",reveals_maze:true,sell_value:140},
+
+  scroll_of_wisdom_1:{name:"Scroll of Wisdom I",type:"consumable",scroll_xp:100,scroll_tier:1,sell_value:40},
+  scroll_of_wisdom_2:{name:"Scroll of Wisdom II",type:"consumable",scroll_xp:300,scroll_tier:2,sell_value:120},
+  scroll_of_wisdom_3:{name:"Scroll of Wisdom III",type:"consumable",scroll_xp:500,scroll_tier:3,sell_value:200},
+  scroll_of_wisdom_4:{name:"Scroll of Wisdom IV",type:"consumable",scroll_xp:1000,scroll_tier:4,sell_value:400},
+  scroll_of_wisdom_5:{name:"Scroll of Wisdom V",type:"consumable",scroll_xp:2000,scroll_tier:5,sell_value:800},
   traveler_pouch:{name:"Traveler's Pouch",type:"bag",capacity:8,sell_value:10},
   woven_bag:{name:"Woven Bramble Bag",type:"bag",capacity:16,sell_value:20},
   bramble_sack:{name:"Bramble Sack",type:"bag",capacity:24,sell_value:32},
@@ -982,6 +1049,10 @@ function questBuildEntry(qid){
     entry={step:1, progress:0, target:Balance.QUEST_DEFS.ASCENDANT_HUNT_STEPS[0].count, status:questInitialStatus(qid)};
   } else if(qid==="wardens"){
     entry={step:1, progress:0, target:Balance.QUEST_DEFS.WARDEN_TRIAL_STEPS[0].count, status:questInitialStatus(qid)};
+  } else if(qid==="trader"){
+    entry={step:1, progress:0, target:Balance.QUEST_DEFS.TRADER_STEPS[0].count, status:questInitialStatus(qid)};
+  } else if(qid==="cleanse"){
+    entry={step:1, progress:0, target:Balance.QUEST_DEFS.CLEANSE_STEPS[0].count, status:questInitialStatus(qid)};
   } else {
     entry={progress:0, target:questTargetFor(qid), status:questInitialStatus(qid)};
   }
@@ -1107,6 +1178,18 @@ function questObjectiveText(qid,entry){
     const band=ASCENDANT_HUNT_BAND_DISPLAY[step.band]||step.band;
     return `${stepOf(stepNum,steps.length)}defeat ${step.count>1?step.count+" "+band+"-band monsters":"a "+band+"-band monster"}.`;
   }
+  if(qid==="trader"){
+    const steps=Balance.QUEST_DEFS.TRADER_STEPS;
+    const stepNum=(entry&&entry.step)||1;
+    const step=steps[stepNum-1]||steps[0];
+    return `${stepOf(stepNum,steps.length)}sell ${step.count===1?"an item":step.count+" items"} on the Auction House. Sales count for the character who listed them, and progress carries across towns.`;
+  }
+  if(qid==="cleanse"){
+    const steps=Balance.QUEST_DEFS.CLEANSE_STEPS;
+    const stepNum=(entry&&entry.step)||1;
+    const step=steps[stepNum-1]||steps[0];
+    return `${stepOf(stepNum,steps.length)}slay ${step.count.toLocaleString()} monsters. Counts every monster this character has ever killed, and survives promotions.`;
+  }
   if(qid==="palisade") return `Open ${T.palisade_chests>1?T.palisade_chests+" stronghold chests":"a stronghold chest"} (progress carries across the whole town, not just one delve).`;
 
   if(qid==="pacifist") return `Slay a monster in combat without ever landing a blow of your own.`;
@@ -1154,6 +1237,12 @@ function questRewardChips(qid,entry){
     const step=Balance.QUEST_DEFS.ASCENDANT_HUNT_STEPS[((entry&&entry.step)||1)-1];
     chips.push(questChip(`+${step.stat_points} stat pt${step.stat_points===1?"":"s"}`,"statpt"));
     chips.push(questChip(`${step.xp} XP`,"xp"));
+  } else if(qid==="trader"||qid==="cleanse"){
+    const steps=qid==="trader"?Balance.QUEST_DEFS.TRADER_STEPS:Balance.QUEST_DEFS.CLEANSE_STEPS;
+    const step=steps[((entry&&entry.step)||1)-1]||steps[0];
+    chips.push(questChip(`+${step.stat_points} stat pt${step.stat_points===1?"":"s"}`,"statpt"));
+    if(step.gold) chips.push(questChip(`${step.gold.toLocaleString()} g`,"gold"));
+    if(step.xp) chips.push(questChip(`${step.xp.toLocaleString()} XP`,"xp"));
   } else if(qid==="palisade"){
     chips.push(questChip(`${R.palisade.gold} g`,"gold"));
 
@@ -1199,6 +1288,10 @@ async function claimQuestReward(questId){
       setToast(reward.done ? "The Ascendant Hunt complete! Every band has fallen to you." : `Step ${reward.step}/${reward.step_count} of The Ascendant Hunt complete, the next band awaits.`);
     }
 
+    if((questId==="trader"||questId==="cleanse") && typeof reward.step==="number"){
+      const name=Balance.QUEST_DEFS.NAMES[questId];
+      setToast(reward.done ? `${name} complete!` : `Step ${reward.step}/${reward.step_count} of ${name} complete.`);
+    }
     if(questId==="wardens" && typeof reward.step==="number"){
       setToast(reward.done ? "The Four Wardens complete! No stronghold in these woods still stands against you." : `Step ${reward.step}/${reward.step_count} of The Four Wardens complete, a longer delve awaits.`);
     }
@@ -1346,6 +1439,12 @@ function gearIconSvg(inst){
 }
 
 const TIER_ROMAN_NUMERALS=["","I","II","III","IV","V"];
+
+for(const [id,src] of [["scroll_of_wisdom_1","scroll_of_challenge_1"],["scroll_of_wisdom_2","scroll_of_challenge_2"],
+                       ["scroll_of_wisdom_3","scroll_of_challenge_3"],["scroll_of_wisdom_4","scroll_of_challenge_3"],
+                       ["scroll_of_wisdom_5","scroll_of_challenge_3"]]){
+  if(GALLERY_ITEM_ICONS[src]) GALLERY_ITEM_ICONS[id]=GALLERY_ITEM_ICONS[src];
+}
 function tierRomanNumeral(tier){ return TIER_ROMAN_NUMERALS[tier]||String(tier); }
 function gearIcon(inst,size=30){
   const badge=iconBadge(gearIconSvg(inst),size);
@@ -1467,11 +1566,11 @@ const Balance = {
   },
   STRONGHOLD_CHEST_GOLD_MIN:500, STRONGHOLD_CHEST_GOLD_MAX:1500,
 
-  STRONGHOLD_CHEST_HERBS_MIN:3, STRONGHOLD_CHEST_HERBS_MAX:7,
+  STRONGHOLD_CHEST_HERBS_MIN:0, STRONGHOLD_CHEST_HERBS_MAX:0,
 
   STRONGHOLD_CHEST_GEAR_COUNT_MIN:2, STRONGHOLD_CHEST_GEAR_COUNT_MAX:5,
 
-  STRONGHOLD_CHEST_GEAR_RARITY_WEIGHTS:[{name:"Rare",weight:70},{name:"Epic",weight:27},{name:"Legendary",weight:3}],
+  STRONGHOLD_CHEST_GEAR_RARITY_WEIGHTS:[{name:"Uncommon",weight:15},{name:"Rare",weight:35},{name:"Epic",weight:45},{name:"Legendary",weight:5}],
   rollStrongholdChestGearRarity(){
     const table=this.STRONGHOLD_CHEST_GEAR_RARITY_WEIGHTS;
     let total=0; for(const r of table) total+=r.weight;
@@ -1493,7 +1592,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.24.1-web",
+  GAME_VERSION:"v0.25-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
 
@@ -1627,13 +1726,14 @@ const Balance = {
   },
 
   QUEST_DEFS:{
-    IDS:["explore","wardens","gatherer","wanderers","streak","cauldron","elder","palisade","pacifist"],
+    IDS:["explore","wardens","gatherer","wanderers","streak","cauldron","elder","palisade","pacifist","trader","cleanse"],
     NAMES:{
       explore:"Every Root and Hollow", wardens:"The Four Wardens", gatherer:"The Gatherer's Dozen",
       wanderers:"Thin the Wanderers", streak:"The Unbroken Chain", cauldron:"The Simmering Cauldron",
       elder:"The Ascendant Hunt", palisade:"Behind the Palisade", pacifist:"The Pacifist",
+      trader:"The Long Road to Market", cleanse:"Cleanse the Forest",
     },
-    LEVEL_REQ:{explore:1, wardens:1, gatherer:1, wanderers:6, streak:3, cauldron:2, elder:8, palisade:1, pacifist:1},
+    LEVEL_REQ:{explore:1, wardens:1, gatherer:1, wanderers:6, streak:3, cauldron:2, elder:8, palisade:1, pacifist:1, trader:1, cleanse:1},
 
     TARGETS:{
       gatherer_herbs:12,
@@ -1648,6 +1748,22 @@ const Balance = {
       {count:12, stat_points:4, xp:2500, gold:4000},
       {count:16, stat_points:5, xp:6000, gold:10000},
       {count:20, stat_points:6, xp:15000, gold:25000},
+    ],
+
+    TRADER_STEPS:[
+      {count:1, stat_points:1, xp:50},
+      {count:5, stat_points:1, xp:50},
+      {count:20, stat_points:1, xp:200},
+      {count:50, stat_points:1, xp:500},
+      {count:100, stat_points:1, xp:1000},
+    ],
+
+    CLEANSE_STEPS:[
+      {count:100, stat_points:5, gold:500},
+      {count:500, stat_points:5, gold:2500},
+      {count:3000, stat_points:10, gold:15000},
+      {count:10000, stat_points:25, gold:50000},
+      {count:100000, stat_points:50, gold:300000},
     ],
     CAULDRON_DISTINCT_TARGET:7,
     ASCENDANT_HUNT_STEPS:[
@@ -1682,6 +1798,9 @@ const Balance = {
     ],
   },
 
+  MANA_PER_INTELLIGENCE:2,
+
+  BAG_BUY_PRICES:{traveler_pouch:320, woven_bag:960, bramble_sack:2880, rootpack_ancient:8640},
   BASE_INVENTORY_SLOTS:16, MAX_BAG_SLOTS:3, BAG_BUY_GOLD_PER_CAPACITY:40, BAG_CRAFT_MATERIALS_PER_CAPACITY:3,
   VENDOR_MARKUP:3,
 
@@ -1839,7 +1958,11 @@ const Balance = {
 
   refineCost(tier,slots){return Math.round(this.reforgeCost(tier,slots)*this.REFINE_MATERIAL_COST_MULT);},
   refineGoldCost(tier,slots){return this.reforgeGoldCost(tier,slots)*this.REFINE_GOLD_COST_MULT;},
-  bagBuyPrice(cap){return cap*this.BAG_BUY_GOLD_PER_CAPACITY;},
+
+  bagBuyPrice(cap,itemId){
+    if(itemId && this.BAG_BUY_PRICES[itemId]!=null) return this.BAG_BUY_PRICES[itemId];
+    return cap*this.BAG_BUY_GOLD_PER_CAPACITY;
+  },
 
   itemBuyPrice(item){ return item.buy_price!=null ? item.buy_price : Math.round((item.sell_value||1)*this.VENDOR_MARKUP); },
   bagCraftCost(cap){return cap*this.BAG_CRAFT_MATERIALS_PER_CAPACITY;},
@@ -2764,6 +2887,13 @@ const Net = {
     this.announcement=data.message||"";
     return data;
   },
+
+  async readScroll(slot,itemId){
+    const res=await fetch(this.apiBase()+"/api/scroll/read",{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({slot,item_id:itemId})});
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.error||"Could not read that scroll.");
+    return data;
+  },
   async announceDeath(payload){
     if(!this.online) return;
     try{ await fetch(this.apiBase()+"/api/announce/death",{method:"POST",headers:this.authHeaders({"Content-Type":"application/json"}),body:JSON.stringify(payload)}); }catch(e){}
@@ -3087,7 +3217,7 @@ const PS = {
     return Math.round(flat*(1+this.gearBonus("max_health_pct")/100.0));
   },
 
-  getMaxMana(){const c=this.getClassData(); return Math.round((c.base_mana||0)+Balance.LEVEL_UP_MANA_BONUS_PER_LEVEL*(this.level-1)+this.gearBonus("mana"));},
+  getMaxMana(){const c=this.getClassData(); return Math.round((c.base_mana||0)+Balance.LEVEL_UP_MANA_BONUS_PER_LEVEL*(this.level-1)+this.getTotalAttr("int")*Balance.MANA_PER_INTELLIGENCE+this.gearBonus("mana"));},
 
   getDamageBreakdown(){
     const c=this.getClassData(); const perLevel=(c.damage_per_level||1.0)*(this.level-1);
@@ -4306,6 +4436,8 @@ function topBar(){
 }
 
 const PROMOTION_CHAT_PATTERN=/has passed the broken bridge trial and is now a /;
+
+const BIRTH_CHAT_PATTERN=/^Nature has given birth to a new /;
 function chatLogEntries(){
   const entries=[];
 
@@ -4314,8 +4446,10 @@ function chatLogEntries(){
 
     const isDeath=m.username==="System" && m.kind==="death";
     const isAdmin=m.username==="System" && m.kind==="admin";
-    const cls=isDeath?"chat-death-msg":isAdmin?"chat-admin-msg":isPromotion?"chat-promotion-msg":"";
-    entries.push({t:new Date(m.created_at).getTime(), node:h("div",{class:cls},[h("span",{class:"muted"},[`[${new Date(m.created_at).toLocaleTimeString()}] `]), m.username!=="System"?h("span",{style:{fontWeight:"bold"}},[m.username+": "]):null, isPromotion?"🎉 ":null, isDeath?"🪦 ":null, m.message])});
+
+    const isBirth=m.username==="System" && BIRTH_CHAT_PATTERN.test(m.message);
+    const cls=isDeath?"chat-death-msg":isBirth?"chat-birth-msg":isAdmin?"chat-admin-msg":isPromotion?"chat-promotion-msg":"";
+    entries.push({t:new Date(m.created_at).getTime(), node:h("div",{class:cls},[h("span",{class:"muted"},[`[${new Date(m.created_at).toLocaleTimeString()}] `]), m.username!=="System"?h("span",{style:{fontWeight:"bold"}},[m.username+": "]):null, isPromotion?"🎉 ":null, isDeath?"🪦 ":null, isBirth?"➕ ":null, m.message])});
   }
   for(const m of Net.privateMessages) entries.push({t:new Date(m.created_at).getTime(), node:h("div",{class:"chat-private-msg"},[h("span",{class:"muted"},[`[${new Date(m.created_at).toLocaleTimeString()}] `]), m.message])});
   entries.sort((a,b)=>a.t-b.t);
@@ -4346,7 +4480,141 @@ function chatPanel(){
   return h("div",{class:"chat-panel"},[chatBody(()=>{ GF.chatOpen=false; render(); })]);
 }
 
+function hudGlobe(kind,cur,max,size,tip){
+  const p=clampf(max>0?cur/max*100:0,0,100);
+  const poisoned=kind==="hp"&&PS.isPoisoned();
+  const g=h("div",{class:"hud-globe "+kind+(poisoned?" poisoned":""),style:{width:size+"px",height:size+"px"},
+    id:"hud-globe-"+kind,"data-tip":tip,},[
+    h("div",{class:"gfill",id:"hud-globe-fill-"+kind,style:{height:p+"%"}}),
+    h("div",{class:"ggloss"}),
+    h("div",{class:"glbl"},[
+      h("div",{class:"gn",id:"hud-globe-num-"+kind},[`${Math.round(cur)}`]),
+      h("div",{class:"gt"},[kind==="hp"?"LIFE":"MANA"]),
+    ]),
+  ]);
+  g.classList.add("tooltip");
+  return g;
+}
+function hudTicks(){
+  const out=[]; for(let i=0;i<10;i++) out.push(h("i",{}));
+  return h("div",{class:"hb-ticks"},out);
+}
+
+function hudFooter(){
+  const maxHp=PS.getMaxHp(), maxMana=PS.getMaxMana(), maxStam=PS.getMaxStamina();
+  const stamPct=clampf(maxStam>0?PS.current_stamina/maxStam*100:0,0,100);
+  const xpPct=clampf(PS.xp_to_next>0?PS.xp/PS.xp_to_next*100:0,0,100);
+  return h("div",{id:"hud-footer"},[
+    h("div",{style:{position:"relative"}},[
+      hudGlobe("hp",PS.current_hp,maxHp,104,`Life ${Math.round(PS.current_hp)} / ${Math.round(maxHp)}`),
+      floatLayer("player"),
+    ]),
+    h("div",{class:"hud-bars"},[
+      h("div",{class:"hud-bar stam",style:{height:"15px"}},[
+        h("div",{class:"hb-fill",id:"hud-stam-fill",style:{width:stamPct+"%"}}),
+        h("div",{class:"hb-cap",id:"hud-stam-cap"},[`Stamina ${Math.round(PS.current_stamina)} / ${Math.round(maxStam)}`]),
+      ]),
+      h("div",{style:{position:"relative"}},[
+        h("div",{class:"hud-bar xp",style:{height:"30px"}},[
+          h("div",{class:"hb-fill",id:"hud-xp-fill",style:{width:xpPct+"%"}}),
+          hudTicks(),
+          h("div",{class:"hb-cap",id:"hud-xp-cap"},[`Level ${PS.level} · ${Math.round(PS.xp)} / ${Math.round(PS.xp_to_next)} XP · ${Math.round(xpPct)}%`]),
+        ]),
+        floatLayer("xpbar"),
+      ]),
+    ]),
+    h("div",{},[hudGlobe("mana",PS.current_mana,maxMana,104,`Mana ${Math.round(PS.current_mana)} / ${Math.round(maxMana)}`)]),
+  ]);
+}
+
+function hudRail(){
+  const c=PS.getClassData();
+  const buffIcons=activePotionBuffIcons();
+  const rail=h("div",{id:"hud-rail"});
+  if(PS.current_slot<0){
+
+    return rail;
+  }
+  rail.appendChild(h("div",{class:"panel"},[
+    h("div",{class:"hud-idname"},[PS.character_name, PS.hardcore?h("span",{style:{color:"#e07a7a",fontSize:"11px",marginLeft:"5px"}},["[Hardcore]"]):null]),
+    h("div",{class:"hud-idsub"},[`Level ${PS.level} ${c.display_name||""} · Tier ${tierRomanNumeral(c.tier||1)}`]),
+    h("div",{class:"hud-idsub"},[getTownName()]),
+    buffIcons.length?h("div",{style:{marginTop:"5px"}},buffIcons):null,
+    h("div",{style:{height:"1px",background:"var(--border)",margin:"9px 0"}}),
+    h("div",{class:"row",style:{justifyContent:"space-between",position:"relative"}},[
+      h("span",{class:"muted",style:{fontSize:"12.5px"}},["Gold"]),
+      h("span",{style:{fontWeight:"bold",color:"var(--gold)"}},[`${Math.round(PS.gold).toLocaleString()}`]),
+      floatLayer("gold"),
+    ]),
+    h("div",{class:"row",style:{justifyContent:"space-between",position:"relative"}},[
+      h("span",{class:"muted",style:{fontSize:"12.5px"}},["Materials"]),
+      h("span",{style:{fontWeight:"bold"}},[`${Math.round(PS.materials).toLocaleString()}`]),
+      floatLayer("materials"),
+    ]),
+
+    h("div",{class:"row gap",style:{alignItems:"center",marginTop:"9px"}},[
+      h("div",{class:"linklike",style:{fontWeight:"bold",fontSize:"12.5px",cursor:GF.screen==="inventory"?"default":"pointer"},
+        onClick:GF.screen==="inventory"?null:()=>GF.goto("inventory",{inventory_return_to:GF.screen})},["Character Sheet"]),
+      characterSheetEntryIcon(),
+    ]),
+  ]));
+  rail.appendChild(h("div",{class:"panel"},[hudCombatSummary()]));
+  rail.appendChild(h("div",{class:"panel"},[playerStatsCompactPanel()]));
+  return rail;
+}
+
+function hudCombatSummary(){
+  const d=PS.getDamageBreakdown();
+  const total=Math.round((d.totalMin+d.totalMax)/2);
+  const parts=[
+    `Base (level and attributes): ${Math.round(d.baseMin)} to ${Math.round(d.baseMax)}`,
+    `Gear: +${Math.round(d.gearBonus)}`,
+  ];
+  if(d.weaponSkillBonus) parts.push(`Weapon proficiency: +${Math.round(d.weaponSkillBonus)} (+${Math.round(d.weaponSkillPct)}%)`);
+  if(d.intDmgBonus) parts.push(`Intelligence: +${Math.round(d.intDmgBonus)}`);
+  parts.push(`Total range: ${Math.round(d.totalMin)} to ${Math.round(d.totalMax)}`);
+  return h("div",{},[
+    h("div",{class:"hud-rail-title"},["Damage"]),
+    h("div",{class:"tooltip",style:{fontSize:"19px",fontWeight:"bold",cursor:"help",display:"inline-block",
+      borderBottom:"1px dotted var(--muted)"},"data-tip":parts.join("\n")},[`${total}`]),
+    PS.kill_streak>0?h("div",{class:"muted",style:{marginTop:"7px",fontSize:"12px"}},
+      [`Kill streak ${PS.kill_streak} (+${PS.kill_streak*Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL}% Magic Find)`]):null,
+    h("div",{class:"tooltip muted",style:{marginTop:"3px",fontSize:"12px"},
+      "data-tip":forestReputationTooltipText(PS.getCurrentForestReputation())},
+      [`Forest Reputation ${PS.getCurrentForestReputation()}`]),
+  ]);
+}
+
 function refreshStatHeaderInPlace(smooth){
+  const footer=document.getElementById("hud-footer");
+  if(!footer || !footer.parentNode) return false;
+  const maxHp=PS.getMaxHp(), maxMana=PS.getMaxMana(), maxStam=PS.getMaxStamina();
+  const hpFillG=document.getElementById("hud-globe-fill-hp");
+  const hpNumG=document.getElementById("hud-globe-num-hp");
+  const manaFillG=document.getElementById("hud-globe-fill-mana");
+  const manaNumG=document.getElementById("hud-globe-num-mana");
+  const stamFill=document.getElementById("hud-stam-fill");
+  const stamCap=document.getElementById("hud-stam-cap");
+  const xpFill=document.getElementById("hud-xp-fill");
+  const xpCap=document.getElementById("hud-xp-cap");
+  if(hpFillG) hpFillG.style.height=clampf(PS.current_hp/maxHp*100,0,100)+"%";
+  if(hpNumG) hpNumG.textContent=`${Math.round(PS.current_hp)}`;
+  if(manaFillG) manaFillG.style.height=clampf(maxMana>0?PS.current_mana/maxMana*100:0,0,100)+"%";
+  if(manaNumG) manaNumG.textContent=`${Math.round(PS.current_mana)}`;
+  if(stamFill) stamFill.style.width=clampf(PS.current_stamina/maxStam*100,0,100)+"%";
+  if(stamCap) stamCap.textContent=`Stamina ${Math.round(PS.current_stamina)} / ${Math.round(maxStam)}`;
+  if(xpFill) xpFill.style.width=clampf(PS.xp_to_next>0?PS.xp/PS.xp_to_next*100:0,0,100)+"%";
+  if(xpCap) xpCap.textContent=`Level ${PS.level} · ${Math.round(PS.xp)} / ${Math.round(PS.xp_to_next)} XP · ${Math.round(clampf(PS.xp_to_next>0?PS.xp/PS.xp_to_next*100:0,0,100))}%`;
+
+  const hpGlobe=document.getElementById("hud-globe-hp");
+  if(hpGlobe) hpGlobe.classList.toggle("poisoned",PS.isPoisoned());
+  const hpTip=document.getElementById("hud-globe-hp");
+  if(hpTip) hpTip.setAttribute("data-tip",`Life ${Math.round(PS.current_hp)} / ${Math.round(maxHp)}`);
+  const manaTip=document.getElementById("hud-globe-mana");
+  if(manaTip) manaTip.setAttribute("data-tip",`Mana ${Math.round(PS.current_mana)} / ${Math.round(maxMana)}`);
+  return true;
+}
+function refreshStatHeaderInPlaceLegacyUnused(smooth){
   const el=document.getElementById("stat-header-panel");
   if(!el || !el.parentNode) return false;
 
@@ -4455,17 +4723,33 @@ function refreshCraftProgressInPlace(){
 function render(){
   app.innerHTML="";
 
+  const chromeless=NO_TOPBAR_SCREENS.includes(GF.screen) || PS.current_slot<0;
+  const main=h("div",{id:"hud-main"});
+  if(chromeless){
+    app.style.gridTemplateColumns="1fr";
+    app.style.gridTemplateRows="1fr";
+  } else {
+    app.style.gridTemplateColumns="";
+    app.style.gridTemplateRows="";
+    app.appendChild(hudRail());
+  }
+  app.appendChild(main);
+  renderScreenInto(main,chromeless);
+  if(!chromeless && PS.current_slot>=0) app.appendChild(hudFooter());
+  maybeShowWhatsNewPopup();
+}
+function renderScreenInto(app,chromeless){
+
   if(!Net.online && !Storage_.available){
     app.appendChild(h("div",{class:"panel",style:{background:"#4a2a20",borderColor:"#8a4a3a",marginBottom:"14px"}},[
       "Your browser is blocking local storage for this page (this can happen when opening the file directly instead of through a web server or a hosted link). You'll be able to log in and play normally, you'll just need to log in again each time you come back instead of staying signed in. Your character progress itself always lives on the server either way."
     ]));
   }
 
-  if(!NO_TOPBAR_SCREENS.includes(GF.screen)){ app.appendChild(topBar()); app.appendChild(knownIssuesBanner()); app.appendChild(communityXpHeader()); }
+  if(!chromeless){ app.appendChild(topBar()); app.appendChild(knownIssuesBanner()); app.appendChild(communityXpHeader()); }
   const fn=SCREENS[GF.screen]||SCREENS.mainMenuSlots;
   app.appendChild(fn());
   const cp=chatPanel(); if(cp) app.appendChild(cp);
-  maybeShowWhatsNewPopup();
 }
 
 const WHATS_NEW_STORAGE_KEY="wandrian_last_seen_changelog_version";
@@ -4666,6 +4950,25 @@ const POTION_BUFF_DEFS=[
   {type:"regen",emoji:"♻️",label:"Potion of Renewal",suffix:" HP/sec and Stamina/sec regen"},
 
 ];
+
+function buffCounterChip(emoji,label,count,noun){
+  return h("span",{class:"tooltip",style:{marginLeft:"5px",cursor:"help",whiteSpace:"nowrap"},
+    "data-tip":`${label}: ${count} ${noun}${count===1?"":"s"} remaining.`},[
+    emoji,
+    h("span",{style:{marginLeft:"3px",fontSize:".8em",fontWeight:"bold",background:"rgba(0,0,0,.45)",
+      borderRadius:"9px",padding:"0 5px"}},[`x${count}`]),
+  ]);
+}
+function activeEffectCounterIcons(){
+  const out=[];
+  if(PS.xp_buff_encounters_left>0) out.push(buffCounterChip("✨","Experience Shrine",PS.xp_buff_encounters_left,"encounter"));
+  if(PS.magic_find_rounds_left>0) out.push(buffCounterChip("🍀","Magic Find",PS.magic_find_rounds_left,"round"));
+  if(PS.invuln_rounds_left>0) out.push(buffCounterChip("🛡","Touch of Unicorn",PS.invuln_rounds_left,"round"));
+  if(PS.quad_dmg_rounds_left>0) out.push(buffCounterChip("⚔","Quad Damage",PS.quad_dmg_rounds_left,"round"));
+  if(PS.clarity_charges_left>0) out.push(buffCounterChip("🔮","Clairvoyance",PS.clarity_charges_left,"charge"));
+  if(PS.eyesight_potion_steps_left>0) out.push(buffCounterChip("👁","Elixir of Eyesight",PS.eyesight_potion_steps_left,"step"));
+  return out;
+}
 function activePotionBuffIcons(){
   const icons=[];
   for(const def of POTION_BUFF_DEFS){
@@ -4674,6 +4977,8 @@ function activePotionBuffIcons(){
     const msLeft=PS.getTempBuffMsLeft(def.type);
     icons.push(h("span",{title:`${def.label} active: +${amt}${def.suffix}. ${formatMsAsMinSec(msLeft)} remaining.`,style:{marginLeft:"4px",cursor:"help"}},[def.emoji]));
   }
+
+  for(const node of activeEffectCounterIcons()) icons.push(node);
   return icons;
 }
 
@@ -4752,7 +5057,11 @@ function playerStatsCompactPanel(){
     ],true),
     col("Offense",[
       cell("Damage",Math.round((dmgBreak.baseMin+dmgBreak.baseMax)/2),"",Math.round(dmgBreak.gearBonus),false),
+
       cell("Crit Chance",Math.round(PS.getCritChance()*100)-Math.round(PS.gearBonus("crit")),"%",Math.round(PS.gearBonus("crit")),true),
+      PS.getCritChance()>=0.80?h("div",{class:"tooltip muted",style:{fontSize:"11px",marginTop:"2px",cursor:"help"},
+        "data-tip":"Critical Hit Chance cannot go above 95%: one hit in twenty always lands as a normal hit. Any crit chance beyond that point is wasted. Critical Hit Damage has no cap, so that is where further critical investment keeps paying."},
+        ["Caps at 95%"]):null,
 
       cell("Crit Multiplier",PS.getCritMultiplierMax(),"x",0,false),
 
@@ -4784,7 +5093,11 @@ function playerStatsCompactPanel(){
   root.appendChild(grid);
   return root;
 }
+
 function statHeader(opts={}){
+  return h("div",{class:"hud-legacy-stat-header"});
+}
+function statHeaderLegacyUnused(opts={}){
   const compact=!!opts.compact;
   const c=PS.getClassData();
   const buffIcons=activePotionBuffIcons();
@@ -5619,7 +5932,7 @@ function inspectEquipSlotTile(slot,snapshot){
 
   return h("div",{class:"tile"},[
     h("div",{class:"muted"},[IF.slotLabel(slot)]),
-    inst?h("div",{class:"row gap",style:{alignItems:"center"}},[gearIcon(inst,26), gearHoverBox(h("div",{class:"rarity-"+inst.rarity,style:{fontWeight:"bold"}},[IF.displayName(inst)+` (${tierRomanNumeral(inst.tier)})`]), inst)]):h("div",{class:"muted"},["(empty)"]),
+    inst?h("div",{class:"row gap",style:{alignItems:"center"}},[gearIcon(inst,26), gearHoverBox(h("div",{class:"rarity-"+inst.rarity,style:{fontWeight:"bold"}},[IF.displayName(inst)+` (${tierRomanNumeral(inst.tier)})`]), inst, {compare:false})]):h("div",{class:"muted"},["(empty)"]),
   ]);
 }
 
@@ -5803,7 +6116,8 @@ function getVentureDepth(){
 
 function kindleBonfirePanel(){
   const WARM_MS=Balance.POTION_HEAL_DURATION_MS, HOLD_MS=900, FADE_MS=750;
-  const maxed=PS.current_hp>=PS.getMaxHp() && PS.current_stamina>=PS.getMaxStamina();
+
+  const maxed=PS.current_hp>=PS.getMaxHp() && PS.current_stamina>=PS.getMaxStamina() && PS.current_mana>=PS.getMaxMana();
   let warming=false, holding=false, fading=false, pct=0;
 
   if(GF.bonfireKindle){
@@ -5834,14 +6148,23 @@ function kindleBonfirePanel(){
   }
 
   const isActive=warming||holding||fading;
-  const label=warming?"Warming...":(holding?"Full HP & Stamina!":"Kindle the Bonfire");
+  const label=warming?"Warming...":(holding?"Fully restored!":"Kindle the Bonfire");
+
   const subtext=isActive
     ? (warming?"Warming yourself by the flames...":(holding?"Fully healed and rested.":""))
-    : (maxed?"You are already fully rested.":"Warm yourself by the bonfire for a full 5-second heal of HP and Stamina.");
+    : (maxed?"You are already fully rested.":"Rest and restore.");
+
+  const lowParts=[];
+  if(PS.getMaxHp()>0 && PS.current_hp/PS.getMaxHp()<0.25) lowParts.push("health");
+  if(PS.getMaxStamina()>0 && PS.current_stamina/PS.getMaxStamina()<0.25) lowParts.push("stamina");
+  if(PS.getMaxMana()>0 && PS.current_mana/PS.getMaxMana()<0.25) lowParts.push("mana");
+  const lowAlert=!isActive && !maxed && lowParts.length>0;
+  const lowNote=lowParts.length===1?`Your ${lowParts[0]} is running low.`
+    :`Your ${lowParts.slice(0,-1).join(", ")} and ${lowParts[lowParts.length-1]} are running low.`;
 
   return h("div",{class:"row venture-row"},[
     h("div",{id:"kindle-bonfire-btn",
-      class:"panel venture-card venture-fill kindle"+(isActive&&!fading?" lit":"")+(fading?" fading":"")+((isActive||maxed)?"":" venture-clickable"),
+      class:"panel venture-card venture-fill kindle"+(isActive&&!fading?" lit":"")+(fading?" fading":"")+((isActive||maxed)?"":" venture-clickable")+(lowAlert?" bonfire-alert":""),
       style:(isActive||maxed)?{cursor:"default"}:{},
       onClick:(isActive||maxed)?null:()=>{
         PS.kindleBonfireInstant();
@@ -5858,6 +6181,7 @@ function kindleBonfirePanel(){
       ]),
       h("div",{class:"venture-title"},[inlineIcon(BONFIRE_SVG,18)," ",h("span",{id:"kindle-bonfire-label"},[label])]),
       h("div",{class:"muted",style:{fontSize:".8em",marginTop:"2px"}},[subtext]),
+      lowAlert?h("div",{class:"bonfire-alert-note"},[lowNote]):null,
     ]),
   ]);
 }
@@ -6072,7 +6396,7 @@ function generateMaze(depth, isNight){
     roamers.push({roamerId:r, idx:spawnIdx, monsterId:DL.pickRandomMonsterForArea(depth).id, defeated:false, behavior, homeIdx:spawnIdx});
   }
 
-  const maze={size, sizeH, cells, depth, playerIdx:0, stronghold, roamers, isNight:!!isNight, facingDir:1};
+  const maze={size, sizeH, cells, depth, playerIdx:0, stronghold, roamers, isNight:!!isNight, facingDir:1, facingUp:false};
 
   revealAround(maze,0,mazeEyesightRadius(maze));
   return maze;
@@ -6404,7 +6728,7 @@ const MZW_CLASS_CONFIG={
  galeshaper:{head:"galemantle",prop:"bow",aura:()=>mzwAuraWind(),gait:{gait:"0.52s",bob:4,stride:16,swing:16,lean:7,float:true}},
 };
 
-function mazeWalkerFor(classId){
+function mazeWalkerFor(classId,facing){
   const cls=CLASSES[classId];
   const cfg=cls?MZW_CLASS_CONFIG[classId]:null;
   const pal=cfg&&cls?MZW_CHAIN_PALETTES[cls.chain]:null;
@@ -6418,7 +6742,8 @@ function mazeWalkerFor(classId){
   const headSvg=MZW_HEADS[cfg.head](pal);
   const prop=MZW_PROPS[cfg.prop]?MZW_PROPS[cfg.prop](pal):"";
   const aura=cfg.aura?cfg.aura(pal):"";
-  const html=`<div class="mzw-walker${isFloat?" mzw-float":""}" style="${vars}">
+  const back=facing==="back";
+  const html=`<div class="mzw-walker${isFloat?" mzw-float":""}${back?" mzw-back":""}" style="${vars}">
       <div class="mzw-shadow"></div>
       ${aura}
       <div class="mzw-fig">
@@ -6430,6 +6755,7 @@ function mazeWalkerFor(classId){
         <div class="mzw-limb mzw-arm mzw-front"></div>
         <div class="mzw-head"></div>
         <div class="mzw-gear">${headSvg}</div>
+        ${back?`<div class="mzw-back-head"></div>`:""}
         ${prop}
       </div>
     </div>`;
@@ -6542,13 +6868,14 @@ function screenMaze(){
       }
     }
 
-    const walker=mazeWalkerFor(PS.class_id);
+    const walker=mazeWalkerFor(PS.class_id, maze.facingUp?"back":"side");
 
     const moverPct={width:(100/maze.size)+"%", height:(100/maze.sizeH)+"%"};
     grid.appendChild(h("div",{id:"maze-player-marker",class:"maze-mover maze-mover-player",style:Object.assign({left:(px/maze.size*100)+"%",top:(py/maze.sizeH*100)+"%"},moverPct)},[
       h("div",{class:"mz-player-glow"}),
       h("div",{class:"mzw-scale"},[
-        h("div",{class:"mzw-flip",style:{transform:"scaleX("+(maze.facingDir||1)+")"},html:walker.html}),
+
+        h("div",{class:"mzw-flip",style:{transform:"scaleX("+(maze.facingUp?1:(maze.facingDir||1))+")"},html:walker.html}),
       ]),
     ]));
     if(maze.roamers){
@@ -6717,8 +7044,13 @@ function onStepMaze(maze,targetIdx){
   const cell=maze.cells[targetIdx];
 
   const prevPx=prevPlayerIdx%maze.size, newPx=targetIdx%maze.size;
-  if(newPx>prevPx) maze.facingDir=1;
-  else if(newPx<prevPx) maze.facingDir=-1;
+
+  const prevPy=Math.floor(prevPlayerIdx/maze.size), newPy=Math.floor(targetIdx/maze.size);
+  if(newPx>prevPx){ maze.facingDir=1; maze.facingUp=false; }
+  else if(newPx<prevPx){ maze.facingDir=-1; maze.facingUp=false; }
+
+  else if(newPy<prevPy) maze.facingUp=true;
+  else if(newPy>prevPy) maze.facingUp=false;
   maze.playerIdx=targetIdx; cell.discovered=true; cell.visited=true;
 
   PS.spendStamina(Balance.staminaCostPerStep(IF.EQUIPPED_SLOT_KEYS.filter(s=>PS.equipped[s]).length));
@@ -8303,21 +8635,22 @@ function equippedRefForCompare(inst){
   return PS.equipped[inst.slot]||null;
 }
 
-function gearHoveredItemContent(inst){
+function gearHoveredItemContent(inst,opts){
   const nodes=[h("div",{class:"compare-title rarity-"+inst.rarity},[`${IF.displayName(inst)} (${tierRomanNumeral(inst.tier)})`])];
 
-  const levelFailed=PS.level<Balance.tierLevelRequirement(inst.tier);
+  const compareOn=!(opts&&opts.compare===false);
+  const levelFailed=compareOn && PS.level<Balance.tierLevelRequirement(inst.tier);
   nodes.push(h("div",{style:{marginBottom:"2px",color:levelFailed?"#e07a7a":undefined}},[`Requires Level ${Balance.tierLevelRequirement(inst.tier)}`]));
   const weaponType=IF.weaponTypeForInstance(inst);
   const offhandType=IF.offhandTypeForInstance(inst);
 
   const restrictedTo=weaponType?IF.WEAPON_TYPE_CLASS_RESTRICTIONS[weaponType]:(offhandType?IF.OFFHAND_TYPE_CLASS_RESTRICTIONS[offhandType]:null);
   if(restrictedTo){
-    const classFailed=!IF.classCanEquipItem(PS.class_id,inst);
+    const classFailed=compareOn && !IF.classCanEquipItem(PS.class_id,inst);
     nodes.push(h("div",{style:{marginBottom:"2px",color:classFailed?"#e07a7a":undefined}},[`Class: ${restrictedTo.map(id=>DL.getClass(id).display_name||id).join(", ")}`]));
   }
 
-  const equippedRef=equippedRefForCompare(inst);
+  const equippedRef=compareOn?equippedRefForCompare(inst):null;
   const equippedMap=equippedRef?gearAffixMap(equippedRef):{};
   const hoveredMap=gearAffixMap(inst);
   for(const a of (inst.affixes||[])){
@@ -8346,10 +8679,10 @@ function gearCompareWrap(triggerEl, inst){
   ]);
 }
 
-function gearHoverBox(triggerEl, inst){
+function gearHoverBox(triggerEl, inst, opts){
   return h("div",{class:"gear-compare-wrap"},[
     triggerEl,
-    h("div",{class:"hover-item-box"},gearHoveredItemContent(inst)),
+    h("div",{class:"hover-item-box"},gearHoveredItemContent(inst,opts)),
   ]);
 }
 
@@ -8723,8 +9056,27 @@ function consumablesListPanel(){
     const item=DL.getItem(itemId);
     const isPotion=item.type==="consumable";
 
-    const disabled=isPotion && !PS.canUseConsumable(itemId);
+    const scrollTier=item.scroll_tier||0;
+    const scrollLevelReq=scrollTier?Balance.tierLevelRequirement(scrollTier):0;
+    const scrollLocked=scrollTier>0 && PS.level<scrollLevelReq;
+    const disabled=scrollTier>0 ? scrollLocked : (isPotion && !PS.canUseConsumable(itemId));
     const onUse=()=>{
+      if(scrollTier>0){
+        if(scrollLocked){ setToast(`This scroll's words are beyond you until Level ${scrollLevelReq}.`); render(); return; }
+        if(GF.scrollReading) return;
+        GF.scrollReading=itemId; render();
+        Net.readScroll(PS.current_slot,itemId).then(result=>{
+          PS._saveSeqFloor=Math.max(PS._saveSeqFloor||0, result._save_seq||0);
+          PS.consumables=result.consumables||PS.consumables;
+          PS.level=result.level; PS.xp=result.xp; PS.xp_to_next=result.xp_to_next;
+          if(result.quests) PS.quests=result.quests;
+          spawnFloat("xpbar",`+${Math.round(result.xp_gained)} XP`,"float-text-xp");
+          setToast(result.leveled?`The scroll's wisdom carries you to Level ${result.level}!`:`You read the ${item.name} and gain ${Math.round(result.xp_gained)} experience.`);
+        }).catch(e=>{
+          setToast(e.message||"Could not read that scroll.");
+        }).then(()=>{ GF.scrollReading=null; render(); });
+        return;
+      }
       if(isPotion){
 
         const wasEyesight=(item.eyesight_steps||0)>0;
@@ -8780,13 +9132,14 @@ function screenInventory(){
   const activeTab=GF.characterSheetTab||"inventory";
 
   if(activeTab==="overview"){
-    root.appendChild(skillsBonusPanel());
+
     root.appendChild(h("div",{class:"row",style:{alignItems:"stretch",gap:"14px"}},[
       h("div",{style:{flex:"0 0 50%",maxWidth:"50%",minWidth:"0"}},[attributesPanel()]),
       h("div",{style:{flex:"1",minWidth:"0"}},[gearBonusPanel()]),
     ]));
 
     root.appendChild(questStatPointsPanel());
+    root.appendChild(h("div",{style:{marginTop:"14px"}},[skillsBonusPanel()]));
 
     root.appendChild(h("div",{style:{marginTop:"14px"}},[shrineBonusPanel()]));
 
@@ -9584,7 +9937,7 @@ function merchantContainersTab(){
   const root=h("div",{class:"merchant-item-grid"});
   for(const itemId in ITEMS){
     const item=ITEMS[itemId]; if(item.type!=="bag") continue;
-    const price=Balance.bagBuyPrice(item.capacity);
+    const price=Balance.bagBuyPrice(item.capacity,itemId);
     root.appendChild(h("div",{class:"tile merchant-item-card"},[
       h("div",{class:"merchant-item-card-head"},[
         itemIcon(itemId,36),
@@ -10869,6 +11222,40 @@ function legacyGearSection(){
 }
 
 const CHANGELOG=[
+  { version:"v0.25", date:"2026-08-04 20:15", notes:[
+    "The game now fills your whole screen. Your Life and Mana are round globes in the bottom corners, with Stamina and a taller, tick-marked Experience bar between them, and everything about your character now lives in a rail down the left side. The middle of the screen belongs entirely to the game.",
+    "Your class now shows its back while walking upward through a maze, instead of facing you the whole way.",
+    "New questline, The Long Road to Market: sell 1, 5, 20, 50 and 100 items on the Auction House. Sales count for the character that listed them.",
+    "New questline, Cleanse the Forest: slay 100, 500, 3,000, 10,000 and finally 100,000 monsters. It counts every monster that character has ever killed and survives promotions.",
+    "Scrolls of Wisdom return, in five tiers granting 100 to 2,000 experience. Deeper areas drop better ones, you must have reached a tier's level before you can read its scroll, and they can be traded on the Auction House.",
+    "Intelligence now grants +2 maximum Mana per point for every class, from attributes, gear and potions alike.",
+    "Stronghold chests no longer contain herbs, and half of everything inside is now Rare quality or better.",
+    "Potions cost three times as much per tier, and the two largest bags are considerably more expensive. The cheap tiers are unchanged.",
+    "The bonfire now lights up when any of your Life, Stamina or Mana is running low, and can be used when only your Mana is short. It could not be before.",
+    "Shrine and elixir effects now show a small counter beside them, ticking down as they are spent, so you can see how much is left.",
+    "Critical Hit Chance now says plainly that it caps at 95%, so you can stop pouring gear into it and put that into Critical Hit Damage instead.",
+    "The Character Sheet overview now leads with Attributes, Gear Bonuses and your quest points, with Skill Bonuses below them.",
+    "A new character arriving is announced in green, and inspecting another player no longer colours their gear against your own.",
+  ]},
+  { version:"v0.24.2", date:"2026-08-04 18:40", notes:[
+    "Fixed quest progress being silently erased: kills were being counted by the server and then overwritten a second later by your own autosave. The Unbroken Chain, Thin the Wanderers, The Ascendant Hunt and The Four Wardens all track properly now.",
+    "Fixed being stuck in combat when a monster died to Thorns damage or a Fireflies tick. The fight now ends and pays out exactly as it does for any other killing blow.",
+    "There are no more decimals anywhere. Health, Mana, Stamina and every damage number are whole values, as the bars always implied.",
+    "The Pacifist is no longer locked behind a meaningless \"Unlocks at Level 1\", and quests added in future updates will appear on existing characters instead of showing as locked.",
+    "Quest requirements no longer change with your town or tier. Every quest asks the same thing everywhere, and progression now lives in multi-step questlines that show which step you are on.",
+    "The Four Wardens is now a five-step questline (4, 8, 12, 16 and 20 stronghold guardians in a single delve), and no longer restricts you to the first few area levels.",
+    "The whole quest board now resets when you attempt a Broken Bridge Trial, whether you pass or fall, matching the level reset that comes with it.",
+    "Gear Vitality finally raises your Health, and the Max Health % stat on gear now does something. Both had no effect on your health bar before.",
+    "Every Root and Hollow now requires every grass tile to be trampled bare, not merely stepped on once.",
+    "New characters no longer inherit the previous character's spellcasting proficiency, quest board or learned spells.",
+    "Monster encounters start immediately instead of pausing first; the monster fades into view as the fight opens.",
+    "A slotted spell you cannot cast yet shows a red lock over its icon, instead of only telling you after you try.",
+    "The Merchant lays its stock out four to a row and offers quick-sell buttons for Crude, Common and Magical items.",
+    "Hardcore deaths are announced once rather than twice, in grey with a tombstone. Admin broadcasts are shown in blue.",
+    "Stronghold Keys drop far less often from guardians (30% down to 5%).",
+    "Admins can post a known-issues banner visible to every player above the community experience panel.",
+    "The maze frame now uses the full width available to it.",
+  ]},
   { version:"v0.24.1", date:"2026-08-04 16:24", notes:[
     "New quest: The Pacifist, for those who'd rather let their gear do the fighting.",
     "The Elder of the Thicket's old quest is now The Ascendant Hunt, a five-part questline that sends you after every monster band in order, one step at a time.",
@@ -11589,6 +11976,14 @@ function screenGameplayGuide(){
     h("div",{style:{marginBottom:"8px"}},[`Long ago, the forest was in balance. Trees grew, streams ran clear, and people lived alongside nature instead of apart from it, gathered in a network of camps where the line between civilization and wilderness was respected, not fought. Then, for reasons nobody quite remembers, the balance broke. The corruption spread through root and water, turning trees hostile and animals aggressive, until the forest that once sheltered people started fighting back.`]),
     h("div",{style:{marginBottom:"8px"}},[`Every monster you fight isn't an invader, it's the forest's own child, twisted by that corruption (see "The Forest's Children" in the Monster Guide). Cleansing it isn't about defeating nature, it's about healing it, and your Forest Reputation (see below) is the game's own running measure of whether you're doing that with care or with carelessness.`]),
     h("div",{},[`Each of the five towns you pass through on your climb sits a little deeper into the corruption than the last, and asks a different question of you: what is this? (${Balance.TOWN_NAMES[0]}), how do I fight it? (${Balance.TOWN_NAMES[1]}), where did it come from? (${Balance.TOWN_NAMES[2]}), how do I heal it? (${Balance.TOWN_NAMES[3]}), and finally, at ${Balance.TOWN_NAMES[4]}, everything you've learned gets put to the test.`]),
+  ]));
+
+  root.appendChild(h("h3",{},["Your Interface"]));
+  root.appendChild(h("div",{class:"panel",style:{marginBottom:"16px"}},[
+    h("div",{style:{marginBottom:"8px"}},[`The two globes in the bottom corners are your Life (left, red) and your Mana (right, blue). They drain and refill in place, so you can read your state at a glance without looking away from whatever you are doing. Hover either one for the exact numbers. A poisoned character's Life globe turns green until the poison wears off.`]),
+    h("div",{style:{marginBottom:"8px"}},[`Between the globes are two bars. The thin one on top is Stamina, which every step through a maze spends, and which decides how far you can push before you have to turn back. The tall one underneath is Experience, marked with a tick every ten percent so you can see how close the next level really is.`]),
+    h("div",{style:{marginBottom:"8px"}},[`The rail down the left side is everything about your character: who you are and where you stand, your gold and materials, your total damage (hover it for the full breakdown of where that damage comes from), your kill streak and Forest Reputation, and a collapsible panel with every stat in detail. It stays put wherever you go.`]),
+    h("div",{},[`Everything else, the whole middle and right of the screen, is the game itself: the town, the maze, the shops and the fights.`]),
   ]));
 
   root.appendChild(h("h3",{},["The Core Loop"]));
