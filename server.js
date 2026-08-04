@@ -970,11 +970,17 @@ const QUEST_TOWN_REWARD_MULT = [1.0, 1.25, 1.5, 1.75, 2.0];
 // per-town array entries below (index 0 = town 1 .. index 4 = town 5), nothing scattered in
 // per-town `if` branches anywhere else in this file.
 const QUEST_DEFS = {
-  IDS: ["explore", "wardens", "gatherer", "wanderers", "streak", "cauldron", "elder", "palisade"],
+  IDS: ["explore", "wardens", "gatherer", "wanderers", "streak", "cauldron", "elder", "palisade", "pacifist"],
   NAMES: {
     explore: "Every Root and Hollow", wardens: "The Four Wardens", gatherer: "The Gatherer's Dozen",
     wanderers: "Thin the Wanderers", streak: "The Unbroken Chain", cauldron: "The Simmering Cauldron",
-    elder: "Elder of the Thicket", palisade: "Behind the Palisade",
+    // v0.24.1 (B4): renamed from "Elder of the Thicket" -- now a 5-step questline through every
+    // band, not a single Elder-band kill. See ASCENDANT_HUNT_STEPS below.
+    elder: "The Ascendant Hunt", palisade: "Behind the Palisade",
+    // v0.24.1 (B5): new. Deliberately named/worded without ever mentioning Thorns/reflect
+    // mechanics -- see questObjectiveText's "pacifist" branch in index.html for the exact
+    // player-facing copy, per Gwen's explicit instruction not to spell out the mechanism.
+    pacifist: "The Pacifist",
   },
   // Level requirement (within the CURRENT town's own level arc) for a quest to flip from
   // "locked" to "active". Kept IDENTICAL across all 5 towns rather than scaled per town --
@@ -982,7 +988,7 @@ const QUEST_DEFS = {
   // applyTrialResolutionReset() above), so "must be level 8" is already a meaningfully
   // mid-late gate in every town's own arc (town 1 runs levels 1-10 before trial eligibility,
   // town 2 runs 1-20, town 3+ runs 1-30/40 -- see trialLevelRequirement()), not just town 1's.
-  LEVEL_REQ: { explore: 1, wardens: 1, gatherer: 1, wanderers: 6, streak: 3, cauldron: 2, elder: 8, palisade: 1 },
+  LEVEL_REQ: { explore: 1, wardens: 1, gatherer: 1, wanderers: 6, streak: 3, cauldron: 2, elder: 8, palisade: 1, pacifist: 1 },
   TARGETS: {
     explore_area_level: [3, 6, 9, 12, 15],
     // v-quest: town 1-2 = 1 stronghold's 4 guardians in one delve; town 3+ = 2 strongholds'
@@ -993,22 +999,40 @@ const QUEST_DEFS = {
     gatherer_herbs: [12, 16, 20, 24, 28],
     wanderers_roamers: [10, 14, 18, 22, 26],
     streak_kills: [8, 10, 12, 14, 16],
-    cauldron_brews: [5, 7, 9, 11, 13],
-    // v-quest: town 1 needs 1 Elder-band kill; town 2+ steps the required BAND up to
-    // Ancient (see ELDER_BAND below) rather than requiring more kills; town 4-5 ALSO raises
-    // the count to 2 on top of that -- one clean escalation axis per town, not both at once
-    // except at the very top end.
-    elder_kills: [1, 1, 1, 2, 2],
+    // v0.24.1 (B6): "cauldron" no longer counts total brews -- see CAULDRON_DISTINCT_TARGET
+    // below, which replaces this per-town-scaled count with a single fixed "7 distinct
+    // recipes" target. Removed rather than left dead so nothing accidentally reads a stale
+    // per-town number here.
     // v-quest: "in the town" = a running total across the WHOLE town's play, never reset
     // between delves (unlike wardens/streak/explore, which require completion within one
     // continuous delve) -- see questTrackStrongholdChestReport() below.
     palisade_chests: [1, 1, 2, 2, 3],
   },
-  // Internal monster-band keys (see COMBAT_MONSTER_BAND_INFO) -- "Epic" displays as "Elder",
-  // "Legendary" as "Ancient" (index.html's MONSTER_BAND_INFO label field).
-  ELDER_BAND: ["Epic", "Legendary", "Legendary", "Legendary", "Legendary"],
-  // v-quest: from town 2 on, at least 1 of the N brews counted toward cauldron_brews must be
-  // one of ATTR_POTION_IDS below -- see questTrackBrewReport()'s richer entry shape
+  // v0.24.1 (B4): "elder" is now a 5-step questline through every band in order, replacing the
+  // old single "kill N of band X" target -- each step must be individually claimed at the board
+  // before the next one unlocks (see the claim endpoint's "elder" branch, which advances
+  // entry.step/progress/target in place instead of setting a terminal "claimed" status until
+  // step 5). Deliberately NOT scaled by town/QUEST_TOWN_REWARD_MULT like every other quest here
+  // -- per Gwen's exact spec this is a fixed reward table tied to band difficulty, which already
+  // is its own escalation axis. Band keys are the internal COMBAT_MONSTERS tier keys (Common/
+  // Uncommon/Rare/Epic/Legendary), displayed via index.html's MONSTER_BAND_INFO[...].label as
+  // Newborn/Young/Mature/Elder/Ancient. Total across all 5 steps: +25 stat points, +19,700 XP.
+  ASCENDANT_HUNT_STEPS: [
+    { band: "Common", count: 20, stat_points: 5, xp: 200 },
+    { band: "Uncommon", count: 10, stat_points: 5, xp: 500 },
+    { band: "Rare", count: 5, stat_points: 5, xp: 1000 },
+    { band: "Epic", count: 3, stat_points: 5, xp: 3000 },
+    { band: "Legendary", count: 1, stat_points: 5, xp: 15000 },
+  ],
+  // v0.24.1 (B6): "The Simmering Cauldron" now asks for 7 DISTINCT potion recipes brewed while
+  // the quest is active, not 7 (or N) brews of anything -- brewing the same potion twice no
+  // longer makes any progress past the first time. Fixed across every town (variety, not
+  // volume, doesn't get harder just because you're in a later town), replacing the old
+  // per-town TARGETS.cauldron_brews count entirely. See questTrackBrewReport() below for how
+  // the entry's new `distinct_brewed` array (instead of a plain counter) is tracked.
+  CAULDRON_DISTINCT_TARGET: 7,
+  // v-quest: from town 2 on, at least 1 of the distinct recipes brewed toward the target must
+  // be one of ATTR_POTION_IDS below -- see questTrackBrewReport()'s richer entry shape
   // (progress/target PLUS attr_potion_brewed) for how this sub-requirement is modeled.
   CAULDRON_ATTR_POTION_REQUIRED: [false, true, true, true, true],
   ATTR_POTION_IDS: ["potion_of_might", "potion_of_swiftness", "potion_of_intellect"],
@@ -1031,14 +1055,19 @@ const QUEST_DEFS = {
     wanderers: { hp: [80, 100, 120, 140, 160], gold: [1800, 2250, 2700, 3150, 3600], xp: [400, 500, 600, 700, 800] },
     streak: { gold: [600, 750, 900, 1050, 1200], xp: [250, 313, 375, 438, 500] },
     cauldron: { elixirs: [["elixir_of_eyesight"], ["elixir_of_eyesight"], ["elixir_of_eyesight"], ["elixir_of_eyesight"], ["elixir_of_eyesight"]], stat_points: [1, 1, 2, 2, 2] },
-    // gear reward is rolled live at claim time (see the claim endpoint), tier derived from
-    // this town's own explore_area_level target via the SAME combatItemTierForAreaLevel()
-    // every monster-drop/Blacksmith roll already uses -- not hardcoded here.
-    elder: { stat_points: [1, 1, 2, 2, 2], xp: [300, 375, 450, 525, 600] },
+    // v0.24.1 (B4): "elder" reward moved to the fixed, non-town-scaled ASCENDANT_HUNT_STEPS
+    // table above (see the claim endpoint's "elder" branch) -- no per-town REWARDS entry here
+    // anymore, and no gear roll (the questline pays in stat points + XP only).
     // key tier = town+1 (the NEXT tier's key), clamped to ITEM_TIER_MAX at town 5 (see the
     // claim endpoint) -- not hardcoded here either.
     palisade: { gold: [900, 1125, 1350, 1575, 1800] },
   },
+  // v0.24.1 (B5 "The Pacifist"): a single fixed reward, deliberately NOT town-scaled (like
+  // ASCENDANT_HUNT_STEPS above) -- this is a one-time "did you ever pull off a pure-Thorns
+  // kill" achievement, not a repeatable per-town grind, so one flat payout regardless of which
+  // town's board it's claimed from. Potion quantities are {item_id: qty} so the claim endpoint
+  // can grant multiple stacks of each in one combatAddConsumable() loop.
+  PACIFIST_REWARD: { xp: 5000, stat_points: 20, potions: { potion_of_renewal: 3, potion_of_wardveil: 3 } },
   // Mirrors index.html's Balance.SHRINE_XP_BUFF_MULT/SHRINE_XP_BUFF_ENCOUNTERS +
   // PS.applyXpShrineBuff()'s exact effect (multiplier assigned outright, encounters ADDED on
   // top of whatever's already active) -- the gatherer reward calls this directly instead of a
@@ -1062,11 +1091,23 @@ function questBuildEntriesForTown(town) {
     else if (qid === "gatherer") target = QUEST_DEFS.TARGETS.gatherer_herbs[idx];
     else if (qid === "wanderers") target = QUEST_DEFS.TARGETS.wanderers_roamers[idx];
     else if (qid === "streak") target = QUEST_DEFS.TARGETS.streak_kills[idx];
-    else if (qid === "cauldron") target = QUEST_DEFS.TARGETS.cauldron_brews[idx];
-    else if (qid === "elder") target = QUEST_DEFS.TARGETS.elder_kills[idx];
+    // v0.24.1 (B6): "cauldron" no longer reads a per-town count -- fixed 7-distinct-recipes
+    // target, same at every town (see CAULDRON_DISTINCT_TARGET's own comment).
+    else if (qid === "cauldron") target = QUEST_DEFS.CAULDRON_DISTINCT_TARGET;
     else if (qid === "palisade") target = QUEST_DEFS.TARGETS.palisade_chests[idx];
-    const entry = { progress: 0, target, status: QUEST_DEFS.LEVEL_REQ[qid] <= 1 ? "active" : "locked" };
-    if (qid === "cauldron") entry.attr_potion_brewed = false;
+    let entry;
+    if (qid === "elder") {
+      // v0.24.1 (B4): "elder" is now step-based -- see ASCENDANT_HUNT_STEPS. Not town-scaled;
+      // every town starts this questline fresh at step 1 (band difficulty IS the escalation).
+      entry = { step: 1, progress: 0, target: QUEST_DEFS.ASCENDANT_HUNT_STEPS[0].count, status: QUEST_DEFS.LEVEL_REQ[qid] <= 1 ? "active" : "locked" };
+    } else {
+      entry = { progress: 0, target, status: QUEST_DEFS.LEVEL_REQ[qid] <= 1 ? "active" : "locked" };
+    }
+    // v0.24.1 (B6): distinct_brewed replaces the old plain brew-count progress semantics --
+    // `progress` is now simply `distinct_brewed.length` (kept in sync by report-brew below) so
+    // every OTHER piece of code that already reads entry.progress/target (the board UI, the
+    // claim endpoint's readiness check) keeps working unmodified.
+    if (qid === "cauldron") { entry.attr_potion_brewed = false; entry.distinct_brewed = []; }
     if (qid === "wardens") entry._delve_streak_marker = 0; // internal bookkeeping, see questTrackGuardianKill()
     entries[qid] = entry;
   }
@@ -1106,6 +1147,28 @@ function questEnsureState(data) {
   for (const qid of QUEST_DEFS.IDS) {
     const entry = data.quests.entries[qid];
     if (entry && entry.status === "locked" && level >= QUEST_DEFS.LEVEL_REQ[qid]) entry.status = "active";
+  }
+  // v0.24.1 (B4): migrate a legacy "elder" entry (pre-Ascendant-Hunt save, or one that somehow
+  // lost its step field) onto the new step-based shape -- fresh start at step 1, since the old
+  // single-target progress has no meaningful equivalent in the new 5-step chain.
+  const elderEntry = data.quests.entries.elder;
+  if (elderEntry && typeof elderEntry.step !== "number") {
+    elderEntry.step = 1;
+    elderEntry.progress = 0;
+    elderEntry.target = QUEST_DEFS.ASCENDANT_HUNT_STEPS[0].count;
+    if (elderEntry.status === "ready" || elderEntry.status === "claimed") elderEntry.status = "active";
+  }
+  // v0.24.1 (B6): migrate a legacy "cauldron" entry (pre-distinct-recipes save, tracking a
+  // plain brew count) onto the new distinct_brewed shape -- old progress toward "N brews of
+  // anything" has no honest equivalent under "7 DIFFERENT recipes", so this resets progress to
+  // 0 rather than carry over a count that may not represent 7 distinct items at all. A
+  // "ready"/"claimed" legacy entry is reset to "active" too, same as the elder migration above.
+  const cauldronEntry = data.quests.entries.cauldron;
+  if (cauldronEntry && !Array.isArray(cauldronEntry.distinct_brewed)) {
+    cauldronEntry.distinct_brewed = [];
+    cauldronEntry.progress = 0;
+    cauldronEntry.target = QUEST_DEFS.CAULDRON_DISTINCT_TARGET;
+    if (cauldronEntry.status === "ready" || cauldronEntry.status === "claimed") cauldronEntry.status = "active";
   }
 }
 
@@ -1160,23 +1223,30 @@ function questTrackGuardianKill(data, areaLevel) {
   if (entry.progress >= entry.target) entry.status = "ready";
 }
 
-// v-quest (Q7 "elder"): monster band is already known server-side at kill resolution
-// (COMBAT_MONSTERS[...].tier, the SAME field combatRollRarityForBand() already reads) --
-// "Elder or higher" for town 1 means Epic-band-or-above (Legendary/Ancient trivially
-// qualifies too, it just can't spawn until area level 34); town 2+ raises the requirement to
-// Legendary/Ancient specifically, so an Epic/Elder kill no longer counts even though it still
-// would under town 1's own rule.
-const QUEST_BAND_RANK = { Common: 0, Uncommon: 1, Rare: 2, Epic: 3, Legendary: 4 };
+// v0.24.1 (B4 -- "The Ascendant Hunt"): monster band is already known server-side at kill
+// resolution (COMBAT_MONSTERS[...].tier, the SAME field combatRollRarityForBand() already
+// reads). Unlike the old "band-or-higher" rule, each step requires an EXACT band match against
+// ASCENDANT_HUNT_STEPS[entry.step-1].band -- a Legendary kill does NOT count toward the
+// Common-band step 1, it has to be worked through in order.
 function questTrackEliteKill(data, monsterBand) {
   const entry = data.quests.entries.elder;
   if (!entry || entry.status !== "active") return;
-  const idx = questTownIndex(data.quests.town);
-  const requiredBand = QUEST_DEFS.ELDER_BAND[idx];
-  const required = QUEST_BAND_RANK[requiredBand] != null ? QUEST_BAND_RANK[requiredBand] : 3;
-  const rank = QUEST_BAND_RANK[monsterBand];
-  if (rank == null || rank < required) return;
+  const step = QUEST_DEFS.ASCENDANT_HUNT_STEPS[(entry.step || 1) - 1];
+  if (!step || monsterBand !== step.band) return;
   entry.progress = Math.min(entry.target, (entry.progress || 0) + 1);
   if (entry.progress >= entry.target) entry.status = "ready";
+}
+
+// v0.24.1 (B5 "The Pacifist"): called from combatFinalizeMonsterKill() exactly once, only when
+// THIS fight's session.player_dealt_direct_damage flag never got set -- i.e. the monster died
+// without the player ever landing a swing or a spell-DOT tick, which (now that C2 lets Thorns
+// land the killing blow) is a genuinely achievable "tank it to death on reflect damage alone"
+// challenge. A single boolean completion, not a counter -- one qualifying kill is enough.
+function questTrackPacifist(data) {
+  const entry = data.quests.entries.pacifist;
+  if (!entry || entry.status !== "active") return;
+  entry.progress = entry.target;
+  entry.status = "ready";
 }
 
 // v-quest: explore (Q1)/gatherer (Q3)/cauldron (Q6)/palisade (Q8) all live behind systems
@@ -1558,21 +1628,29 @@ app.post("/api/quests/:questId/claim", requireAuth, (req, res) => {
     reward.elixirs = QUEST_DEFS.REWARDS.cauldron.elixirs[idx];
     reward.stat_points = QUEST_DEFS.REWARDS.cauldron.stat_points[idx];
   } else if (questId === "elder") {
-    data.unspent_quest_stat_points = (data.unspent_quest_stat_points || 0) + QUEST_DEFS.REWARDS.elder.stat_points[idx];
-    const xpResult = combatAddXp(data, QUEST_DEFS.REWARDS.elder.xp[idx]);
+    // v0.24.1 (B4): fixed per-step reward off ASCENDANT_HUNT_STEPS -- deliberately NOT scaled
+    // by town idx (see that constant's own comment). No gear roll; this questline pays in
+    // stat points + XP only.
+    const stepIdx = (entry.step || 1) - 1;
+    const stepDef = QUEST_DEFS.ASCENDANT_HUNT_STEPS[stepIdx] || QUEST_DEFS.ASCENDANT_HUNT_STEPS[0];
+    data.unspent_quest_stat_points = (data.unspent_quest_stat_points || 0) + stepDef.stat_points;
+    const xpResult = combatAddXp(data, stepDef.xp);
     if (xpResult.leveled) maybeDeclareSeasonWinner(req.account.id, data);
-    // Gear tier derived from this town's own explore-area-level target via the SAME
-    // combatItemTierForAreaLevel()/combatGenerateGearItem() every monster-drop and Blacksmith
-    // roll already uses -- not a fresh, unvalidated roll.
-    const gearTier = combatItemTierForAreaLevel(QUEST_DEFS.TARGETS.explore_area_level[idx]);
-    const magicFind = combatGetMagicFind(data);
-    const inst = combatGenerateGearItem(gearTier, magicFind);
-    const placement = combatAddGearAutoEquip(data, inst);
-    reward.stat_points = QUEST_DEFS.REWARDS.elder.stat_points[idx];
+    reward.stat_points = stepDef.stat_points;
     reward.xp = xpResult.xpGained;
-    reward.gear = inst;
-    reward.gear_fit = placement.fit;
-    reward.gear_auto_equipped = placement.autoEquipped;
+    reward.step = entry.step || 1;
+    reward.step_count = QUEST_DEFS.ASCENDANT_HUNT_STEPS.length;
+    if (stepIdx + 1 < QUEST_DEFS.ASCENDANT_HUNT_STEPS.length) {
+      // Mid-chain: advance to the next band/count and stay "active" -- do NOT fall through to
+      // the generic `entry.status = "claimed"` below, this questline isn't done yet.
+      entry.step = stepIdx + 2;
+      entry.progress = 0;
+      entry.target = QUEST_DEFS.ASCENDANT_HUNT_STEPS[stepIdx + 1].count;
+      entry.status = "active";
+      reward.done = false;
+    } else {
+      reward.done = true;
+    }
   } else if (questId === "palisade") {
     creditAccountGold(req.account.id, QUEST_DEFS.REWARDS.palisade.gold[idx]);
     const keyTier = cbClampi((data.quests.town || 1) + 1, 1, ITEM_TIER_MAX);
@@ -1580,9 +1658,26 @@ app.post("/api/quests/:questId/claim", requireAuth, (req, res) => {
     combatAddConsumable(data, keyItemId, 1);
     reward.gold = QUEST_DEFS.REWARDS.palisade.gold[idx];
     reward.key_item_id = keyItemId;
+  } else if (questId === "pacifist") {
+    // v0.24.1 (B5): single fixed non-town-scaled reward -- see PACIFIST_REWARD's own comment.
+    const r = QUEST_DEFS.PACIFIST_REWARD;
+    data.unspent_quest_stat_points = (data.unspent_quest_stat_points || 0) + r.stat_points;
+    const xpResult = combatAddXp(data, r.xp);
+    if (xpResult.leveled) maybeDeclareSeasonWinner(req.account.id, data);
+    const potions = {};
+    for (const [itemId, qty] of Object.entries(r.potions)) {
+      combatAddConsumable(data, itemId, qty);
+      potions[itemId] = qty;
+    }
+    reward.stat_points = r.stat_points;
+    reward.xp = xpResult.xpGained;
+    reward.potions = potions;
   }
 
-  entry.status = "claimed";
+  // v0.24.1 (B4): a mid-chain "elder" claim already set entry.status = "active" (with the next
+  // step's progress/target) above -- do NOT stomp that back to "claimed" here. Every other
+  // quest, and a step-5 "elder" claim, still terminate normally.
+  if (!(questId === "elder" && entry.status === "active")) entry.status = "claimed";
   const saveSeq = saveCharacterRow(req.account.id, slot, data);
   res.json({
     ok: true, reward, quests: data.quests,
@@ -1615,10 +1710,14 @@ app.post("/api/quests/spend-stat-point", requireAuth, (req, res) => {
 });
 
 // v-quest (Q1 "explore"): client-attested (see the Quest System section's report-route
-// comment, above questReportRateLimitOk()). Plausibility: the reported area level must
-// actually meet this town's explore_area_level target AND the character must have genuinely
-// reached that area level already (max_maze_depth_reached) -- rejects both an under-target
-// report and a report claiming a depth the character never reached.
+// comment, above questReportRateLimitOk()). Plausibility: the character must have genuinely
+// reached the reported area level already (max_maze_depth_reached) -- rejects a report
+// claiming a depth the character never reached.
+// v0.24.1 (B3): previously ALSO required areaLevel >= this town's explore_area_level target
+// (3/6/9/12/15), so "fully explore a maze" only counted at that specific depth or deeper --
+// per Gwen's exact spec this quest is meant to be satisfiable at ANY area level (same simple
+// "finish exploring a delve" objective everywhere for a given town), so that lower-bound check
+// is dropped entirely. The max_maze_depth_reached upper-bound plausibility check stays.
 app.post("/api/quests/report-explore", requireAuth, (req, res) => {
   const slot = Number(req.body?.slot);
   const areaLevel = Number(req.body?.area_level);
@@ -1630,9 +1729,7 @@ app.post("/api/quests/report-explore", requireAuth, (req, res) => {
   const entry = data.quests.entries.explore;
   if (!entry || entry.status !== "active") return res.json({ ok: true, ignored: true, quests: data.quests });
   if (!questReportRateLimitOk(entry)) return res.status(429).json({ error: "Too soon since your last report." });
-  const idx = questTownIndex(data.quests.town);
-  const required = QUEST_DEFS.TARGETS.explore_area_level[idx];
-  if (areaLevel < required || areaLevel > (data.max_maze_depth_reached || 1)) {
+  if (areaLevel > (data.max_maze_depth_reached || 1)) {
     return res.status(400).json({ error: "That report isn't plausible for your current progress." });
   }
   entry.progress = entry.target;
@@ -1663,8 +1760,10 @@ app.post("/api/quests/report-herb-harvest", requireAuth, (req, res) => {
 
 // v-quest (Q6 "cauldron"): client-attested (Alchemist brewing has never had a server route at
 // all). Plausibility: item_id must be a real, known brewable consumable, and reports are
-// rate-limited. Tracks the richer attr_potion_brewed sub-requirement (town 2+, see
-// QUEST_DEFS.CAULDRON_ATTR_POTION_REQUIRED) alongside the flat progress/target pair.
+// rate-limited. v0.24.1 (B6): now tracks DISTINCT recipe ids brewed (entry.distinct_brewed),
+// not a plain brew count -- brewing the same potion again is a no-op for progress (still
+// counts toward attr_potion_brewed below if it happens to be an attribute potion, since that
+// sub-requirement only needs "at least once", not "as one of the 7 distinct").
 app.post("/api/quests/report-brew", requireAuth, (req, res) => {
   const slot = Number(req.body?.slot);
   const itemId = req.body?.item_id;
@@ -1676,7 +1775,9 @@ app.post("/api/quests/report-brew", requireAuth, (req, res) => {
   const entry = data.quests.entries.cauldron;
   if (!entry || entry.status !== "active") return res.json({ ok: true, ignored: true, quests: data.quests });
   if (!questReportRateLimitOk(entry)) return res.status(429).json({ error: "Too soon since your last report." });
-  entry.progress = Math.min(entry.target, (entry.progress || 0) + 1);
+  if (!Array.isArray(entry.distinct_brewed)) entry.distinct_brewed = [];
+  if (!entry.distinct_brewed.includes(itemId)) entry.distinct_brewed.push(itemId);
+  entry.progress = Math.min(entry.target, entry.distinct_brewed.length);
   if (QUEST_DEFS.ATTR_POTION_IDS.includes(itemId)) entry.attr_potion_brewed = true;
   const idx = questTownIndex(data.quests.town);
   const subReqMet = !QUEST_DEFS.CAULDRON_ATTR_POTION_REQUIRED[idx] || entry.attr_potion_brewed;
@@ -1753,8 +1854,12 @@ const ITEM_AFFIX_POOL = [
 // NEVER renamed (that would orphan live gear/saves) -- only its Tier-1 max and display label
 // changed. See ITEM_AFFIX_TIER1_MAX_CEILING just below for why regen's OLD max (5) is
 // preserved there instead of being lowered along with this one.
+// v0.24.1 (C6): "crit" (Critical Strike Chance) Tier-1 max nerfed 5 -> 3 (curve becomes
+// 3/6/9/12/15% across T1-T5, was 5/10/15/20/25%) -- must stay in sync with index.html's
+// Balance.AFFIX_TIER1_MAX. See ITEM_AFFIX_TIER1_MAX_CEILING just below for why crit's OLD max
+// (5) is preserved there instead of being lowered along with this one.
 const ITEM_AFFIX_TIER1_MAX = {
-  damage: 5, hp: 15, crit: 5, armor: 2, regen: 1, stamina_regen: 1, gold_find: 10, xp_find: 5,
+  damage: 5, hp: 15, crit: 3, armor: 2, regen: 1, stamina_regen: 1, gold_find: 10, xp_find: 5,
   stamina_max: 15, strength: 5, dexterity: 5, vitality: 5, intelligence: 5, poison_resist: 5,
   magic_find: 10, block_chance: 2, flee_chance: 2,
   // v0.21 (#8): new "crit_multiplier" gear affix -- stored/rolled as a plain integer (10-50
@@ -1854,7 +1959,7 @@ const ITEM_REFINE_MATERIAL_COST_MULT = 1.4, ITEM_REFINE_GOLD_COST_MULT = 4;
 // A regen-5 item rolled before this patch must keep passing validateGearItem()'s bounds
 // check (reforge/list/deposit) even though fresh rolls now cap at 1/2/3/4/5 -- see
 // legacyGearScan() below for how these old-spec items still get surfaced for optional rescale.
-const ITEM_AFFIX_TIER1_MAX_CEILING = Object.assign({}, ITEM_AFFIX_TIER1_MAX, { xp_find: 10, armor: 20, regen: 5 });
+const ITEM_AFFIX_TIER1_MAX_CEILING = Object.assign({}, ITEM_AFFIX_TIER1_MAX, { xp_find: 10, armor: 20, regen: 5, crit: 5 });
 
 function itemAffixMaxForTier(stat, tier) {
   const base = ITEM_AFFIX_TIER1_MAX[stat];
@@ -2321,6 +2426,17 @@ for (const stmt of [
   // NOT EXISTS above already includes is_night for a fresh database, this covers one that
   // already existed before this change shipped.
   "ALTER TABLE combat_sessions ADD COLUMN is_night INTEGER NOT NULL DEFAULT 0",
+  // v0.24.1 (B5 "The Pacifist" / C2): tracks, for THIS fight only, whether the player has
+  // landed any direct attack swing or spell-damage tick against the monster. Thorns reflect
+  // damage (combatResolveMonsterTurn) never sets this. Monotonic within a fight (set to 1,
+  // never reset back to 0) -- see combatFinalizeMonsterKill()'s Pacifist check below.
+  "ALTER TABLE combat_sessions ADD COLUMN player_dealt_direct_damage INTEGER NOT NULL DEFAULT 0",
+  // v0.24.1 (C3): elapsed-time clock for HP/Stamina/Mana regen ticking during combat --
+  // see combatTickRegenElapsed()'s own comment for why this needs to be wall-clock-based
+  // (like last_monster_hit_at) rather than a flat "once per request" tick.
+  "ALTER TABLE combat_sessions ADD COLUMN last_regen_tick_at INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE combat_sessions ADD COLUMN player_poison_dots TEXT NOT NULL DEFAULT '[]'",
+  "ALTER TABLE combat_sessions ADD COLUMN sting_lockout_until INTEGER NOT NULL DEFAULT 0",
 ]) {
   try { db.exec(stmt); } catch (e) { /* column already exists, fine */ }
 }
@@ -2546,7 +2662,11 @@ const CB = {
   // Balance.CRIT_MULTIPLIER. Monsters no longer use this constant as their own floor at all
   // (see combatGetMonsterCritFloor()/combatGetMonsterCritCeiling() below) -- CB.CRIT_MULTIPLIER
   // is the PLAYER'S floor only now.
-  CRIT_MULTIPLIER: 1.5, FLEE_FAIL_CHANCE: 0.20, MONSTER_FIRST_STRIKE_CHANCE: 0.5,
+  // v0.24.1 (C5): crit multiplier ladder shifted down 0.25 across the board (was 1.5/1.5-2.0/
+  // 1.75-2.25.../2.0-2.5...) -- see combatGetMonsterCritFloor()/combatGetMonsterCritCeiling()
+  // below for the matching monster-side shift; must stay in sync with Balance.CRIT_MULTIPLIER
+  // in index.html.
+  CRIT_MULTIPLIER: 1.25, FLEE_FAIL_CHANCE: 0.20, MONSTER_FIRST_STRIKE_CHANCE: 0.5,
   // v0.20 (#9.6): dialed down from 1% to 0.5% per point of Dexterity -- must stay in sync
   // with Balance.BLOCK_CHANCE_PER_DEX in index.html (see its comment for the full rationale).
   BLOCK_CHANCE_PER_DEX: 0.005, BLOCK_CHANCE_MAX: 0.60,
@@ -2589,6 +2709,19 @@ const CB = {
   // combatGetManaRegen() below. Stacks with the "mana_regen" gear affix. Must stay in sync
   // with Balance.MANA_REGEN_PER_SEC in index.html.
   MANA_REGEN_PER_SEC: 1.0,
+  // v0.24.1 (C3): elapsed-time cap for combatTickRegenElapsed()'s wall-clock regen catch-up --
+  // prevents a session that's sat idle for a long time (tab backgrounded, etc.) from awarding
+  // one huge regen lump-sum the instant it's touched again.
+  COMBAT_REGEN_MAX_CATCHUP_SEC: 30,
+  // v0.24.1 (C4): Poison Sting -- a small set of "venomous" monsters can, on a landed hit,
+  // sting instead of striking: that hit's fully-mitigated damage roll is queued as poison
+  // (spread over POISON_STING_DURATION_MS) instead of applied instantly, and the monster
+  // pauses for POISON_STING_LOCKOUT_MS before its normal attack cadence resumes (the poison
+  // itself keeps ticking through that pause, and stacks if another sting lands later).
+  POISON_STING_MONSTER_IDS: ["bramble_knight", "thornling", "boglurker", "vinewraith"],
+  POISON_STING_CHANCE: 0.10,
+  POISON_STING_DURATION_MS: 20000,
+  POISON_STING_LOCKOUT_MS: 2000,
   // v0.20.4 HOTFIX: AREA_HP_GROWTH/AREA_DAMAGE_GROWTH dialed down from 0.15/0.12 (0.105/
   // 0.09), and LATE_GAME_MONSTER_GROWTH_PER_LEVEL below is now permanently unused (see
   // combatLateGameGrowthMult()) -- must stay in sync with Balance.AREA_HP_GROWTH/
@@ -3171,13 +3304,16 @@ function combatMonsterAttackSpeed(areaLevel) {
 // L25 (bracket 5) 2.0-3.25 -- L30 (bracket 6) 2.25-3.5. Uncapped past L30 by design (level cap
 // is 100); a ceiling cap can be added later if very-high-level crits feel too spiky. Mirrors
 // index.html's Balance.monsterCritFloor()/monsterCritCeiling() exactly.
+// v0.24.1 (C5): base shifted down 0.25 (was 1.5/2.0) -- the per-bracket growth increments are
+// untouched, just the floor of the whole ladder. Must stay in sync with index.html's identical
+// pair of functions.
 function combatGetMonsterCritFloor(areaLevel) {
   const bracket = Math.floor(Math.max(1, areaLevel) / 5);
-  return 1.5 + 0.25 * Math.floor(bracket / 2);
+  return 1.25 + 0.25 * Math.floor(bracket / 2);
 }
 function combatGetMonsterCritCeiling(areaLevel) {
   const bracket = Math.floor(Math.max(1, areaLevel) / 5);
-  return 2.0 + 0.25 * bracket;
+  return 1.75 + 0.25 * bracket;
 }
 // v0.21 (#10): a landed crit doesn't always hit for the full ceiling -- it's a fresh random
 // roll each time, somewhere between CB.CRIT_MULTIPLIER (the player's own floor) and the
@@ -3304,6 +3440,33 @@ function combatTickCombatRoundBuffs(data) {
   // current_mana to full AND clamps it, so this can never push current_mana above max.
   const manaRegen = combatGetManaRegen(data);
   if (manaRegen > 0) data.current_mana = Math.min(combatGetMaxMana(data), combatGetCurrentMana(data) + manaRegen);
+}
+// v0.24.1 (C3): HP/Mana/Stamina regen must visibly tick DURING combat, not just once per
+// "round" (attack/failed-flee, see combatTickCombatRoundBuffs() above) -- most of a real fight
+// now passes through /use-item, /cast, the idle /tick poll, and the WS combat-tick pusher,
+// none of which used to call any regen tick at all. A flat per-call increment (like
+// combatTickCombatRoundBuffs' regen lines) would badly over- or under-tick depending on how
+// often each of THOSE fires (the WS pusher alone is every 500ms vs. town's real per-second
+// rate), so this is wall-clock elapsed-time-based instead -- same "advance a persisted
+// timestamp, apply rate * elapsed-seconds" shape combatCatchUpMonsterHits() already uses for
+// the monster's own attack clock. Deliberately kept SEPARATE from combatTickCombatRoundBuffs()
+// (which still only fires on a real round) so calling this from every endpoint below can't
+// accidentally speed up how fast Invulnerability/Quad Damage/Magic Find round-counters expire.
+// Capped at CB.COMBAT_REGEN_MAX_CATCHUP_SEC of elapsed time so a long-abandoned-then-resumed
+// session can't award a huge lump-sum regen burst. Mutates session.last_regen_tick_at in
+// place; the caller is responsible for persisting it via its own updateCombatSession() call.
+function combatTickRegenElapsed(data, session) {
+  const now = Date.now();
+  const lastAt = session.last_regen_tick_at || now;
+  const elapsedSec = Math.min(Math.max(0, (now - lastAt) / 1000), CB.COMBAT_REGEN_MAX_CATCHUP_SEC);
+  session.last_regen_tick_at = now;
+  if (elapsedSec <= 0) return;
+  const regen = combatGetRegen(data);
+  if (regen > 0) data.current_hp = Math.min(combatGetMaxHp(data), (data.current_hp || 0) + regen * elapsedSec);
+  const staminaRegen = combatGetStaminaRegen(data);
+  if (staminaRegen > 0) data.current_stamina = Math.min(combatGetMaxStamina(data), (data.current_stamina || 0) + staminaRegen * elapsedSec);
+  const manaRegen = combatGetManaRegen(data);
+  if (manaRegen > 0) data.current_mana = Math.min(combatGetMaxMana(data), combatGetCurrentMana(data) + manaRegen * elapsedSec);
 }
 // Shared fragment merged into every combat endpoint's `player` response object so the client
 // always has a fresh, authoritative snapshot of all 3 round-based shrine buffs to overwrite
@@ -3538,6 +3701,35 @@ function combatResolveMonsterTurn(data, session, invulnActiveThisRound) {
   // v0.20.4: flat subtraction instead of a percentage multiplier -- see combatGetArmor()'s
   // own comment for the full mechanic change.
   mdmg = Math.max(0, mdmg - combatGetArmor(data));
+  // v0.24.1 (C4): Poison Sting -- a small set of venomous monsters can, on a landed hit, sting
+  // instead of striking: this hit's fully-mitigated damage roll (mdmg, same value that would
+  // otherwise have been subtracted instantly below) is queued as a poison DOT spread over
+  // POISON_STING_DURATION_MS instead, and the monster's own attack cadence pauses for
+  // POISON_STING_LOCKOUT_MS (see combatCatchUpMonsterHits' lockout gate above). The hit still
+  // "lands" for every other purpose (Thorns still reflects below), it just doesn't deal its
+  // damage instantly. Non-lethal by construction (see combatSettlePlayerPoison's floor).
+  if (CB.POISON_STING_MONSTER_IDS.includes(session.monster_id) && Math.random() < CB.POISON_STING_CHANCE) {
+    let dots;
+    try { dots = JSON.parse(session.player_poison_dots || "[]"); } catch (e) { dots = []; }
+    if (!Array.isArray(dots)) dots = [];
+    const tickIntervalMs = 1000;
+    const totalTicks = Math.round(CB.POISON_STING_DURATION_MS / tickIntervalMs);
+    dots.push({
+      hits_remaining: totalTicks,
+      next_hit_at: Date.now() + tickIntervalMs,
+      interval_ms: tickIntervalMs,
+      dmg_per_tick: mdmg / totalTicks,
+    });
+    session.player_poison_dots = JSON.stringify(dots);
+    session.sting_lockout_until = Date.now() + CB.POISON_STING_LOCKOUT_MS;
+    const thornsSting = combatGearBonus(data, "thorns");
+    let thornsStingDamage = 0;
+    if (thornsSting > 0 && session.hp > 0) {
+      thornsStingDamage = Math.min(session.hp, thornsSting);
+      session.hp = Math.max(0, session.hp - thornsSting);
+    }
+    return { invulnerable: false, blocked: false, damage: null, crit, crit_mult: critMult, fatal: false, poison_sting: true, poison_total: Math.round(mdmg), thorns_damage: thornsStingDamage };
+  }
   data.current_hp = (data.current_hp || 0) - mdmg;
   let fatal = false;
   if (data.current_hp < 1) { data.current_hp = 0; fatal = true; }
@@ -3576,7 +3768,14 @@ function combatResolveMonsterTurn(data, session, invulnActiveThisRound) {
 // depends on.
 function combatCatchUpMonsterHits(session, data, invulnActiveThisRound) {
   const now = Date.now();
-  const lastAt = session.last_monster_hit_at || now;
+  let lastAt = session.last_monster_hit_at || now;
+  // v0.24.1 (C4): a landed Poison Sting pauses the monster's normal attack cadence for
+  // POISON_STING_LOCKOUT_MS -- while locked out, no hits are owed at all (returned early
+  // below), and once the lockout passes the clock resumes FROM the lockout's end rather than
+  // owing a backlog for the paused stretch (that pause was intentional, not idle time).
+  const lockoutUntil = session.sting_lockout_until || 0;
+  if (lockoutUntil > now) return { ticks: [], newLastHitAt: lastAt, fatal: false };
+  if (lockoutUntil > lastAt) lastAt = lockoutUntil;
   const speed = session.monster_attack_speed || CB.MONSTER_BASE_ATTACK_SPEED;
   const intervalMs = 1000 / Math.max(0.01, speed);
   const elapsedMs = Math.max(0, now - lastAt);
@@ -3783,15 +3982,22 @@ function combatGetEffectiveSpellSlotCount(data) {
 // mirrors combatSettleHeal()/combatSettleAllHeals()'s "computed on demand instead of a real
 // 200ms tick loop" philosophy, adapted to discrete RANDOM-per-hit damage (8-12 per hit, not a
 // smooth rate) rather than a continuous rate, since each Fireflies hit must independently roll
-// its own damage. Deliberately clamps at hp=1 rather than ever landing the kill blow itself --
-// the monster's actual defeat/loot/XP/gold resolution lives entirely in POST /api/combat/
-// :sessionId/attack's existing kill branch, and duplicating that non-trivial block (loot rolls,
-// leaderboard upsert, guardian key drops, etc.) into every DOT-settling call site was judged
-// out of scope for this pass; the practical effect is a monster already at 1 HP dies on the
-// very next landed swing or idle tick, sub-second in real play.
-// v0.23.1 (#2): now takes an optional `data` (the loaded character row) so a dot that carries
-// a `heal_pct` (Verdant Siphon's channeled drain) can heal the caster for a % of THIS tick's
-// own realized damage -- computed from `dmg` below, i.e. AFTER hp-clamping/rounding, never a
+// its own damage.
+// v0.24.1 (C1): used to deliberately clamp at hp=1 and never land the kill blow itself, per its
+// own now-obsolete comment -- per Gwen's exact ask, spell DOT damage must be able to finish the
+// monster off directly instead of always deferring to the next landed swing or idle tick. Every
+// call site now checks the resulting session.hp itself and calls the shared
+// combatFinalizeMonsterKill() helper (see right before POST /api/combat/:sessionId/attack) the
+// instant it reaches 0, so the loot/XP/gold/quest-tracking resolution genuinely fires from a
+// killing DOT tick, not just a cosmetic "1 HP forever" state.
+// v0.24.1 (B5/C2): also stamps session.player_dealt_direct_damage=1 the moment any tick lands
+// (mutated in place; the caller's own updateCombatSession() call persists it) -- this is player-
+// cast spell damage, so it always counts as "direct damage" for The Pacifist quest, same as a
+// landed physical swing does in /attack. Thorns reflect damage is a completely separate code
+// path (combatResolveMonsterTurn) and never touches this flag.
+// v0.23.1 (#2): takes an optional `data` (the loaded character row) so a dot that carries a
+// `heal_pct` (Verdant Siphon's channeled drain) can heal the caster for a % of THIS tick's own
+// realized damage -- computed from `dmg` below, i.e. AFTER hp-clamping/rounding, never a
 // separately-scaled or independently-rolled amount. `data` is optional/backward-compatible:
 // every existing call site already has the character row loaded by the time it calls this, but
 // passing it is harmless for Fireflies/Entangle-only sessions (dots without heal_pct just skip
@@ -3808,9 +4014,11 @@ function combatSettleSpellDots(session, data) {
   for (const dot of dots) {
     let d = dot;
     let changed = false;
-    while (d.hits_remaining > 0 && d.next_hit_at <= now && hp > 1) {
-      const dmg = Math.min(hp - 1, Math.round(cbRandRange(d.dmg_min, d.dmg_max)));
+    while (d.hits_remaining > 0 && d.next_hit_at <= now && hp > 0) {
+      // v0.24.1 (C1): hp can now reach exactly 0 (a genuine killing blow), not just hp-1.
+      const dmg = Math.min(hp, Math.round(cbRandRange(d.dmg_min, d.dmg_max)));
       hp -= dmg;
+      session.player_dealt_direct_damage = 1;
       const tick = { spell_id: d.spell_id, damage: dmg };
       if (d.heal_pct && data) {
         const healAmt = Math.round(dmg * d.heal_pct);
@@ -3824,9 +4032,44 @@ function combatSettleSpellDots(session, data) {
       changed = true;
     }
     if (changed || ticks.length === 0) { /* no-op, just avoids an unused-var lint concern */ }
-    if (d.hits_remaining > 0) remaining.push(d);
+    // v0.24.1 (C1): a dot that just landed the killing blow (hp===0) has nothing left to do --
+    // don't keep it queued for future ticks even if hits_remaining>0, since there's no monster
+    // left to keep hitting (a fresh fight starts an entirely new session/spell_dots anyway).
+    if (d.hits_remaining > 0 && hp > 0) remaining.push(d);
   }
   return { ticks, newHp: hp, newDots: remaining, dotsChanged: true };
+}
+
+// v0.24.1 (C4): Poison Sting settlement -- mirrors combatSettleSpellDots() above exactly (same
+// lazy on-demand discrete-tick pattern reused from the player's own spell DOTs, just aimed at
+// data.current_hp instead of session.hp), with one deliberate difference: this DOT is
+// NON-LETHAL, per the locked design call -- a sting can never be what actually kills the
+// player, it only ever drains down to 1 HP and sits there until something else finishes the
+// job (a normal monster swing, a real-time catch-up hit, etc.). Multiple stings can be queued
+// at once (each push in combatResolveMonsterTurn below just appends another entry -- this
+// function settles all of them independently every call, so they genuinely stack).
+function combatSettlePlayerPoison(session, data) {
+  let dots;
+  try { dots = JSON.parse(session.player_poison_dots || "[]"); } catch (e) { dots = []; }
+  if (!Array.isArray(dots) || dots.length === 0) return { ticks: [], dotsChanged: false };
+  const now = Date.now();
+  let hp = data.current_hp || 0;
+  const ticks = [];
+  const remaining = [];
+  for (const dot of dots) {
+    let d = dot;
+    while (d.hits_remaining > 0 && d.next_hit_at <= now) {
+      // Floors at 1 HP -- never the killing blow (locked design call).
+      const dmg = Math.min(Math.max(0, hp - 1), d.dmg_per_tick);
+      hp -= dmg;
+      const tick = { damage: dmg };
+      ticks.push(tick);
+      d = Object.assign({}, d, { hits_remaining: d.hits_remaining - 1, next_hit_at: d.next_hit_at + d.interval_ms });
+    }
+    if (d.hits_remaining > 0) remaining.push(d);
+  }
+  data.current_hp = hp;
+  return { ticks, dotsChanged: true, newDots: remaining };
 }
 
 // v0.23.0 (Part B4/B6): Magician spell-purchase endpoint -- mirrors the Blacksmith reroll
@@ -3942,6 +4185,14 @@ app.post("/api/combat/start", requireAuth, (req, res) => {
   const data = loadCharacterRow(req.account.id, slot);
   if (!data) return res.status(404).json({ error: "No character in that slot." });
   if (areaLevel > (data.max_maze_depth_reached || 1)) return res.status(400).json({ error: "You haven't reached that area level yet." });
+  // v0.24.1 (B1+B2): run the locked->active unlock pass at combat START too, not only at
+  // kill-resolution time. A dev-bumped character's level can jump with no natural level-up
+  // event to trigger this, so without a call here, a fight fought entirely at that already-
+  // qualifying level could still resolve its kill against a quest that's technically still
+  // "locked" if this were ever the very first quest-touching call of the session. The
+  // kill-resolution call further down (in /attack's monsterDefeated branch) already covers the
+  // reported repros on its own; this is the explicit "and on combat start" half of the fix.
+  questEnsureState(data);
 
   // A stale/abandoned session (e.g. the client navigated away mid-fight) can't be reused --
   // starting a new encounter always retires whatever was previously active for this slot.
@@ -4015,10 +4266,13 @@ app.post("/api/combat/start", requireAuth, (req, res) => {
   // the engage first-strike above -- a subsequent /attack call will naturally resolve the kill
   // (with full XP/gold/loot) once the player's next action lands, same as any other kill.
   const startingHp = Math.max(0, maxHp - engageThornsDamage);
+  // v0.24.1 (C3): seed the regen clock at the same "now" as last_monster_hit_at -- the very
+  // first combat-touching call owes 0 elapsed seconds of regen, same logic as the monster's
+  // own catch-up clock.
   db.prepare(
-    `INSERT INTO combat_sessions (id, account_id, slot, monster_id, name, area_level, max_hp, hp, dmg_min, dmg_max, xp, gold_min, gold_max, loot_table, is_guardian, is_roamer, is_night, status, created_at, updated_at, player_attack_speed, monster_attack_speed, last_monster_hit_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?, ?, ?, ?, ?)`
-  ).run(id, req.account.id, slot, monster.id, name, areaLevel, maxHp, startingHp, dmgMin, dmgMax, xp, monster.gold_min, monster.gold_max, monster.loot_table, isGuardian ? 1 : 0, isRoamer ? 1 : 0, isNight ? 1 : 0, now, now, playerAttackSpeed, monsterAttackSpeed, lastMonsterHitAt);
+    `INSERT INTO combat_sessions (id, account_id, slot, monster_id, name, area_level, max_hp, hp, dmg_min, dmg_max, xp, gold_min, gold_max, loot_table, is_guardian, is_roamer, is_night, status, created_at, updated_at, player_attack_speed, monster_attack_speed, last_monster_hit_at, last_regen_tick_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?, ?, ?, ?, ?, ?)`
+  ).run(id, req.account.id, slot, monster.id, name, areaLevel, maxHp, startingHp, dmgMin, dmgMax, xp, monster.gold_min, monster.gold_max, monster.loot_table, isGuardian ? 1 : 0, isRoamer ? 1 : 0, isNight ? 1 : 0, now, now, playerAttackSpeed, monsterAttackSpeed, lastMonsterHitAt, lastMonsterHitAt);
 
   const saveSeq = saveCharacterRow(req.account.id, slot, data);
   res.json({
@@ -4029,6 +4283,122 @@ app.post("/api/combat/start", requireAuth, (req, res) => {
   });
 });
 
+// v0.24.1 (C1/C2/B5): shared monster-defeat resolution -- extracted verbatim from
+// POST /api/combat/:sessionId/attack's own monsterDefeated branch (which now just calls this)
+// so /flee, /use-item, /tick, /cast, and the WS combat-tick pusher can ALL resolve a genuine
+// kill instead of leaving the fight hanging at 0 HP forever whenever the elapsed-time
+// catch-up's Thorns reflect (C2) or a settled spell DOT (C1) finishes the monster off outside
+// of a player-initiated attack. Every gold/XP/loot/quest-tracking side effect is identical
+// regardless of which call site triggers it -- the monster doesn't know or care whether the
+// killing blow came from a landed swing, a Fireflies tick, or a Thorns counter-hit.
+// `extraSessionFields` lets each caller merge in whatever ELSE it needs to persist on this same
+// updateCombatSession() write (e.g. last_monster_hit_at, spell_dots) without this helper needing
+// to know about every caller's own bookkeeping.
+function combatFinalizeMonsterKill(req, session, data, extraSessionFields) {
+  const gold = cbRandIntRange(session.gold_min, session.gold_max);
+  const goldCredited = Math.round(gold * combatGetGoldFindMult(data, session));
+  // v0.20 (#9.3): session.xp (the monster's raw base reward) is now handed to
+  // combatAddXp() UNMODIFIED -- every bonus (Community XP, Forest Reputation, XP Find
+  // gear, Experience Shrine) is summed and applied exactly once inside that function
+  // instead of being partly pre-multiplied here and partly multiplied again inside it.
+  const xpResult = combatAddXp(data, session.xp);
+  const leveled = xpResult.leveled;
+  // v0.22.3 (#10): the season is now won by "tier 5 AND Level 100", not by reaching tier 5
+  // alone -- only check on an actual level-up, and only a tier-5 character can possibly
+  // qualify (maybeDeclareSeasonWinner() checks both and no-ops otherwise).
+  if (leveled) maybeDeclareSeasonWinner(req.account.id, data);
+  creditAccountGold(req.account.id, goldCredited);
+  combatIncrementKillStreak(data);
+  // v-quest: Quest System hooks -- run on every server-resolved kill, mirroring exactly the
+  // same trusted event the gold/XP/kill-streak grants right above already ride on. See the
+  // Quest System section (above applyLadderReset()) for questTrackKillStreak()/
+  // questTrackRoamerKill()/questTrackGuardianKill()/questTrackEliteKill()'s own comments.
+  questEnsureState(data);
+  questTrackKillStreak(data);
+  if (session.is_roamer) questTrackRoamerKill(data);
+  if (session.is_guardian) questTrackGuardianKill(data, session.area_level);
+  // v0.19.1 (#19): this endpoint used to persist the raw characters-table row via
+  // saveCharacterRow() below but never forward max_kill_streak (or level/xp) into the
+  // separate leaderboard_bests table that GET /api/leaderboard/killstreak actually reads --
+  // so kills scored through server-authoritative combat never showed up on that leaderboard
+  // tab. The Broken Bridge Trial endpoint already does this correctly; mirror it here.
+  upsertLeaderboardBests(req.account.id, data);
+
+  const magicFind = combatGetMagicFind(data, session);
+  // v0.22.1 (Part A2d): look up the slain monster's band once, so both the guaranteed drop
+  // and any bonus drops below skew toward its matching item rarity (see
+  // combatRollRarityForBand()/MONSTER_BAND_LOOT_RARITY_WEIGHTS).
+  const monsterForLoot = COMBAT_MONSTERS.find((m) => m.id === session.monster_id);
+  const monsterBand = monsterForLoot ? monsterForLoot.tier : null;
+  // v-quest: elder-band kill tracking (Q7) needs the monster's band, computed just above.
+  questTrackEliteKill(data, monsterBand);
+  // v0.24.1 (B5 "The Pacifist"): if the player never landed a direct hit/spell-damage tick
+  // this whole fight, the monster still died (only possible via a now-lethal Thorns reflect,
+  // C2) -- that's exactly the challenge this quest asks for.
+  if (!session.player_dealt_direct_damage) questTrackPacifist(data);
+  const rolled = combatRollLoot(session.loot_table, magicFind);
+  let loot = { type: rolled.type };
+  if (rolled.type === "gear") {
+    const tier = combatRollItemTier(session.area_level);
+    const inst = combatGenerateGearItem(tier, magicFind, monsterBand);
+    const placement = combatAddGearAutoEquip(data, inst);
+    loot = { type: "gear", item: inst, fit: placement.fit, auto_equipped: placement.autoEquipped };
+  } else if (rolled.type === "consumable") {
+    combatAddConsumable(data, rolled.item_id, 1);
+    loot = { type: "consumable", item_id: rolled.item_id };
+  } else if (rolled.type === "herb") {
+    combatAddHerb(data, rolled.herb_id, 1);
+    loot = { type: "herb", herb_id: rolled.herb_id };
+  }
+
+  // v0.20.1 (#10): roll for bonus loot beyond the guaranteed drop above. Roaming mobs and
+  // Stronghold guardians ("special" spawns) both boost the CHANCE of a bonus drop AND the
+  // effective Magic Find used to decide what it actually is, so their extra items skew
+  // toward better quality too -- everything else about the roll (same loot table, same
+  // gear-tier/auto-equip/consumable/herb handling as the guaranteed drop) is identical.
+  const isSpecialSpawn = !!(session.is_roamer || session.is_guardian);
+  const bonusMagicFind = isSpecialSpawn ? magicFind + CB.EXTRA_LOOT_SPECIAL_SPAWN_QUALITY_BONUS_PCT : magicFind;
+  const extraLootCount = combatRollExtraLootCount(magicFind, isSpecialSpawn);
+  const bonusLoot = [];
+  for (let i = 0; i < extraLootCount; i++) {
+    const extraRolled = combatRollLoot(session.loot_table, bonusMagicFind);
+    if (extraRolled.type === "gear") {
+      const extraTier = combatRollItemTier(session.area_level);
+      const extraInst = combatGenerateGearItem(extraTier, bonusMagicFind, monsterBand);
+      const extraPlacement = combatAddGearAutoEquip(data, extraInst);
+      bonusLoot.push({ type: "gear", item: extraInst, fit: extraPlacement.fit, auto_equipped: extraPlacement.autoEquipped });
+    } else if (extraRolled.type === "consumable") {
+      combatAddConsumable(data, extraRolled.item_id, 1);
+      bonusLoot.push({ type: "consumable", item_id: extraRolled.item_id });
+    } else if (extraRolled.type === "herb") {
+      combatAddHerb(data, extraRolled.herb_id, 1);
+      bonusLoot.push({ type: "herb", herb_id: extraRolled.herb_id });
+    }
+    // "nothing" results simply contribute no entry -- same as the guaranteed roll can do.
+  }
+
+  let keyDrop = null;
+  if (session.is_guardian) {
+    const keyEligible = combatStrongholdKeyEligible(session.area_level, data.level);
+    if (keyEligible && Math.random() < CB.STRONGHOLD_KEY_DROP_CHANCE) {
+      const keyTier = combatStrongholdKeyTierForAreaLevel(session.area_level);
+      const keyItemId = combatStrongholdKeyItemIdForTier(keyTier);
+      combatAddConsumable(data, keyItemId, 1);
+      keyDrop = { tier: keyTier, item_id: keyItemId };
+    }
+    keyDrop = keyDrop || { eligible: keyEligible, dropped: false };
+  }
+
+  const kill = {
+    gold, gold_credited: goldCredited, xp_gained: xpResult.xpGained, leveled,
+    loot, bonus_loot: bonusLoot, key_drop: keyDrop, kill_streak: data.kill_streak, max_kill_streak: data.max_kill_streak,
+    total_kills: data.total_kills,
+    is_guardian: !!session.is_guardian, is_roamer: !!session.is_roamer,
+  };
+  updateCombatSession(session.id, Object.assign({ hp: 0, status: "won" }, extraSessionFields || {}));
+  return kill;
+}
+
 app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
   const session = getCombatSession(req.account.id, req.params.sessionId);
   if (!session) return res.status(404).json({ error: "That fight no longer exists." });
@@ -4037,13 +4407,20 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
   if (!data) return res.status(404).json({ error: "No character in that slot." });
 
   combatSettleAllHeals(data);
+  combatTickRegenElapsed(data, session); // v0.24.1 (C3): HP/Stamina/Mana regen ticks during combat too
+  { const _poison = combatSettlePlayerPoison(session, data); if (_poison.dotsChanged) session.player_poison_dots = JSON.stringify(_poison.newDots || []); } // v0.24.1 (C4): settle any queued Poison Sting DOT ticks against the player
   // v0.23.0 (Part B7): settle any queued Fireflies DOT ticks against the monster before this
   // round's own action -- same lazy on-demand pattern as combatSettleAllHeals() just above,
   // applied to session.hp instead of the player's HP/Stamina/Mana.
   const spellDotResult = combatSettleSpellDots(session, data);
   if (spellDotResult.dotsChanged) {
     session.hp = spellDotResult.newHp;
-    updateCombatSession(session.id, { hp: spellDotResult.newHp, spell_dots: JSON.stringify(spellDotResult.newDots || []) });
+    // v0.24.1 (C1/B5): combatSettleSpellDots() stamps session.player_dealt_direct_damage=1 in
+    // place the moment a tick lands -- persist that alongside hp/spell_dots so it survives past
+    // this request (it's a monotonic flag, so re-writing 1 here whenever it's already 1 is a
+    // harmless no-op, and it's the only place a Fireflies/Siphon/Entangle tick's damage gets
+    // written back to the row at all).
+    updateCombatSession(session.id, { hp: spellDotResult.newHp, spell_dots: JSON.stringify(spellDotResult.newDots || []), player_dealt_direct_damage: session.player_dealt_direct_damage ? 1 : 0 });
   }
   const quadActiveThisRound = combatHasQuadDamage(data);
   const invulnActiveThisRound = combatIsInvulnerable(data);
@@ -4057,7 +4434,7 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
   // ONLY source of monster damage during this whole handler -- see the non-kill branch below.
   const catchUp = combatCatchUpMonsterHits(session, data, invulnActiveThisRound);
   if (catchUp.fatal) {
-    updateCombatSession(session.id, { status: "lost", last_monster_hit_at: catchUp.newLastHitAt });
+    updateCombatSession(session.id, { status: "lost", last_monster_hit_at: catchUp.newLastHitAt, last_regen_tick_at: session.last_regen_tick_at, player_poison_dots: session.player_poison_dots || "[]", sting_lockout_until: session.sting_lockout_until || 0 });
     // HOTFIX: perform the atomic hardcore permadeath (if applicable) in THIS same handler,
     // right where fatal is first produced -- see combatHandleHardcoreDeath()'s own comment.
     // A hardcore-killed character's row no longer exists, so saveCharacterRow() is skipped
@@ -4103,6 +4480,11 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
     }
     if (quadActiveThisRound) dmg *= 4;
     newMonsterHp = session.hp - dmg;
+    // v0.24.1 (B5/C2): a landed physical swing always counts as "direct damage" for The
+    // Pacifist quest -- mutated in place here so combatFinalizeMonsterKill() (if this swing is
+    // also the killing blow) sees it immediately; persisted below regardless of which branch
+    // (monsterDefeated or not) actually runs.
+    session.player_dealt_direct_damage = 1;
     playerHit = { damage: Math.round(dmg), crit, crit_mult: critMult, quad_damage: quadActiveThisRound };
     // v0.22.3 (#20, credit: Gwen): no weapon-skill XP from a hit swung with an equipped
     // weapon that no longer meets its level/class requirement (e.g. after a demotion) --
@@ -4124,103 +4506,10 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
 
   if (monsterDefeated) {
     newMonsterHp = 0;
-    const gold = cbRandIntRange(session.gold_min, session.gold_max);
-    const goldCredited = Math.round(gold * combatGetGoldFindMult(data, session));
-    // v0.20 (#9.3): session.xp (the monster's raw base reward) is now handed to
-    // combatAddXp() UNMODIFIED -- every bonus (Community XP, Forest Reputation, XP Find
-    // gear, Experience Shrine) is summed and applied exactly once inside that function
-    // instead of being partly pre-multiplied here and partly multiplied again inside it.
-    const xpResult = combatAddXp(data, session.xp);
-    const leveled = xpResult.leveled;
-    // v0.22.3 (#10): the season is now won by "tier 5 AND Level 100", not by reaching tier 5
-    // alone -- only check on an actual level-up, and only a tier-5 character can possibly
-    // qualify (maybeDeclareSeasonWinner() checks both and no-ops otherwise).
-    if (leveled) maybeDeclareSeasonWinner(req.account.id, data);
-    creditAccountGold(req.account.id, goldCredited);
-    combatIncrementKillStreak(data);
-    // v-quest: Quest System hooks -- run on every server-resolved kill, mirroring exactly the
-    // same trusted event the gold/XP/kill-streak grants right above already ride on. See the
-    // Quest System section (above applyLadderReset()) for questTrackKillStreak()/
-    // questTrackRoamerKill()/questTrackGuardianKill()/questTrackEliteKill()'s own comments.
-    questEnsureState(data);
-    questTrackKillStreak(data);
-    if (session.is_roamer) questTrackRoamerKill(data);
-    if (session.is_guardian) questTrackGuardianKill(data, session.area_level);
-    // v0.19.1 (#19): this endpoint used to persist the raw characters-table row via
-    // saveCharacterRow() below but never forward max_kill_streak (or level/xp) into the
-    // separate leaderboard_bests table that GET /api/leaderboard/killstreak actually reads --
-    // so kills scored through server-authoritative combat never showed up on that leaderboard
-    // tab. The Broken Bridge Trial endpoint already does this correctly; mirror it here.
-    upsertLeaderboardBests(req.account.id, data);
-
-    const magicFind = combatGetMagicFind(data, session);
-    // v0.22.1 (Part A2d): look up the slain monster's band once, so both the guaranteed drop
-    // and any bonus drops below skew toward its matching item rarity (see
-    // combatRollRarityForBand()/MONSTER_BAND_LOOT_RARITY_WEIGHTS).
-    const monsterForLoot = COMBAT_MONSTERS.find((m) => m.id === session.monster_id);
-    const monsterBand = monsterForLoot ? monsterForLoot.tier : null;
-    // v-quest: elder-band kill tracking (Q7) needs the monster's band, computed just above.
-    questTrackEliteKill(data, monsterBand);
-    const rolled = combatRollLoot(session.loot_table, magicFind);
-    let loot = { type: rolled.type };
-    if (rolled.type === "gear") {
-      const tier = combatRollItemTier(session.area_level);
-      const inst = combatGenerateGearItem(tier, magicFind, monsterBand);
-      const placement = combatAddGearAutoEquip(data, inst);
-      loot = { type: "gear", item: inst, fit: placement.fit, auto_equipped: placement.autoEquipped };
-    } else if (rolled.type === "consumable") {
-      combatAddConsumable(data, rolled.item_id, 1);
-      loot = { type: "consumable", item_id: rolled.item_id };
-    } else if (rolled.type === "herb") {
-      combatAddHerb(data, rolled.herb_id, 1);
-      loot = { type: "herb", herb_id: rolled.herb_id };
-    }
-
-    // v0.20.1 (#10): roll for bonus loot beyond the guaranteed drop above. Roaming mobs and
-    // Stronghold guardians ("special" spawns) both boost the CHANCE of a bonus drop AND the
-    // effective Magic Find used to decide what it actually is, so their extra items skew
-    // toward better quality too -- everything else about the roll (same loot table, same
-    // gear-tier/auto-equip/consumable/herb handling as the guaranteed drop) is identical.
-    const isSpecialSpawn = !!(session.is_roamer || session.is_guardian);
-    const bonusMagicFind = isSpecialSpawn ? magicFind + CB.EXTRA_LOOT_SPECIAL_SPAWN_QUALITY_BONUS_PCT : magicFind;
-    const extraLootCount = combatRollExtraLootCount(magicFind, isSpecialSpawn);
-    const bonusLoot = [];
-    for (let i = 0; i < extraLootCount; i++) {
-      const extraRolled = combatRollLoot(session.loot_table, bonusMagicFind);
-      if (extraRolled.type === "gear") {
-        const extraTier = combatRollItemTier(session.area_level);
-        const extraInst = combatGenerateGearItem(extraTier, bonusMagicFind, monsterBand);
-        const extraPlacement = combatAddGearAutoEquip(data, extraInst);
-        bonusLoot.push({ type: "gear", item: extraInst, fit: extraPlacement.fit, auto_equipped: extraPlacement.autoEquipped });
-      } else if (extraRolled.type === "consumable") {
-        combatAddConsumable(data, extraRolled.item_id, 1);
-        bonusLoot.push({ type: "consumable", item_id: extraRolled.item_id });
-      } else if (extraRolled.type === "herb") {
-        combatAddHerb(data, extraRolled.herb_id, 1);
-        bonusLoot.push({ type: "herb", herb_id: extraRolled.herb_id });
-      }
-      // "nothing" results simply contribute no entry -- same as the guaranteed roll can do.
-    }
-
-    let keyDrop = null;
-    if (session.is_guardian) {
-      const keyEligible = combatStrongholdKeyEligible(session.area_level, data.level);
-      if (keyEligible && Math.random() < CB.STRONGHOLD_KEY_DROP_CHANCE) {
-        const keyTier = combatStrongholdKeyTierForAreaLevel(session.area_level);
-        const keyItemId = combatStrongholdKeyItemIdForTier(keyTier);
-        combatAddConsumable(data, keyItemId, 1);
-        keyDrop = { tier: keyTier, item_id: keyItemId };
-      }
-      keyDrop = keyDrop || { eligible: keyEligible, dropped: false };
-    }
-
-    kill = {
-      gold, gold_credited: goldCredited, xp_gained: xpResult.xpGained, leveled,
-      loot, bonus_loot: bonusLoot, key_drop: keyDrop, kill_streak: data.kill_streak, max_kill_streak: data.max_kill_streak,
-      total_kills: data.total_kills,
-      is_guardian: !!session.is_guardian, is_roamer: !!session.is_roamer,
-    };
-    updateCombatSession(session.id, { hp: 0, status: "won", last_monster_hit_at: catchUp.newLastHitAt });
+    // v0.24.1 (C1/C2/B5): delegates to the shared helper (see its own comment right before this
+    // route) -- identical gold/XP/loot/quest-tracking/Pacifist-check behavior as before, just
+    // reusable from every other combat call site that can also land a kill now.
+    kill = combatFinalizeMonsterKill(req, session, data, { last_monster_hit_at: catchUp.newLastHitAt, last_regen_tick_at: session.last_regen_tick_at, player_poison_dots: session.player_poison_dots || "[]", sting_lockout_until: session.sting_lockout_until || 0, player_dealt_direct_damage: session.player_dealt_direct_damage ? 1 : 0 });
   } else {
     // v0.21.5 BUG FIX: this used to ALSO call combatResolveMonsterTurn() here -- a guaranteed
     // monster counter-hit every time the player attacked and didn't land a killing blow, on
@@ -4232,7 +4521,7 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
     // (combatCatchUpMonsterHits, above), never as a side effect of the player's own swing.
     // monsterTurn stays null and fatal stays false here now; a kill this round can only ever
     // come from the elapsed-time catch-up already resolved earlier in this handler.
-    updateCombatSession(session.id, { hp: newMonsterHp, last_monster_hit_at: catchUp.newLastHitAt });
+    updateCombatSession(session.id, { hp: newMonsterHp, last_monster_hit_at: catchUp.newLastHitAt, last_regen_tick_at: session.last_regen_tick_at, player_poison_dots: session.player_poison_dots || "[]", sting_lockout_until: session.sting_lockout_until || 0, player_dealt_direct_damage: session.player_dealt_direct_damage ? 1 : 0 });
   }
 
   if (fatal) updateCombatSession(session.id, { status: "lost" });
@@ -4258,19 +4547,37 @@ app.post("/api/combat/:sessionId/flee", requireAuth, (req, res) => {
   if (!data) return res.status(404).json({ error: "No character in that slot." });
 
   combatSettleAllHeals(data);
+  combatTickRegenElapsed(data, session); // v0.24.1 (C3): HP/Stamina/Mana regen ticks during combat too
+  { const _poison = combatSettlePlayerPoison(session, data); if (_poison.dotsChanged) session.player_poison_dots = JSON.stringify(_poison.newDots || []); } // v0.24.1 (C4): settle any queued Poison Sting DOT ticks against the player
   // v0.21.1 (#9): elapsed-time catch-up applies to fleeing too -- deciding whether to run
   // still costs real wall-clock time the monster keeps swinging through. Captured before the
   // fail-roll so a fatal catch-up ends the fight before the flee attempt itself resolves.
   const invulnActiveThisRound = combatIsInvulnerable(data);
   const catchUp = combatCatchUpMonsterHits(session, data, invulnActiveThisRound);
   if (catchUp.fatal) {
-    updateCombatSession(session.id, { status: "lost", last_monster_hit_at: catchUp.newLastHitAt });
+    updateCombatSession(session.id, { status: "lost", last_monster_hit_at: catchUp.newLastHitAt, last_regen_tick_at: session.last_regen_tick_at, player_poison_dots: session.player_poison_dots || "[]", sting_lockout_until: session.sting_lockout_until || 0 });
     const hcResult = combatHandleHardcoreDeath(req.account.id, req.account.username, session.slot, data, session);
     const saveSeq = hcResult.hardcoreKilled ? null : saveCharacterRow(req.account.id, session.slot, data);
     return res.json({
       ok: true, failed: null, monster_turn: null, monster_ticks: catchUp.ticks, fatal: true,
       player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), ...combatRoundBuffsPayload(data) },
       hardcore_killed: hcResult.hardcoreKilled, _save_seq: saveSeq,
+    });
+  }
+
+  // v0.24.1 (C2): the elapsed-time catch-up above can now land a genuinely lethal Thorns
+  // reflect hit even though the PLAYER survived (catchUp.fatal only covers the player's own
+  // death) -- if the monster is already dead, resolve that kill right here instead of letting
+  // the flee attempt proceed against a corpse (or worse, silently leaving the fight "active"
+  // forever at 0 HP, the exact bug this ticket reports).
+  if (session.hp <= 0) {
+    const kill = combatFinalizeMonsterKill(req, session, data, { last_monster_hit_at: catchUp.newLastHitAt, last_regen_tick_at: session.last_regen_tick_at, player_poison_dots: session.player_poison_dots || "[]", sting_lockout_until: session.sting_lockout_until || 0 });
+    const saveSeq = saveCharacterRow(req.account.id, session.slot, data);
+    return res.json({
+      ok: true, failed: null, monster_turn: null, monster_ticks: catchUp.ticks, fatal: false,
+      monster: { hp: 0, max_hp: session.max_hp, defeated: true }, kill,
+      player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
+      hardcore_killed: false, _save_seq: saveSeq,
     });
   }
 
@@ -4296,14 +4603,14 @@ app.post("/api/combat/:sessionId/flee", requireAuth, (req, res) => {
     combatTickCombatRoundBuffs(data);
     monsterTurn = combatResolveMonsterTurn(data, session, invulnActiveThisRound);
     fatal = monsterTurn.fatal;
-    updateCombatSession(session.id, fatal ? { status: "lost", last_monster_hit_at: catchUp.newLastHitAt } : { last_monster_hit_at: catchUp.newLastHitAt });
+    updateCombatSession(session.id, fatal ? { status: "lost", last_monster_hit_at: catchUp.newLastHitAt, last_regen_tick_at: session.last_regen_tick_at, player_poison_dots: session.player_poison_dots || "[]", sting_lockout_until: session.sting_lockout_until || 0 } : { last_monster_hit_at: catchUp.newLastHitAt, last_regen_tick_at: session.last_regen_tick_at, player_poison_dots: session.player_poison_dots || "[]", sting_lockout_until: session.sting_lockout_until || 0 });
     // HOTFIX: this is the ONE fatal site in this whole combat section that is NOT reached
     // via combatCatchUpMonsterHits -- the failed-flee guaranteed hit calls
     // combatResolveMonsterTurn() directly, so it needs its own combatHandleHardcoreDeath()
     // call rather than sharing the catchUp.fatal early-return above.
     if (fatal) hcResult = combatHandleHardcoreDeath(req.account.id, req.account.username, session.slot, data, session);
   } else {
-    updateCombatSession(session.id, { status: "fled", last_monster_hit_at: catchUp.newLastHitAt });
+    updateCombatSession(session.id, { status: "fled", last_monster_hit_at: catchUp.newLastHitAt, last_regen_tick_at: session.last_regen_tick_at, player_poison_dots: session.player_poison_dots || "[]", sting_lockout_until: session.sting_lockout_until || 0 });
   }
   const saveSeq = hcResult.hardcoreKilled ? null : saveCharacterRow(req.account.id, session.slot, data);
   res.json({
@@ -4329,13 +4636,15 @@ app.post("/api/combat/:sessionId/use-item", requireAuth, (req, res) => {
   if (!((data.consumables && data.consumables[itemId]) > 0)) return res.status(400).json({ error: "You don't have that item." });
 
   combatSettleAllHeals(data);
+  combatTickRegenElapsed(data, session); // v0.24.1 (C3): HP/Stamina/Mana regen ticks during combat too
+  { const _poison = combatSettlePlayerPoison(session, data); if (_poison.dotsChanged) session.player_poison_dots = JSON.stringify(_poison.newDots || []); } // v0.24.1 (C4): settle any queued Poison Sting DOT ticks against the player
 
   // v0.21.1 (#9): elapsed-time catch-up applies here too -- opening the item menu and picking
   // a potion still costs real wall-clock time the monster keeps swinging through.
   const invulnActiveThisRound = combatIsInvulnerable(data);
   const catchUp = combatCatchUpMonsterHits(session, data, invulnActiveThisRound);
   if (catchUp.fatal) {
-    updateCombatSession(session.id, { status: "lost", last_monster_hit_at: catchUp.newLastHitAt });
+    updateCombatSession(session.id, { status: "lost", last_monster_hit_at: catchUp.newLastHitAt, last_regen_tick_at: session.last_regen_tick_at, player_poison_dots: session.player_poison_dots || "[]", sting_lockout_until: session.sting_lockout_until || 0 });
     const hcResult = combatHandleHardcoreDeath(req.account.id, req.account.username, session.slot, data, session);
     const saveSeq = hcResult.hardcoreKilled ? null : saveCharacterRow(req.account.id, session.slot, data);
     return res.json({
@@ -4344,7 +4653,24 @@ app.post("/api/combat/:sessionId/use-item", requireAuth, (req, res) => {
       hardcore_killed: hcResult.hardcoreKilled, _save_seq: saveSeq,
     });
   }
-  updateCombatSession(session.id, { last_monster_hit_at: catchUp.newLastHitAt });
+
+  // v0.24.1 (C2/B5): THIS is the call site that matters most for The Pacifist -- a player who
+  // never attacks and only drinks potions while Thorns kills the monster off would otherwise
+  // hit this exact "opened the item menu against a corpse" gap forever, since nothing here used
+  // to check whether the catch-up above just finished the monster off. Resolve the kill (and,
+  // per the Pacifist tracking above, credit it as a no-direct-damage kill) instead of proceeding
+  // into the potion-use logic below.
+  if (session.hp <= 0) {
+    const kill = combatFinalizeMonsterKill(req, session, data, { last_monster_hit_at: catchUp.newLastHitAt, last_regen_tick_at: session.last_regen_tick_at, player_poison_dots: session.player_poison_dots || "[]", sting_lockout_until: session.sting_lockout_until || 0 });
+    const saveSeq = saveCharacterRow(req.account.id, session.slot, data);
+    return res.json({
+      ok: true, monster_ticks: catchUp.ticks, fatal: false,
+      monster: { hp: 0, max_hp: session.max_hp, defeated: true }, kill,
+      player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
+      _save_seq: saveSeq,
+    });
+  }
+  updateCombatSession(session.id, { last_monster_hit_at: catchUp.newLastHitAt, last_regen_tick_at: session.last_regen_tick_at, player_poison_dots: session.player_poison_dots || "[]", sting_lockout_until: session.sting_lockout_until || 0 });
 
   let used = false;
   const totalTicks = CB.POTION_HEAL_DURATION_MS; // durationMs directly, rate = amount/durationMs
@@ -4409,16 +4735,35 @@ app.post("/api/combat/:sessionId/tick", requireAuth, (req, res) => {
   if (!data) return res.status(404).json({ error: "No character in that slot." });
 
   combatSettleAllHeals(data);
+  combatTickRegenElapsed(data, session); // v0.24.1 (C3): HP/Stamina/Mana regen ticks during combat too
+  { const _poison = combatSettlePlayerPoison(session, data); if (_poison.dotsChanged) session.player_poison_dots = JSON.stringify(_poison.newDots || []); } // v0.24.1 (C4): settle any queued Poison Sting DOT ticks against the player
   // v0.23.0 (Part B7): idle-polling must settle spell DOTs too, same as /attack -- otherwise
   // a Fireflies cast would only visibly progress while the player kept attacking.
   const spellDotResult = combatSettleSpellDots(session, data);
   if (spellDotResult.dotsChanged) {
     session.hp = spellDotResult.newHp;
-    updateCombatSession(session.id, { hp: spellDotResult.newHp, spell_dots: JSON.stringify(spellDotResult.newDots || []) });
+    updateCombatSession(session.id, { hp: spellDotResult.newHp, spell_dots: JSON.stringify(spellDotResult.newDots || []), player_dealt_direct_damage: session.player_dealt_direct_damage ? 1 : 0 });
   }
   const invulnActiveThisRound = combatIsInvulnerable(data);
   const catchUp = combatCatchUpMonsterHits(session, data, invulnActiveThisRound);
-  updateCombatSession(session.id, catchUp.fatal ? { status: "lost", last_monster_hit_at: catchUp.newLastHitAt } : { last_monster_hit_at: catchUp.newLastHitAt });
+
+  // v0.24.1 (C1/C2): the idle-poll tick is the single most likely place a Thorns-reflect kill
+  // (C2) or a settled Fireflies/Siphon/Entangle DOT kill (C1) actually lands, since it's the
+  // one call site that fires purely from real elapsed time with no player action at all.
+  // Resolve it here exactly like every other endpoint does now, before falling through to the
+  // old "still fighting" response shape.
+  if (!catchUp.fatal && session.hp <= 0) {
+    const kill = combatFinalizeMonsterKill(req, session, data, { last_monster_hit_at: catchUp.newLastHitAt, last_regen_tick_at: session.last_regen_tick_at, player_poison_dots: session.player_poison_dots || "[]", sting_lockout_until: session.sting_lockout_until || 0 });
+    const saveSeq = saveCharacterRow(req.account.id, session.slot, data);
+    return res.json({
+      ok: true, monster_ticks: catchUp.ticks, spell_dot_ticks: spellDotResult.ticks, fatal: false,
+      monster: { hp: 0, max_hp: session.max_hp, defeated: true }, kill,
+      player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data), ...combatRoundBuffsPayload(data) },
+      hardcore_killed: false, _save_seq: saveSeq,
+    });
+  }
+
+  updateCombatSession(session.id, catchUp.fatal ? { status: "lost", last_monster_hit_at: catchUp.newLastHitAt, last_regen_tick_at: session.last_regen_tick_at, player_poison_dots: session.player_poison_dots || "[]", sting_lockout_until: session.sting_lockout_until || 0 } : { last_monster_hit_at: catchUp.newLastHitAt, last_regen_tick_at: session.last_regen_tick_at, player_poison_dots: session.player_poison_dots || "[]", sting_lockout_until: session.sting_lockout_until || 0 });
 
   const hcResult = catchUp.fatal ? combatHandleHardcoreDeath(req.account.id, req.account.username, session.slot, data, session) : { hardcoreKilled: false };
   const saveSeq = hcResult.hardcoreKilled ? null : saveCharacterRow(req.account.id, session.slot, data);
@@ -4463,6 +4808,8 @@ app.post("/api/combat/:sessionId/cast", requireAuth, (req, res) => {
   }
 
   combatSettleAllHeals(data);
+  combatTickRegenElapsed(data, session); // v0.24.1 (C3): HP/Stamina/Mana regen ticks during combat too
+  { const _poison = combatSettlePlayerPoison(session, data); if (_poison.dotsChanged) session.player_poison_dots = JSON.stringify(_poison.newDots || []); } // v0.24.1 (C4): settle any queued Poison Sting DOT ticks against the player
   const currentMana = combatGetCurrentMana(data);
   // v0.23.6 (Item 4): Wizard Set 6pc bonus -- spells cost WIZARD_SET_6PC_MANA_COST_REDUCTION_PCT%
   // less mana. Computed once here and reused for both the affordability check and the actual
@@ -4476,19 +4823,43 @@ app.post("/api/combat/:sessionId/cast", requireAuth, (req, res) => {
   // cast layers a new effect on top -- same lazy on-demand pattern combatSettleAllHeals()
   // already uses for HP/Stamina/Mana potions, applied here to the monster's HP instead.
   const dotResult = combatSettleSpellDots(session, data);
+  // v0.24.1 (C1/C2 latent-bug fix): session.hp MUST be synced from dotResult.newHp immediately,
+  // BEFORE combatCatchUpMonsterHits runs below -- that call (and the Thorns reflect damage it
+  // can apply as a side effect) mutates session.hp directly, not the local `monsterHp` variable.
+  // Previously monsterHp was only a local copy, so any Thorns damage landed during THIS cast's
+  // catch-up window was silently discarded when the endpoint's own updateCombatSession() call
+  // overwrote hp with the stale pre-catch-up value. Keeping session.hp authoritative here fixes
+  // that regardless of how monsterHp is used for the response payload below.
+  session.hp = dotResult.newHp;
   let monsterHp = dotResult.newHp;
   let spellDots = dotResult.newDots || [];
 
   const invulnActiveThisRound = combatIsInvulnerable(data);
   const catchUp = combatCatchUpMonsterHits(session, data, invulnActiveThisRound);
   if (catchUp.fatal) {
-    updateCombatSession(session.id, { status: "lost", last_monster_hit_at: catchUp.newLastHitAt, hp: monsterHp, spell_dots: JSON.stringify(spellDots) });
+    updateCombatSession(session.id, { status: "lost", last_monster_hit_at: catchUp.newLastHitAt, last_regen_tick_at: session.last_regen_tick_at, player_poison_dots: session.player_poison_dots || "[]", sting_lockout_until: session.sting_lockout_until || 0, hp: session.hp, spell_dots: JSON.stringify(spellDots), player_dealt_direct_damage: session.player_dealt_direct_damage ? 1 : 0 });
     const hcResult = combatHandleHardcoreDeath(req.account.id, req.account.username, session.slot, data, session);
     const saveSeq = hcResult.hardcoreKilled ? null : saveCharacterRow(req.account.id, session.slot, data);
     return res.json({
       ok: true, monster_ticks: catchUp.ticks, spell_dot_ticks: dotResult.ticks, fatal: true,
       player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), ...combatRoundBuffsPayload(data) },
       hardcore_killed: hcResult.hardcoreKilled, _save_seq: saveSeq,
+    });
+  }
+
+  // v0.24.1 (C2): a Thorns reflect hit landed during this cast's catch-up window (above) may
+  // have finished the monster off before the cast's own effect even resolves -- e.g. queuing a
+  // new Fireflies volley onto a monster that's about to die to reflect damage from an EARLIER
+  // volley's catch-up tick. Resolve that kill now, exactly like every other endpoint does, and
+  // bail out before layering a fresh spell effect onto an already-dead session.
+  if (session.hp <= 0) {
+    const kill = combatFinalizeMonsterKill(req, session, data, { last_monster_hit_at: catchUp.newLastHitAt, last_regen_tick_at: session.last_regen_tick_at, player_poison_dots: session.player_poison_dots || "[]", sting_lockout_until: session.sting_lockout_until || 0, spell_dots: "[]" });
+    const saveSeq = saveCharacterRow(req.account.id, session.slot, data);
+    return res.json({
+      ok: true, monster_ticks: catchUp.ticks, spell_dot_ticks: dotResult.ticks, fatal: false,
+      monster: { hp: 0, max_hp: session.max_hp, defeated: true }, kill,
+      player: { current_hp: data.current_hp, max_hp: combatGetMaxHp(data), current_mana: data.current_mana, max_mana: combatGetMaxMana(data), ...combatRoundBuffsPayload(data) },
+      _save_seq: saveSeq,
     });
   }
 
@@ -4535,7 +4906,8 @@ app.post("/api/combat/:sessionId/cast", requireAuth, (req, res) => {
 
   updateCombatSession(session.id, {
     hp: monsterHp, spell_dots: JSON.stringify(spellDots),
-    spell_cooldowns: JSON.stringify(cooldowns), last_monster_hit_at: catchUp.newLastHitAt,
+    spell_cooldowns: JSON.stringify(cooldowns), last_monster_hit_at: catchUp.newLastHitAt, last_regen_tick_at: session.last_regen_tick_at, player_poison_dots: session.player_poison_dots || "[]", sting_lockout_until: session.sting_lockout_until || 0,
+    player_dealt_direct_damage: session.player_dealt_direct_damage ? 1 : 0,
   });
 
   const saveSeq = saveCharacterRow(req.account.id, session.slot, data);
@@ -5080,6 +5452,38 @@ app.get("/api/admin/accounts", requireAuth, requireAdmin, (req, res) => {
   });
 });
 
+// v0.24.1 (A3): admin mutations targeting a character OTHER than the admin's own must never
+// be silently overwritten by that player's own client autosaving its pre-mutation, now-stale
+// in-memory state back in a moment later. This is the exact same autosave-vs-server-write race
+// shape as the hardcore-death choke point already solves for combat -- here the admin's write
+// stands in for the "other" writer. Two safeguards, reused everywhere an admin route touches a
+// live character row:
+//   1. Fence the save sequence far ahead of anything a live client could reach on its own, so
+//      the strictly-greater-seq guard on PUT /api/characters/:slot (see the WHERE clause on the
+//      upsert earlier in this file) rejects any in-flight or queued autosave still carrying the
+//      player's pre-mutation state.
+//   2. Push a "your character was updated by an admin, please reload" signal down the player's
+//      own already-open chat WebSocket (the same channel every other live broadcast feature --
+//      chat, combat ticks -- already reuses), so a currently-online player sees the change
+//      immediately instead of only on next login.
+// ADMIN_SEQ_FENCE_JUMP is comically large relative to how _save_seq actually grows in practice
+// (PS._nextSaveSeq() floors once at Date.now(), then increments by 1 per save from there -- a
+// client autosaving nonstop, once a second, forever, would take over 31,000 years to add 1e12 to
+// its own seq), which is the point: it needs to permanently outrun any seq a live client could
+// organically reach, not merely win "for now".
+const ADMIN_SEQ_FENCE_JUMP = 1e12;
+function applyAdminSaveSeqFence(data) {
+  const current = Number(data._save_seq) || 0;
+  data._save_seq = Math.max(current, Date.now()) + ADMIN_SEQ_FENCE_JUMP;
+  return data._save_seq;
+}
+function notifyCharacterForceReload(accountId, slot) {
+  const payload = JSON.stringify({ type: "force_reload", slot });
+  for (const client of chatClients) {
+    if (client.readyState === client.OPEN && client.accountId === accountId) client.send(payload);
+  }
+}
+
 /* ---------------- v0.22.3 (#10 section C): admin "Reset Ladder" tab ----------------
    Human-in-the-loop, per-character ladder reset. Deliberately NO bulk "reset everyone"
    endpoint -- the admin resets one character at a time, from a listing of every character
@@ -5131,7 +5535,12 @@ app.post("/api/admin/reset-ladder/:accountId/:slot", requireAuth, requireAdmin, 
   try { data = JSON.parse(row.data); } catch (e) { return res.status(500).json({ error: "Corrupt character save." }); }
 
   applyLadderReset(data);
-  data._save_seq = (data._save_seq || 0) + 1;
+  // v0.24.1 (A3): was a fragile +1 bump (identical shape to the /api/keeper/choice race A1
+  // uncovered) -- a stale online client's own next autosave, carrying a newer seq of its own,
+  // would silently clobber the reset a moment later. Fence it, then push a forced reload so an
+  // online target sees the reset immediately instead of the change only "sticking" once they
+  // happen to log out and back in.
+  applyAdminSaveSeqFence(data);
   const nowStr = nowIso();
   db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(
     JSON.stringify(data),
@@ -5140,6 +5549,7 @@ app.post("/api/admin/reset-ladder/:accountId/:slot", requireAuth, requireAdmin, 
     slot
   );
   upsertLeaderboardBests(accountId, data);
+  notifyCharacterForceReload(accountId, slot);
   console.log(`[admin] ${req.account.username} reset the ladder for "${data.character_name}" (account_id=${accountId}, slot=${slot})`);
   res.json({
     ok: true,
@@ -5147,6 +5557,52 @@ app.post("/api/admin/reset-ladder/:accountId/:slot", requireAuth, requireAdmin, 
     class_display_name: data.class_display_name,
     level: data.level,
     highest_tier_reached: data.highest_tier_reached,
+  });
+});
+
+// v0.24.1 (A4): compensation tool -- a player lost heavily-invested gear rolls when the
+// itemization bulk update ran, so this credits a chosen character's account gold and/or the
+// character's own materials (Item Scraps) in one shot. Gold is account-bound (see
+// creditAccountGold() above, a separate `accounts` table column the character-save PUT route
+// never touches) so it's immune to the autosave-clobber race by construction -- only materials
+// lives inside the per-character JSON, so that side gets the same save-seq fence treatment as
+// every other admin character-write above. Always pushes the forced-reload notification so a
+// live online target's gold display (refreshed by the client's Net.refreshCharacters() call in
+// that same handler) and any granted materials both show up immediately without a relog, even
+// when only gold was granted.
+app.post("/api/admin/grant/:accountId/:slot", requireAuth, requireAdmin, (req, res) => {
+  const accountId = Number(req.params.accountId);
+  const slot = Number(req.params.slot);
+  if (!Number.isInteger(accountId)) return res.status(400).json({ error: "Invalid account id." });
+  if (!Number.isInteger(slot) || slot < 0 || slot >= MAX_CHARACTER_SLOTS) return res.status(400).json({ error: "Invalid slot." });
+  const goldAmount = Math.round(Number(req.body?.gold) || 0);
+  const materialsAmount = Math.round(Number(req.body?.materials) || 0);
+  if (!goldAmount && !materialsAmount) return res.status(400).json({ error: "Enter a gold or materials amount to grant." });
+
+  const row = db.prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?").get(accountId, slot);
+  if (!row) return res.status(404).json({ error: "No character in that slot." });
+  let data;
+  try { data = JSON.parse(row.data); } catch (e) { return res.status(500).json({ error: "Corrupt character save." }); }
+
+  let accountGoldAfter = getAccountGold(accountId);
+  if (goldAmount) accountGoldAfter = creditAccountGold(accountId, goldAmount);
+
+  if (materialsAmount) {
+    data.materials = Math.max(0, (data.materials || 0) + materialsAmount);
+    applyAdminSaveSeqFence(data);
+    db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(
+      JSON.stringify(data), nowIso(), accountId, slot
+    );
+  }
+  notifyCharacterForceReload(accountId, slot);
+  console.log(`[admin] ${req.account.username} granted account_id=${accountId} slot=${slot}: gold=${goldAmount}, materials=${materialsAmount}`);
+  res.json({
+    ok: true,
+    character_name: data.character_name,
+    gold_granted: goldAmount,
+    materials_granted: materialsAmount,
+    account_gold: accountGoldAfter,
+    materials: data.materials,
   });
 });
 
@@ -5393,9 +5849,15 @@ function rescaleLegacyGearAtLocation(location) {
     if (!bad.length) throw Object.assign(new Error("This item is already within current spec -- nothing to rescale."), { httpStatus: 409 });
     const rescaled = legacyGearRescale(target);
     applyBack(rescaled);
+    // v0.24.1 (A3 hardening): this write previously carried no _save_seq bump at all -- the
+    // same race shape the ladder reset had, just with no fence whatsoever, so an online
+    // player's own next autosave (which always carries a strictly newer seq than whatever's
+    // stored) would silently revert the rescale entirely. Same fence + forced-reload treatment.
+    applyAdminSaveSeqFence(data);
     db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(
       JSON.stringify(data), nowIso(), accountId, slot
     );
+    notifyCharacterForceReload(accountId, slot);
     console.log(`[admin] rescaled a legacy gear item (${kind}) for account_id=${accountId} slot=${slot}`);
     return { kind, before: target, after: rescaled };
   }
@@ -5480,9 +5942,13 @@ function deleteLegacyGearAtLocation(location) {
       list.splice(idx, 1);
       data.gear_instances = list;
     }
+    // v0.24.1 (A3 hardening): same missing-fence gap as the rescale path above -- fence +
+    // forced-reload so a live online player's own autosave can't silently un-delete the item.
+    applyAdminSaveSeqFence(data);
     db.prepare("UPDATE characters SET data = ?, updated_at = ? WHERE account_id = ? AND slot = ?").run(
       JSON.stringify(data), nowIso(), accountId, slot
     );
+    notifyCharacterForceReload(accountId, slot);
     console.log(`[admin] deleted a legacy gear item (${kind}) for account_id=${accountId} slot=${slot}`);
     return { kind, removed };
   }
@@ -5944,14 +6410,43 @@ setInterval(() => {
     const data = loadCharacterRow(client.accountId, session.slot);
     if (!data) continue;
     combatSettleAllHeals(data);
+    combatTickRegenElapsed(data, session); // v0.24.1 (C3): HP/Stamina/Mana regen ticks during combat too
+  { const _poison = combatSettlePlayerPoison(session, data); if (_poison.dotsChanged) session.player_poison_dots = JSON.stringify(_poison.newDots || []); } // v0.24.1 (C4): settle any queued Poison Sting DOT ticks against the player
     // v0.23.0 (Part B7): settle queued Fireflies DOT ticks on the server's own clock too, so
     // they land even if the player never sends another attack/tick request while idle.
     const spellDotResult = combatSettleSpellDots(session, data);
+    if (spellDotResult.dotsChanged) session.hp = spellDotResult.newHp;
     const invulnActiveThisRound = combatIsInvulnerable(data);
     const catchUp = combatCatchUpMonsterHits(session, data, invulnActiveThisRound);
     if (catchUp.ticks.length === 0 && !catchUp.fatal && spellDotResult.ticks.length === 0) continue;
-    if (spellDotResult.dotsChanged) updateCombatSession(session.id, { hp: spellDotResult.newHp, spell_dots: JSON.stringify(spellDotResult.newDots || []) });
-    updateCombatSession(session.id, catchUp.fatal ? { status: "lost", last_monster_hit_at: catchUp.newLastHitAt } : { last_monster_hit_at: catchUp.newLastHitAt });
+    if (spellDotResult.dotsChanged) updateCombatSession(session.id, { hp: spellDotResult.newHp, spell_dots: JSON.stringify(spellDotResult.newDots || []), player_dealt_direct_damage: session.player_dealt_direct_damage ? 1 : 0 });
+
+    // v0.24.1 (C1/C2/B5): this pusher is a genuine kill call site now too -- a settled spell DOT
+    // (C1) or a Thorns reflect landed during the catch-up above (C2) can finish the monster off
+    // purely from server-clock elapsed time, with no HTTP request involved at all. Resolve the
+    // kill through the exact same combatFinalizeMonsterKill() helper every other endpoint uses,
+    // BEFORE the old fatal-only branch below (a kill and a player death can never both be true of
+    // the same catch-up, since combatCatchUpMonsterHits() stops resolving further hits once the
+    // player is dead -- but the monster can still die to Thorns/DOT in this same pass).
+    if (!catchUp.fatal && session.hp <= 0) {
+      const fakeReq = { account: { id: client.accountId, username: client.username } };
+      const kill = combatFinalizeMonsterKill(fakeReq, session, data, { last_monster_hit_at: catchUp.newLastHitAt, last_regen_tick_at: session.last_regen_tick_at, player_poison_dots: session.player_poison_dots || "[]", sting_lockout_until: session.sting_lockout_until || 0 });
+      const saveSeq = saveCharacterRow(client.accountId, session.slot, data);
+      client.send(JSON.stringify({
+        type: "combat_tick", session_id: session.id, monster_ticks: catchUp.ticks, spell_dot_ticks: spellDotResult.ticks, fatal: false,
+        monster: { hp: 0, max_hp: session.max_hp, defeated: true }, kill,
+        player: {
+          current_hp: data.current_hp, max_hp: combatGetMaxHp(data),
+          current_stamina: data.current_stamina, max_stamina: combatGetMaxStamina(data),
+          current_mana: combatGetCurrentMana(data), max_mana: combatGetMaxMana(data),
+        },
+        hardcore_killed: false,
+        _save_seq: saveSeq,
+      }));
+      continue;
+    }
+
+    updateCombatSession(session.id, catchUp.fatal ? { status: "lost", last_monster_hit_at: catchUp.newLastHitAt, last_regen_tick_at: session.last_regen_tick_at, player_poison_dots: session.player_poison_dots || "[]", sting_lockout_until: session.sting_lockout_until || 0 } : { last_monster_hit_at: catchUp.newLastHitAt, last_regen_tick_at: session.last_regen_tick_at, player_poison_dots: session.player_poison_dots || "[]", sting_lockout_until: session.sting_lockout_until || 0 });
     // HOTFIX: this server-driven push is a real fatal-hit call site too (Gwen's exact repro:
     // a hardcore character was slain by an elapsed-time catch-up hit landed by THIS pusher
     // while the tab was backgrounded, then kept playing once they returned) -- route it

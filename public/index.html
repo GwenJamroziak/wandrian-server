@@ -143,6 +143,17 @@ input[type=checkbox]:checked::after{content:"✓";position:absolute;top:-3px;lef
   78%{opacity:1;}
   100%{transform:translate(0,0) scale(1.6);opacity:0;}
 }
+/* v0.24.1 (C9): Entangle root visual cue -- see spawnEntangleRoots()/entangleRootsLayer(). */
+.entangle-roots-layer{position:absolute;inset:0;overflow:visible;pointer-events:none;z-index:6;}
+.entangle-roots-overlay{position:absolute;inset:0;animation-name:entangleRootsFade;animation-timing-function:ease-in-out;animation-fill-mode:forwards;
+  filter:drop-shadow(0 0 4px rgba(120,220,100,.6));}
+.entangle-roots-overlay svg{width:100%;height:100%;}
+@keyframes entangleRootsFade{
+  0%{opacity:0;transform:scale(.92);}
+  12%{opacity:1;transform:scale(1);}
+  85%{opacity:1;transform:scale(1);}
+  100%{opacity:0;transform:scale(1.03);}
+}
 .float-text-dmg{color:#ff5c5c;} .float-text-heal{color:#6cff6c;} .float-text-xp{color:#b46cff;}
 .float-text-gold{color:var(--gold);} .float-text-crit{color:#ffb400;font-size:1.2em;} .float-text-block{color:#9fb0c3;}
 .hp-text{color:var(--hp);} .stamina-text{color:var(--stamina);} .xp-text{color:var(--xp);} .gold-text{color:var(--gold);}
@@ -165,8 +176,22 @@ a.back-link,.linklike{color:#cbd9a0;cursor:pointer;text-decoration:underline;}
 .maze-wrap{display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;}
 /* v0.23.2: maze restyle -- gap/border removed so tiles read as a seamless lit ground instead
    of a hard grid (the carved-wood .maze-frame below now carries the board's outer edge). */
-.maze-grid{display:grid;gap:0;background:transparent;position:relative;border-radius:4px;overflow:hidden;}
-.maze-tile{width:34px;height:34px;position:relative;overflow:hidden;transition:opacity .5s ease;}
+/* v0.24.1 (E5/E7): grid columns are now fr-based (set inline, see screenMaze()) instead of a
+   hardcoded 34px, so the whole board scales to fill .maze-frame's actual width instead of
+   forcing a fixed size that could overflow a narrow viewport. .maze-tile fills its own cell
+   and stays square via aspect-ratio rather than an explicit pixel height, so both dimensions
+   scale together. Every marker (player/roamer) and the torch-lighting overlay now position
+   themselves in PERCENTAGES of this same box (see maze-mover/maze-lighting below) instead of
+   the old px*35 math, so nothing can drift out of alignment with the actual rendered tiles
+   regardless of how wide the frame ends up being on any given screen.  */
+.maze-grid{display:grid;gap:0;background:transparent;position:relative;border-radius:4px;overflow:hidden;width:100%;}
+.maze-tile{position:relative;overflow:hidden;transition:opacity .5s ease;aspect-ratio:1/1;}
+/* v0.24.1 (E8): fog-of-war reveal fade, driven by a per-cell timestamp + negative
+   animation-delay (see revealAround()/screenMaze() in JS) instead of a one-shot JS opacity
+   flip -- this way the fade survives a tile being rebuilt mid-animation by an unrelated
+   render() (e.g. idleRoamerTick()'s 1s poll). */
+@keyframes mzTileReveal{from{opacity:0}to{opacity:1}}
+.mz-revealing{animation:mzTileReveal .5s ease both;}
 .maze-tile::after{content:"";position:absolute;inset:0;box-shadow:inset 0 0 9px rgba(0,0,0,.32);pointer-events:none;}
 .mz-ground{position:absolute;inset:0;}
 .mz-ground.mz-grass{background:radial-gradient(circle at 30% 25%,var(--mz-grass1),var(--mz-grass2) 70%);}
@@ -201,14 +226,22 @@ a.back-link,.linklike{color:#cbd9a0;cursor:pointer;text-decoration:underline;}
 @keyframes mzbreathe{0%,100%{transform:scale(1);}50%{transform:scale(1.07);}}
 
 .maze-lighting,.maze-torchcast{position:absolute;inset:0;pointer-events:none;z-index:6;}
-.maze-lighting{background:radial-gradient(circle var(--mz-torch-radius,140px) at var(--mz-px,50%) var(--mz-py,50%),
+/* v0.24.1 (E7): switched from an explicit-pixel "circle Rpx" radius to the two-value ellipse
+   form (percentages valid for BOTH axes there, unlike a circle's single radius which CSS only
+   accepts as a <length>) -- --mz-torch-radius is now a percentage of the grid's own box, so it
+   scales exactly in step with the now-fluid-width grid instead of assuming a fixed 34px tile. */
+.maze-lighting{background:radial-gradient(var(--mz-torch-radius,30%) var(--mz-torch-radius,30%) at var(--mz-px,50%) var(--mz-py,50%),
   transparent 0%, transparent 55%, var(--mz-ambient) 100%); mix-blend-mode:multiply;}
-.maze-torchcast{background:radial-gradient(circle calc(var(--mz-torch-radius,140px) * .8) at var(--mz-px,50%) var(--mz-py,50%),
+.maze-torchcast{background:radial-gradient(calc(var(--mz-torch-radius,30%) * .8) calc(var(--mz-torch-radius,30%) * .8) at var(--mz-px,50%) var(--mz-py,50%),
   var(--mz-torch), rgba(255,170,90,.05) 45%, transparent 62%); mix-blend-mode:screen;}
 
 /* diegetic carved-wood viewport frame + location plaque, wrapping just the board (the side
    panel next to it keeps its own plain .panel-ish styling, restyled below to sit with it). */
-.maze-frame{position:relative;padding:16px 14px 12px;border-radius:14px;flex:none;max-width:100%;
+/* v0.24.1 (E5): flex:1 (was flex:none) + a real width so the frame actually fills the space
+   .maze-wrap gives it (full-width on mobile where the side panel wraps below) instead of just
+   shrink-wrapping its old fixed-px grid content; max-width caps it from ballooning absurdly
+   large next to the side panel on a wide desktop viewport. */
+.maze-frame{position:relative;padding:16px 14px 12px;border-radius:14px;flex:1 1 320px;width:100%;max-width:640px;
   background:linear-gradient(180deg,#4a3826,#2e2216) padding-box,
     repeating-linear-gradient(90deg,#3a2c1c 0 7px,#33271a 7px 14px);
   box-shadow:0 10px 34px rgba(0,0,0,.55), inset 0 0 0 2px #5c462c, inset 0 0 0 4px #241a10;}
@@ -219,7 +252,10 @@ a.back-link,.linklike{color:#cbd9a0;cursor:pointer;text-decoration:underline;}
   font-size:.76em;letter-spacing:.08em;padding:4px 16px;border-radius:7px;
   box-shadow:0 3px 9px rgba(0,0,0,.5);text-transform:uppercase;}
 
-.maze-mover{position:absolute;width:34px;height:34px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;font-size:16px;pointer-events:none;transition:left .18s linear,top .18s linear;z-index:5;overflow:visible;}
+/* v0.24.1 (E7): width/height no longer fixed at 34px here -- each mover now sets its own
+   percentage width/height inline (100/maze.size % / 100/maze.sizeH %, see screenMaze()) so it
+   always exactly spans one grid cell no matter how wide the now-fluid grid actually renders. */
+.maze-mover{position:absolute;box-sizing:border-box;display:flex;align-items:center;justify-content:center;font-size:16px;pointer-events:none;transition:left .18s linear,top .18s linear;z-index:5;overflow:visible;}
 .maze-mover svg{width:78%;height:78%;overflow:visible;position:relative;z-index:1;}
 .mz-player-glow{position:absolute;width:calc(34px * 3);height:calc(34px * 3);border-radius:50%;
   background:radial-gradient(circle,rgba(255,190,110,.45),rgba(255,170,90,.12) 40%,transparent 68%);
@@ -402,6 +438,9 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 }
 .gear-row{display:flex;justify-content:space-between;align-items:center;gap:10px;}
 .gear-row-actions{display:flex;gap:6px;flex:0 0 auto;}
+/* v0.24.1 (E9): Blacksmith's 4 actions (Reroll/Reforge/Refine/Salvage), 2-over-2 instead of a
+   single crowded row -- see the wrapper div at the Blacksmith's gearRow() call site. */
+.blacksmith-actions-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;}
 /* v0.23.1 (#3): Magician spell shop cards -- same repeat(auto-fill,minmax(...)) responsive
    grid technique screenGraveyard()'s older-graves grid already uses. */
 .spell-card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin:14px 0;}
@@ -1133,6 +1172,10 @@ const QUEST_ICON_SVGS={
   cauldron:`<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg"><path d="M13 24 h22 a11 11 0 0 1 -22 0z" fill="#3a4230" stroke="#8fd07a" stroke-width="1.5"/><path d="M18 20 q2 -4 4 0 t4 0 t4 0" fill="none" stroke="#cff0a6" stroke-width="1.5"/></svg>`,
   elder:`<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg"><path d="M24 30 q-6 0 -8 -6 q-3 2 -4 -2 q3 0 3 -3 q2 -6 9 -6 t9 6 q0 3 3 3 q-1 4 -4 2 q-2 6 -8 6z" fill="#5c6350"/><path d="M16 16 q-3 -6 -1 -9 q3 3 3 8M32 16 q3 -6 1 -9 q-3 3 -3 8" fill="none" stroke="#5c6350" stroke-width="2"/></svg>`,
   palisade:`<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg"><g stroke="#5c6350" stroke-width="2.4" fill="none"><path d="M15 16 v18M21 16 v18M27 16 v18M33 16 v18M13 22 h22M13 29 h22"/></g></svg>`,
+  // v0.24.1 (B5): a folded dove-wing/leaf motif over an open palm, for "The Pacifist" -- kept
+  // deliberately non-violent (no thorns/blades) since the quest text itself never names the
+  // Thorns mechanic either.
+  pacifist:`<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg"><path d="M24 34c-6-2-10-8-8-15 3 2 5 5 6 8 0-5 1-9 4-13 2 5 2 10 1 15 3-3 6-5 10-6-3 6-8 10-13 11z" fill="#cff0a6" stroke="#5aa84f" stroke-width="1"/></svg>`,
 };
 function questIconSvg(questId){ return QUEST_ICON_SVGS[questId]||QUEST_ICON_SVGS.explore; }
 
@@ -1152,8 +1195,8 @@ function questTargetFor(qid,idx){
   if(qid==="gatherer") return T.gatherer_herbs[idx];
   if(qid==="wanderers") return T.wanderers_roamers[idx];
   if(qid==="streak") return T.streak_kills[idx];
-  if(qid==="cauldron") return T.cauldron_brews[idx];
-  if(qid==="elder") return T.elder_kills[idx];
+  // v0.24.1 (B6): fixed 7-distinct-recipes target, not town-scaled.
+  if(qid==="cauldron") return Balance.QUEST_DEFS.CAULDRON_DISTINCT_TARGET;
   if(qid==="palisade") return T.palisade_chests[idx];
   return 1; // explore is a single boolean "fully explored this delve" report
 }
@@ -1161,8 +1204,15 @@ function questBuildEntriesForTown(town){
   const idx=questTownIdx(town);
   const entries={};
   for(const qid of Balance.QUEST_DEFS.IDS){
-    const entry={progress:0, target:questTargetFor(qid,idx), status:Balance.QUEST_DEFS.LEVEL_REQ[qid]<=1?"active":"locked"};
-    if(qid==="cauldron") entry.attr_potion_brewed=false;
+    let entry;
+    if(qid==="elder"){
+      // v0.24.1 (B4): "elder" is step-based -- see Balance.QUEST_DEFS.ASCENDANT_HUNT_STEPS.
+      // Not town-scaled; every town starts this questline fresh at step 1.
+      entry={step:1, progress:0, target:Balance.QUEST_DEFS.ASCENDANT_HUNT_STEPS[0].count, status:Balance.QUEST_DEFS.LEVEL_REQ[qid]<=1?"active":"locked"};
+    } else {
+      entry={progress:0, target:questTargetFor(qid,idx), status:Balance.QUEST_DEFS.LEVEL_REQ[qid]<=1?"active":"locked"};
+    }
+    if(qid==="cauldron"){ entry.attr_potion_brewed=false; entry.distinct_brewed=[]; }
     entries[qid]=entry;
   }
   return entries;
@@ -1193,6 +1243,20 @@ function questEnsureLocalState(){
   for(const qid of Balance.QUEST_DEFS.IDS){
     const entry=PS.quests.entries[qid];
     if(entry && entry.status==="locked" && PS.level>=Balance.QUEST_DEFS.LEVEL_REQ[qid]) entry.status="active";
+  }
+  // v0.24.1 (B4): migrate a legacy "elder" entry (pre-Ascendant-Hunt save) lacking a .step
+  // field onto the new step-based shape -- mirrors server.js's questEnsureState() migration.
+  const elderEntry=PS.quests.entries.elder;
+  if(elderEntry && typeof elderEntry.step!=="number"){
+    elderEntry.step=1; elderEntry.progress=0; elderEntry.target=Balance.QUEST_DEFS.ASCENDANT_HUNT_STEPS[0].count;
+    if(elderEntry.status==="ready"||elderEntry.status==="claimed") elderEntry.status="active";
+  }
+  // v0.24.1 (B6): migrate a legacy "cauldron" entry (pre-distinct-recipes save) lacking a
+  // distinct_brewed array -- mirrors server.js's questEnsureState() migration.
+  const cauldronEntry=PS.quests.entries.cauldron;
+  if(cauldronEntry && !Array.isArray(cauldronEntry.distinct_brewed)){
+    cauldronEntry.distinct_brewed=[]; cauldronEntry.progress=0; cauldronEntry.target=Balance.QUEST_DEFS.CAULDRON_DISTINCT_TARGET;
+    if(cauldronEntry.status==="ready"||cauldronEntry.status==="claimed") cauldronEntry.status="active";
   }
   return PS.quests;
 }
@@ -1237,29 +1301,43 @@ function questsButton(){
   const cls="qbtn"+(ready?" ready":isNew?" new":"");
   const title=ready?"A quest reward is ready to claim!":isNew?"A new quest just unlocked.":"View your quests";
   return h("button",{class:cls,title,onClick:()=>{ questsMarkSeen(); GF.goto("quests",{quests_return_to:GF.screen}); }},[
-    `Quests ${questsClaimedOrReadyCount()}/8`,
+    `Quests ${questsClaimedOrReadyCount()}/9`,
     ready?h("span",{class:"qbtn-dot"}):null,
     isNew?h("span",{class:"qbtn-arrow"},["▲"]):null,
   ]);
 }
 
-const ELDER_BAND_DISPLAY={Epic:"Elder", Legendary:"Ancient"};
-function questObjectiveText(qid,idx){
+// v0.24.1 (B4): internal band key -> the display label index.html's own MONSTER_BAND_INFO
+// already uses for that band (Common="Newborn", Uncommon="Young", Rare="Mature", Epic="Elder",
+// Legendary="Ancient") -- kept as a tiny local lookup here since quest copy only ever needs the
+// label, not the full MONSTER_BAND_INFO entry.
+const ASCENDANT_HUNT_BAND_DISPLAY={Common:"Newborn", Uncommon:"Young", Rare:"Mature", Epic:"Elder", Legendary:"Ancient"};
+function questObjectiveText(qid,idx,entry){
   const T=Balance.QUEST_DEFS.TARGETS;
-  if(qid==="explore") return `Fully explore an area-level-${T.explore_area_level[idx]} maze in one delve: every grass tile, roamer, guardian, chest, herb node, and shrine.`;
+  // v0.24.1 (B3): no longer tied to a specific area level -- fully exploring a maze at ANY
+  // area level satisfies this quest.
+  if(qid==="explore") return `Fully explore a maze in one delve, at any area level: every grass tile, roamer, guardian, chest, herb node, and shrine.`;
   if(qid==="wardens") return `Fell ${T.wardens_guardian_kills[idx]} stronghold guardians in one delve (within the first ${T.explore_area_level[idx]} area levels).`;
   if(qid==="gatherer") return `Harvest ${T.gatherer_herbs[idx]} herb nodes across the mazes.`;
   if(qid==="wanderers") return `Slay ${T.wanderers_roamers[idx]} roaming monsters as they wander the maze.`;
   if(qid==="streak") return `Reach a kill streak of ${T.streak_kills[idx]} without returning to town.`;
   if(qid==="cauldron"){
     const sub=Balance.QUEST_DEFS.CAULDRON_ATTR_POTION_REQUIRED[idx];
-    return `Brew ${T.cauldron_brews[idx]} potions at the Alchemist${sub?", including at least one Potion of Might, Swiftness, or Intellect":""}.`;
+    // v0.24.1 (B6): now 7 DISTINCT recipes, not 7 (or N) brews of anything.
+    return `Brew ${Balance.QUEST_DEFS.CAULDRON_DISTINCT_TARGET} different types of potions at the Alchemist${sub?", including at least one Potion of Might, Swiftness, or Intellect":""}.`;
   }
   if(qid==="elder"){
-    const band=ELDER_BAND_DISPLAY[Balance.QUEST_DEFS.ELDER_BAND[idx]]||"Elder";
-    return `Defeat ${T.elder_kills[idx]>1?T.elder_kills[idx]+" monsters":"a monster"} of the ${band} band or higher.`;
+    // v0.24.1 (B4): "The Ascendant Hunt" -- a 5-step chain through every band in order, each
+    // step calling out its own band+count+step number, not a single town-scaled target.
+    const step=Balance.QUEST_DEFS.ASCENDANT_HUNT_STEPS[((entry&&entry.step)||1)-1];
+    const band=ASCENDANT_HUNT_BAND_DISPLAY[step.band]||step.band;
+    const stepNum=(entry&&entry.step)||1;
+    return `Step ${stepNum}/${Balance.QUEST_DEFS.ASCENDANT_HUNT_STEPS.length}: defeat ${step.count>1?step.count+" "+band+"-band monsters":"a "+band+"-band monster"}.`;
   }
   if(qid==="palisade") return `Open ${T.palisade_chests[idx]>1?T.palisade_chests[idx]+" stronghold chests":"a stronghold chest"} (progress carries across the whole town, not just one delve).`;
+  // v0.24.1 (B5): deliberately never names the mechanism (Thorns/reflect damage) -- per Gwen's
+  // exact instruction, this quest's copy is meant to read as a riddle the player has to solve.
+  if(qid==="pacifist") return `Slay a monster in combat without ever landing a blow of your own.`;
   return "";
 }
 const QUEST_CHIP_ICONS={
@@ -1276,11 +1354,13 @@ function questChip(text,iconKey){
 // Builds the reward-chip row for a quest card. Purely DISPLAY -- the actual grant only ever
 // happens server-side inside the claim endpoint (see claimQuestReward() below); this just has
 // to describe the same numbers QUEST_DEFS.REWARDS already carries for this town.
-function questRewardChips(qid,idx){
+function questRewardChips(qid,idx,entry){
   const R=Balance.QUEST_DEFS.REWARDS;
   const chips=[];
   if(qid==="explore"){
-    chips.push(questChip(`+${R.explore.hp[idx]} HP`,"hp"));
+    // v0.24.1 (B3): copy must say "Max HP" (a lasting bonus added to quest_bonus_hp), not
+    // "HP" alone (which reads like a one-time heal).
+    chips.push(questChip(`+${R.explore.hp[idx]} Max HP`,"hp"));
     chips.push(questChip(`${R.explore.gold[idx]} g`,"gold"));
   } else if(qid==="wardens"){
     chips.push(questChip(`+${R.wardens.stat_points[idx]} stat pt${R.wardens.stat_points[idx]===1?"":"s"}`,"statpt"));
@@ -1289,7 +1369,8 @@ function questRewardChips(qid,idx){
     for(const itemId of R.gatherer.elixirs[idx]) chips.push(questChip(DL.getItem(itemId).name||itemId));
     chips.push(questChip("Bonus XP shrine"));
   } else if(qid==="wanderers"){
-    chips.push(questChip(`+${R.wanderers.hp[idx]} HP`,"hp"));
+    // v0.24.1 (B3): same "Max HP" copy fix applied here too (also grants quest_bonus_hp).
+    chips.push(questChip(`+${R.wanderers.hp[idx]} Max HP`,"hp"));
     chips.push(questChip(`${R.wanderers.gold[idx]} g`,"gold"));
     chips.push(questChip(`${R.wanderers.xp[idx]} XP`,"xp"));
   } else if(qid==="streak"){
@@ -1299,13 +1380,20 @@ function questRewardChips(qid,idx){
     for(const itemId of R.cauldron.elixirs[idx]) chips.push(questChip(DL.getItem(itemId).name||itemId));
     chips.push(questChip(`+${R.cauldron.stat_points[idx]} stat pt${R.cauldron.stat_points[idx]===1?"":"s"}`,"statpt"));
   } else if(qid==="elder"){
-    chips.push(questChip(`+${R.elder.stat_points[idx]} stat pt${R.elder.stat_points[idx]===1?"":"s"}`,"statpt"));
-    chips.push(questChip(`${R.elder.xp[idx]} XP`,"xp"));
-    chips.push(questChip("Gear"));
+    // v0.24.1 (B4): fixed per-step reward off ASCENDANT_HUNT_STEPS -- no town scaling, no gear.
+    const step=Balance.QUEST_DEFS.ASCENDANT_HUNT_STEPS[((entry&&entry.step)||1)-1];
+    chips.push(questChip(`+${step.stat_points} stat pt${step.stat_points===1?"":"s"}`,"statpt"));
+    chips.push(questChip(`${step.xp} XP`,"xp"));
   } else if(qid==="palisade"){
     chips.push(questChip(`${R.palisade.gold[idx]} g`,"gold"));
     const keyTier=clampi((idx+1)+1,1,Balance.ITEM_TIER_MAX);
     chips.push(questChip(DL.getItem(Balance.strongholdKeyItemIdForTier(keyTier)).name||"Stronghold Key"));
+  } else if(qid==="pacifist"){
+    // v0.24.1 (B5): single fixed reward, no town scaling -- see Balance.QUEST_DEFS.PACIFIST_REWARD.
+    const pr=Balance.QUEST_DEFS.PACIFIST_REWARD;
+    chips.push(questChip(`+${pr.stat_points} stat pts`,"statpt"));
+    chips.push(questChip(`${pr.xp} XP`,"xp"));
+    for(const [itemId,qty] of Object.entries(pr.potions)) chips.push(questChip(`${qty}x ${DL.getItem(itemId).name||itemId}`));
   }
   return chips;
 }
@@ -1340,6 +1428,18 @@ async function claimQuestReward(questId){
     if(Array.isArray(reward.elixirs)) for(const itemId of reward.elixirs) PS.addConsumable(itemId,1);
     if(reward.key_item_id) PS.addConsumable(reward.key_item_id,1);
     if(reward.gear) PS.addGearAutoEquip(reward.gear);
+    // v0.24.1 (B5): "The Pacifist"'s reward is qty-aware ({item_id: qty}), unlike the plain
+    // 1-each `elixirs` array every other quest uses -- grant each stack, then a single toast
+    // (per-item toasts would be spammy for a 2-item reward).
+    if(reward.potions && typeof reward.potions==="object"){
+      for(const [itemId,qty] of Object.entries(reward.potions)) PS.addConsumable(itemId,qty);
+      const names=Object.entries(reward.potions).map(([itemId,qty])=>`${qty}x ${DL.getItem(itemId).name||itemId}`).join(", ");
+      setToast(`The Pacifist complete! Received ${names}.`);
+    }
+    // v0.24.1 (B4): "The Ascendant Hunt" step-complete/questline-complete toast.
+    if(questId==="elder" && typeof reward.step==="number"){
+      setToast(reward.done ? "The Ascendant Hunt complete! Every band has fallen to you." : `Step ${reward.step}/${reward.step_count} of The Ascendant Hunt complete -- the next band awaits.`);
+    }
     autosave();
   }catch(e){
     setToast("Could not claim that quest: "+e.message);
@@ -1376,9 +1476,9 @@ function reportQuestExploreIfEligible(maze){
   questEnsureLocalState();
   const entry=PS.quests.entries.explore;
   if(!entry || entry.status!=="active") return;
-  const idx=questTownIdx(PS.quests.town);
-  const required=Balance.QUEST_DEFS.TARGETS.explore_area_level[idx];
-  if((maze.depth||1)<required) return;
+  // v0.24.1 (B3): dropped the area-level-3+ gate -- per spec, fully exploring a maze at ANY
+  // area level satisfies this quest now (mirrors the server's report-explore endpoint, which no
+  // longer enforces a explore_area_level lower bound either).
   if(!mazeIsFullyExplored(maze)) return;
   maze._questExploreReported=true; // guarded BEFORE the async call resolves, so a re-render
   // mid-flight (the request is fire-and-forget) can never queue a second report for this delve.
@@ -1447,7 +1547,7 @@ function questCard(qid,idx){
         h("div",{class:"quest-name"},[name]),
         status==="locked"
           ? h("div",{class:"quest-lock-line"},[`Unlocks at Level ${Balance.QUEST_DEFS.LEVEL_REQ[qid]}`])
-          : h("div",{class:"quest-obj"},[questObjectiveText(qid,idx)]),
+          : h("div",{class:"quest-obj"},[questObjectiveText(qid,idx,entry)]),
       ]),
     ]),
   ];
@@ -1455,7 +1555,7 @@ function questCard(qid,idx){
     const pct=entry.target>0?(entry.progress/entry.target*100):0;
     body.push(bar(pct,"bar-gold",false));
     body.push(h("div",{class:"quest-pnum"},[`${Math.min(entry.progress,entry.target)}/${entry.target}`]));
-    body.push(h("div",{class:"quest-reward"},questRewardChips(qid,idx)));
+    body.push(h("div",{class:"quest-reward"},questRewardChips(qid,idx,entry)));
     if(status==="ready"){
       const claiming=GF.questClaiming===qid;
       body.push(h("button",{class:"quest-claim",disabled:claiming,onClick:()=>claimQuestReward(qid)},[claiming?"Claiming...":"Claim Reward"]));
@@ -1487,7 +1587,11 @@ function screenQuests(){
 }
 
 
-const RARITY_ICON_COLORS={Common:"#9a9686",Uncommon:"#e8e4d8",Rare:"#5a9ae0",Epic:"#e0c94a",Legendary:"#d9902f"};
+// v0.24.1 (E11): "Set" was missing from this map entirely (fell back to the Common grey via the
+// `||"#9a9686"` in gearIconSvg() below), so a Set item's icon SHAPE silhouette never actually
+// read as green like its name text already does (.rarity-Set, defined alongside the other
+// rarity text colors) -- same root cause as RARITY_BORDER_COLORS below being missing it too.
+const RARITY_ICON_COLORS={Common:"#9a9686",Uncommon:"#e8e4d8",Rare:"#5a9ae0",Epic:"#e0c94a",Legendary:"#d9902f",Set:"#3fbf5f"};
 function gearIconSvg(inst){
   const color=RARITY_ICON_COLORS[inst.rarity]||"#9a9686";
   const shapes={
@@ -1519,6 +1623,12 @@ const TIER_ROMAN_NUMERALS=["","I","II","III","IV","V"];
 function tierRomanNumeral(tier){ return TIER_ROMAN_NUMERALS[tier]||String(tier); }
 function gearIcon(inst,size=30){
   const badge=iconBadge(gearIconSvg(inst),size);
+  // v0.24.1 (E11): Set items get a green icon-background tint (the ".icon-badge{background:#000}"
+  // base rule is shared by every icon type -- spells, consumables, gear alike -- so this is
+  // overridden per-instance here rather than in the shared CSS class, keeping non-gear icons
+  // untouched). Matches the same green already used for the name text (.rarity-Set) and now the
+  // tile border (RARITY_BORDER_COLORS.Set) and icon silhouette (RARITY_ICON_COLORS.Set) above.
+  if(inst.rarity==="Set") badge.style.background="rgba(63,191,95,0.32)";
   return h("div",{class:"gear-icon-wrap",style:{position:"relative",width:size+"px",height:size+"px",flex:"none"}},[
     badge,
     h("div",{class:"gear-tier-badge"},[tierRomanNumeral(inst.tier)]),
@@ -1593,10 +1703,10 @@ const Balance = {
   
   
   LATE_GAME_MONSTER_GROWTH_START_LEVEL:10, LATE_GAME_MONSTER_GROWTH_PER_LEVEL:0.10,
-  // v0.22.7 (#18): player crit floor 1.75->1.5, mirroring server.js's CB.CRIT_MULTIPLIER.
-  // Monsters no longer use this constant as their own floor at all -- see
-  // monsterCritFloor()/monsterCritCeiling() below.
-  CRIT_MULTIPLIER:1.5,
+  // v0.24.1 (C5): crit multiplier ladder shifted down 0.25 across the board, mirroring
+  // server.js's CB.CRIT_MULTIPLIER. Monsters no longer use this constant as their own floor at
+  // all -- see monsterCritFloor()/monsterCritCeiling() below.
+  CRIT_MULTIPLIER:1.25,
   
   
   
@@ -1712,6 +1822,14 @@ const Balance = {
   
   COMMUNITY_XP_PCT_PER_EXTRA_PLAYER:10,
   STAMINA_MAX_BASE:175.0, STAMINA_COST_PER_STEP:1.0,
+  // v0.24.1 (F2): each currently-equipped item adds +0.5 stamina cost to every maze step, on top
+  // of the base 1.0 (empty-handed) cost above -- 3 items -> 1+3*0.5=2.5/step, a full 12-slot
+  // loadout -> 1+12*0.5=7/step. Ships uncapped per the locked decision (steep on a full loadout
+  // relative to the 175 stamina pool, by design -- gear is a real tradeoff, not just stat sticks).
+  STAMINA_COST_PER_EQUIPPED_ITEM:0.5,
+  staminaCostPerStep(equippedCount){
+    return this.STAMINA_COST_PER_STEP + (equippedCount||0)*this.STAMINA_COST_PER_EQUIPPED_ITEM;
+  },
   SHRINE_STAMINA_BUFF_PCT:1.0, SHRINE_XP_BUFF_MULT:1.5, SHRINE_XP_BUFF_ENCOUNTERS:20,
   
   
@@ -1848,10 +1966,28 @@ const Balance = {
   },
   STRONGHOLD_CHEST_GOLD_MIN:500, STRONGHOLD_CHEST_GOLD_MAX:1500,
   STRONGHOLD_CHEST_HERBS_MIN:3, STRONGHOLD_CHEST_HERBS_MAX:7,
-  STRONGHOLD_CHEST_GEAR_COUNT_MIN:2, STRONGHOLD_CHEST_GEAR_COUNT_MAX:4,
+  // v0.24.1 (F1): gear count max nudged 4->5 (increased chest item value) alongside the new
+  // weighted rarity roll just below (was previously an unweighted Rare/Epic-only pick()).
+  STRONGHOLD_CHEST_GEAR_COUNT_MIN:2, STRONGHOLD_CHEST_GEAR_COUNT_MAX:5,
+  // v0.24.1 (F1): stronghold gear now rolls its rarity from this dedicated weighted table
+  // (via Balance.rollStrongholdChestGearRarity() below) instead of an even pick(["Rare","Epic"])
+  // -- keeps Rare/Epic as the bulk of the loot (still never a Common/Uncommon dud from a
+  // stronghold) while finally making Legendary possible at all, just slightly, "up on gear
+  // quality" per the locked spec. Set is deliberately excluded here (its item framework is
+  // still class-gated to specific chains, not a safe universal drop yet).
+  STRONGHOLD_CHEST_GEAR_RARITY_WEIGHTS:[{name:"Rare",weight:70},{name:"Epic",weight:27},{name:"Legendary",weight:3}],
+  rollStrongholdChestGearRarity(){
+    const table=this.STRONGHOLD_CHEST_GEAR_RARITY_WEIGHTS;
+    let total=0; for(const r of table) total+=r.weight;
+    let roll=Math.floor(Math.random()*total), cum=0;
+    for(const r of table){ cum+=r.weight; if(roll<cum) return r.name; }
+    return table[0].name;
+  },
   // v0.22.3 (#8): Scroll of Challenge deprecated -- zeroed out so stronghold chests never roll one.
   STRONGHOLD_CHEST_SCROLL_CHANCE:0, STRONGHOLD_CHEST_EYESIGHT_CHANCE:0.10, STRONGHOLD_CHEST_BAG_CHANCE:0.30,
-  STRONGHOLD_CHEST_POTIONS_MIN:3, STRONGHOLD_CHEST_POTIONS_MAX:9,
+  // v0.24.1 (F1): "far fewer potions" -- was 3-9 (a LOT of potions dominating the loot list for
+  // a supposed treasure chest), now 0-2. Elixirs (below) are explicitly untouched per spec.
+  STRONGHOLD_CHEST_POTIONS_MIN:0, STRONGHOLD_CHEST_POTIONS_MAX:2,
   STRONGHOLD_CHEST_ELIXIRS_MIN:1, STRONGHOLD_CHEST_ELIXIRS_MAX:3,
   
   
@@ -1882,7 +2018,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.24-web",
+  GAME_VERSION:"v0.24.1-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
   
@@ -1955,8 +2091,10 @@ const Balance = {
   
   
   
+  // v0.24.1 (C6): "crit" Tier-1 max nerfed 5 -> 3 (curve becomes 3/6/9/12/15%), mirroring
+  // server.js's ITEM_AFFIX_TIER1_MAX.
   AFFIX_TIER1_MAX:{
-    damage:5, hp:15, crit:5, armor:2, regen:1, stamina_regen:1, gold_find:10, xp_find:5,
+    damage:5, hp:15, crit:3, armor:2, regen:1, stamina_regen:1, gold_find:10, xp_find:5,
     stamina_max:15, strength:5, dexterity:5, vitality:5, intelligence:5, poison_resist:5,
     magic_find:10, block_chance:2,
     
@@ -2175,18 +2313,19 @@ const Balance = {
     return Object.assign({}, base, t);
   },
   // Quest System (new): display-only copy of server.js's QUEST_DEFS -- must stay
-  // byte-identical (IDS/NAMES/LEVEL_REQ/TOWN_REWARD_MULT/TARGETS/ELDER_BAND/
-  // CAULDRON_ATTR_POTION_REQUIRED/ATTR_POTION_IDS/REWARDS/SHRINE_XP_BUFF_MULT/
+  // byte-identical (IDS/NAMES/LEVEL_REQ/TOWN_REWARD_MULT/TARGETS/ASCENDANT_HUNT_STEPS/
+  // CAULDRON_ATTR_POTION_REQUIRED/CAULDRON_DISTINCT_TARGET/ATTR_POTION_IDS/REWARDS/
+  // PACIFIST_REWARD/SHRINE_XP_BUFF_MULT/
   // SHRINE_XP_BUFF_ENCOUNTERS/BREWABLE_ITEM_IDS) since the server is what actually re-derives
   // readiness and grants every reward; this feeds the (separately-built) Quest board UI.
   QUEST_DEFS:{
-    IDS:["explore","wardens","gatherer","wanderers","streak","cauldron","elder","palisade"],
+    IDS:["explore","wardens","gatherer","wanderers","streak","cauldron","elder","palisade","pacifist"],
     NAMES:{
       explore:"Every Root and Hollow", wardens:"The Four Wardens", gatherer:"The Gatherer's Dozen",
       wanderers:"Thin the Wanderers", streak:"The Unbroken Chain", cauldron:"The Simmering Cauldron",
-      elder:"Elder of the Thicket", palisade:"Behind the Palisade",
+      elder:"The Ascendant Hunt", palisade:"Behind the Palisade", pacifist:"The Pacifist",
     },
-    LEVEL_REQ:{explore:1, wardens:1, gatherer:1, wanderers:6, streak:3, cauldron:2, elder:8, palisade:1},
+    LEVEL_REQ:{explore:1, wardens:1, gatherer:1, wanderers:6, streak:3, cauldron:2, elder:8, palisade:1, pacifist:1},
     TOWN_REWARD_MULT:[1.0, 1.25, 1.5, 1.75, 2.0],
     TARGETS:{
       explore_area_level:[3,6,9,12,15],
@@ -2194,11 +2333,20 @@ const Balance = {
       gatherer_herbs:[12,16,20,24,28],
       wanderers_roamers:[10,14,18,22,26],
       streak_kills:[8,10,12,14,16],
-      cauldron_brews:[5,7,9,11,13],
-      elder_kills:[1,1,1,2,2],
+      // v0.24.1 (B6): cauldron_brews removed -- see CAULDRON_DISTINCT_TARGET below.
       palisade_chests:[1,1,2,2,3],
     },
-    ELDER_BAND:["Epic","Legendary","Legendary","Legendary","Legendary"],
+    // v0.24.1 (B6): fixed "7 distinct recipes" target, same at every town.
+    CAULDRON_DISTINCT_TARGET:7,
+    // v0.24.1 (B4): "elder" is now a 5-step questline -- see the claim endpoint's "elder"
+    // branch server-side. NOT town-scaled (see server.js's own comment on this constant).
+    ASCENDANT_HUNT_STEPS:[
+      {band:"Common", count:20, stat_points:5, xp:200},
+      {band:"Uncommon", count:10, stat_points:5, xp:500},
+      {band:"Rare", count:5, stat_points:5, xp:1000},
+      {band:"Epic", count:3, stat_points:5, xp:3000},
+      {band:"Legendary", count:1, stat_points:5, xp:15000},
+    ],
     CAULDRON_ATTR_POTION_REQUIRED:[false,true,true,true,true],
     ATTR_POTION_IDS:["potion_of_might","potion_of_swiftness","potion_of_intellect"],
     REWARDS:{
@@ -2208,9 +2356,10 @@ const Balance = {
       wanderers:{hp:[80,100,120,140,160], gold:[1800,2250,2700,3150,3600], xp:[400,500,600,700,800]},
       streak:{gold:[600,750,900,1050,1200], xp:[250,313,375,438,500]},
       cauldron:{elixirs:[["elixir_of_eyesight"],["elixir_of_eyesight"],["elixir_of_eyesight"],["elixir_of_eyesight"],["elixir_of_eyesight"]], stat_points:[1,1,2,2,2]},
-      elder:{stat_points:[1,1,2,2,2], xp:[300,375,450,525,600]},
       palisade:{gold:[900,1125,1350,1575,1800]},
     },
+    // v0.24.1 (B5): fixed one-time reward, not town-scaled -- see server.js's own comment.
+    PACIFIST_REWARD:{xp:5000, stat_points:20, potions:{potion_of_renewal:3, potion_of_wardveil:3}},
     SHRINE_XP_BUFF_MULT:1.5,
     SHRINE_XP_BUFF_ENCOUNTERS:20,
     BREWABLE_ITEM_IDS:[
@@ -2402,13 +2551,14 @@ const Balance = {
   // bracket (every 10 levels), ceiling rises every bracket (every 5 levels). Mirrors
   // server.js's combatGetMonsterCritFloor()/combatGetMonsterCritCeiling() exactly. Verification:
   // L1 1.5-2.0, L5 1.5-2.25, L10 1.75-2.5, L15 1.75-2.75, L20 2.0-3.0, L25 2.0-3.25, L30 2.25-3.5.
+  // v0.24.1 (C5): base shifted down 0.25 (was 1.5/2.0), mirroring server.js.
   monsterCritFloor(areaLevel){
     const bracket=Math.floor(Math.max(1,areaLevel)/5);
-    return 1.5+0.25*Math.floor(bracket/2);
+    return 1.25+0.25*Math.floor(bracket/2);
   },
   monsterCritCeiling(areaLevel){
     const bracket=Math.floor(Math.max(1,areaLevel)/5);
-    return 2.0+0.25*bracket;
+    return 1.75+0.25*bracket;
   },
   
   
@@ -3128,7 +3278,11 @@ const IF = {
       case "life_on_hit": return "Life on Hit"; case "thorns": return "Thorns";
       case "max_health_pct": return "Max Health %"; case "trap_ward": return "Trap Ward";
       case "spell_cdr": return "Spell Cooldown Reduction"; case "mana": return "Mana";
-      case "mana_regen": return "Mana Regeneration"; case "attack_rating": return "Attack Rating";
+      // v0.24.1 (C10): display label renamed "Attack Rating" -> "Accuracy" everywhere
+      // (tooltips/item guide/stat readouts all route through this single function) -- the
+      // internal id "attack_rating" is never renamed, same convention as every other past
+      // affix-label-only rename (never orphan live gear/saves).
+      case "mana_regen": return "Mana Regeneration"; case "attack_rating": return "Accuracy";
       case "spell_power": return "Spell Power";
       default: return stat;
     }
@@ -3517,6 +3671,19 @@ const Net = {
     if(!res.ok) throw new Error(json.error||"Could not reset that character.");
     return json;
   },
+  // v0.24.1 (A4): compensation tool -- grants gold (account-bound) and/or materials (per-
+  // character) to a chosen character, landing even while that player is online (see the
+  // server's save-seq fence + forced-reload on this route).
+  async adminGrant(accountId,slot,gold,materials,adminToken){
+    const res=await fetch(this.apiBase()+`/api/admin/grant/${accountId}/${slot}`,{
+      method:"POST",
+      headers:this.authHeaders({"X-Admin-Token":adminToken,"Content-Type":"application/json"}),
+      body:JSON.stringify({gold,materials}),
+    });
+    const json=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(json.error||"Could not grant to that character.");
+    return json;
+  },
   // v0.22.3 (#17): pushes a one-off admin system message to every connected player's global
   // chat -- calls the server's broadcastSystemMessage() via a dedicated admin-only route.
   async adminBroadcast(message,adminToken){
@@ -3865,6 +4032,23 @@ const Net = {
           
           
           else if(msg.type==="combat_tick"){ applyCombatTickPush(msg.session_id,msg); return; }
+          else if(msg.type==="force_reload"){
+            // v0.24.1 (A3): server-side signal that an admin mutated this character (ladder
+            // reset, legacy-gear rescale/delete, grant) while this client may have been sitting
+            // on stale in-memory state. Re-fetch fresh character rows from the server (the
+            // admin's write already fenced _save_seq far ahead of anything this client could
+            // have queued, so this pull always wins), then -- only if the affected slot is the
+            // one actually loaded right now -- replace PS wholesale via the same loadGame() path
+            // character-switching already uses, so nothing here duplicates that logic.
+            Net.refreshCharacters().then(()=>{
+              if(PS.current_slot===msg.slot){
+                PS.loadGame(msg.slot);
+                setToast("An admin updated your character. Your data has been refreshed.");
+              }
+              render();
+            }).catch(()=>{});
+            return;
+          }
           if(GF.screen==="chat" || GF.chatOpen) render();
         }catch(e){}
       };
@@ -4744,9 +4928,15 @@ const PS = {
     const raw=(this.forest_reputation && this.forest_reputation[tier]) || 0;
     return Math.max(Balance.FOREST_REPUTATION_MIN,Math.min(Balance.FOREST_REPUTATION_MAX,raw));
   },
-  getCurrentForestReputation(){ return this.getForestReputation(this.highest_tier_reached||1); },
+  // v0.24.1 (A2): keyed off the live class-tier (TRIAL_CLASSES[class_id].tier), not the
+  // monotonic highest_tier_reached, so this always reflects the character's CURRENT tier.
+  // Previously a ladder-reset (which correctly resets class_id/tier but is a rarer, more
+  // surgical operation) could leave this reading a stale historical peak; deriving it from
+  // the live class tier matches the existing questCurrentTown() pattern and self-corrects
+  // immediately after any tier change, reset or otherwise.
+  getCurrentForestReputation(){ return this.getForestReputation(this.getClassData().tier||1); },
   adjustForestReputation(delta){
-    const tier=this.highest_tier_reached||1;
+    const tier=this.getClassData().tier||1;
     if(!this.forest_reputation) this.forest_reputation={};
     const next=(this.forest_reputation[tier]||0)+delta;
     this.forest_reputation[tier]=Math.max(Balance.FOREST_REPUTATION_MIN,Math.min(Balance.FOREST_REPUTATION_MAX,next));
@@ -5308,6 +5498,14 @@ const PS = {
       current_hp:this.current_hp,current_stamina:this.current_stamina,current_mana:this.current_mana,consumables:this.consumables,
       gear_instances:this.gear_instances,equipped:this.equipped,equipped_bags:this.equipped_bags,
       highest_tier_reached:this.highest_tier_reached,season_won:this.season_won,lifetime_xp:this.lifetime_xp,
+      // v0.24.1 (A1): these were never round-tripped through save/load, so the client's
+      // in-memory value from one character stayed live after switching to another (a fresh
+      // Tier-5/Lv100 character would show a choice it never made), and -- worse -- because a
+      // full character save is a straight REPLACE (not a merge) server-side, leaving this out
+      // of the payload meant the NEXT ordinary autosave after making a choice would silently
+      // erase emerald_choice from the stored blob entirely, re-offering the choice on reload.
+      emerald_choice:this.emerald_choice||null, has_crown_of_victory:!!this.has_crown_of_victory,
+      has_protector_title:!!this.has_protector_title,
       eyesight_potion_steps_left:this.eyesight_potion_steps_left,
       clarity_charges_left:this.clarity_charges_left,
       max_maze_depth_reached:this.max_maze_depth_reached,
@@ -5406,6 +5604,13 @@ const PS = {
     for(const s of IF.EQUIPPED_SLOT_KEYS) this.equipped[s]=loadedEquipped[s]||null;
     this.equipped_bags=(parsed.equipped_bags||[]).slice(0,Balance.MAX_BAG_SLOTS);
     this.highest_tier_reached=parsed.highest_tier_reached||1; this.season_won=!!parsed.season_won;
+    // v0.24.1 (A1): must be explicitly reset per character load, or a previous character's
+    // in-memory choice leaks into whichever character is loaded next (a fresh Tier-5/Lv100
+    // character would appear to have already chosen). See buildSaveData() above for why this
+    // also had to be added to the outgoing save payload.
+    this.emerald_choice=parsed.emerald_choice||null;
+    this.has_crown_of_victory=!!parsed.has_crown_of_victory;
+    this.has_protector_title=!!parsed.has_protector_title;
     this.pending_scroll_bonus=0; this.xp_buff_multiplier=1.0; this.xp_buff_encounters_left=0; this.stamina_shrine_buff=0.0;
     this.lifetime_xp=parsed.lifetime_xp||0; this.isRestingAtCampfire=false;
     this.eyesight_potion_steps_left=parsed.eyesight_potion_steps_left||0;
@@ -5618,8 +5823,11 @@ const GF = {
   // just a cast timestamp, mirrors floatingTexts' own "push a record, filter stale ones on
   // render" shape.
   fireflyBursts:[],
-  
-  
+  // v0.24.1 (C9): active Entangle root-overlay records for entangleRootsLayer() -- same
+  // "push a timestamped record, filter stale ones on render" shape as fireflyBursts above.
+  entangleRoots:[],
+
+
   
   
   
@@ -5858,6 +6066,27 @@ function fireflyBurstLayer(){
     }
   });
   return h("div",{class:"firefly-burst-layer"},nodes);
+}
+
+// v0.24.1 (C9): Entangle root visual cue -- a green vines/roots overlay drawn across the
+// monster portrait for the exact duration the root actually holds (rooted_until - cast time,
+// so it matches the true tier-scaled duration_ms, 4-8s), fading in/out via a single CSS
+// animation rather than a JS loop. Mirrors spawnFireflyBurst()/fireflyBurstLayer()'s exact
+// "push a timestamped record, filter stale ones out on next render" shape. Purely cosmetic,
+// alongside (not replacing) the existing "Rooted!" float/log line in castSpellInCombat().
+const ENTANGLE_ROOTS_SVG=`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><path d="M6,30 Q40,10 70,32 Q100,54 134,28" stroke="#5f9a52" stroke-width="5" fill="none" stroke-linecap="round"/><path d="M4,80 Q36,102 70,80 Q104,58 136,84" stroke="#4a8a44" stroke-width="5" fill="none" stroke-linecap="round"/><path d="M20,4 Q40,50 20,100 Q6,124 24,136" stroke="#5f9a52" stroke-width="4" fill="none" stroke-linecap="round"/><path d="M118,4 Q100,50 120,100 Q134,124 116,136" stroke="#4a8a44" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="70" cy="32" r="3.5" fill="#8fce6a"/><circle cx="20" cy="100" r="3" fill="#8fce6a"/><circle cx="120" cy="100" r="3" fill="#8fce6a"/><circle cx="6" cy="30" r="3" fill="#8fce6a"/><circle cx="134" cy="28" r="3" fill="#8fce6a"/></svg>`;
+function spawnEntangleRoots(durationMs){
+  GF.entangleRoots.push({id:++_floatSeq,t:Date.now(),durationMs:Math.max(500,durationMs||4000)});
+}
+function entangleRootsLayer(){
+  const now=Date.now();
+  GF.entangleRoots=GF.entangleRoots.filter(r=>now-r.t<r.durationMs+400);
+  const nodes=GF.entangleRoots.map(r=>{
+    const el=h("div",{class:"entangle-roots-overlay",style:{animationDuration:(r.durationMs+400)+"ms"}});
+    el.innerHTML=ENTANGLE_ROOTS_SVG;
+    return el;
+  });
+  return h("div",{class:"entangle-roots-layer"},nodes);
 }
 
 
@@ -6651,7 +6880,10 @@ function secondaryStatsPanel(){
   return h("div",{class:"col gap",style:{flex:"1",minWidth:"0",alignItems:"flex-end",textAlign:"right"}},[
     damageLine(),
     PS.kill_streak>0?h("div",{class:"muted"},[`Kill streak: ${PS.kill_streak} (+${PS.kill_streak*Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL}% Magic Find)`]):null,
-    h("div",{class:"tooltip muted","data-tip":forestReputationTooltipText(PS.getCurrentForestReputation())},[`Forest Reputation (Tier ${tierRomanNumeral(PS.highest_tier_reached||1)}): ${PS.getCurrentForestReputation()}`]),
+    // v0.24.1 (A2): Tier label now derived from the live class tier (matches
+    // getCurrentForestReputation()'s new key), not the monotonic highest_tier_reached --
+    // so this always-visible readout can't go stale after a tier change/reset.
+    h("div",{class:"tooltip muted","data-tip":forestReputationTooltipText(PS.getCurrentForestReputation())},[`Forest Reputation (Tier ${tierRomanNumeral(PS.getClassData().tier||1)}): ${PS.getCurrentForestReputation()}`]),
   ]);
 }
 // v0.22.6 (#19): compact all-bonuses readout folded into the player tile (mock:
@@ -6682,9 +6914,16 @@ function playerStatsCompactPanel(){
   ]);
   if(!expanded) return root;
 
-  const cell=(label,total,suffix,gearAmount,gearIsPercent)=>h("div",{class:"player-stats-cell"},[
+  // v0.24.1 (E10): cell() now takes the BASE value directly (caller computes what "base" means
+  // for that stat) instead of a POST-gear total it had to reverse-engineer a base out of --
+  // that reverse math was the actual bug (Player Stats was showing the post-gear TOTAL right
+  // next to its own gear delta, e.g. "20 (+5)" for a 15-base+5-gear stat, double-counting the
+  // +5, while the Attributes panel already correctly showed the pre-gear base). Every call site
+  // below now passes a real pre-gear base, matching the Attributes panel's own long-standing
+  // "BASE (+addition)" format one-for-one.
+  const cell=(label,base,suffix,addition,additionIsPercent)=>h("div",{class:"player-stats-cell"},[
     h("div",{class:"muted"},[label]),
-    h("div",{},[playerStatsStatText(total,suffix), playerStatsGearDelta(gearAmount,gearIsPercent)]),
+    h("div",{},[playerStatsStatText(base,suffix), playerStatsGearDelta(addition,additionIsPercent)]),
   ]);
   // v0.22.7 (#3): grouped into columns by category (Attributes/Offense/Defense/Sustain/Find)
   // instead of one flowing 4-wide grid where a category's own cells could spill into the next
@@ -6695,24 +6934,34 @@ function playerStatsCompactPanel(){
     ...cells,
   ]);
 
-  const dmg=PS.getDamageRange();
+  // v0.24.1 (E10): true pre-gear damage base, reusing the exact same breakdown damageLine()
+  // already computes elsewhere (baseMin/baseMax are BEFORE gear, weapon-skill%, and Intelligence
+  // are applied) instead of averaging PS.getDamageRange()'s post-everything total.
+  const dmgBreak=PS.getDamageBreakdown();
   const grid=h("div",{class:"player-stats-grid"},[
     col("Attributes",[
-      cell("Strength",PS.getTotalAttr("str"),"",PS.gearBonus("strength"),false),
-      cell("Dexterity",PS.getTotalAttr("dex"),"",PS.gearBonus("dexterity"),false),
-      cell("Vitality",PS.getTotalAttr("vit"),"",PS.gearBonus("vitality"),false),
-      cell("Intelligence",PS.getTotalAttr("int"),"",PS.gearBonus("intelligence"),false),
+      cell("Strength",PS.attributes.str||0,"",PS.gearBonus("strength"),false),
+      cell("Dexterity",PS.attributes.dex||0,"",PS.gearBonus("dexterity"),false),
+      cell("Vitality",PS.attributes.vit||0,"",PS.gearBonus("vitality"),false),
+      cell("Intelligence",PS.attributes.int||0,"",PS.gearBonus("intelligence"),false),
     ],true),
     col("Offense",[
-      cell("Damage",Math.round((dmg[0]+dmg[1])/2),"",Math.round(PS.gearBonus("damage")),false),
-      cell("Crit Chance",Math.round(PS.getCritChance()*100),"%",Math.round(PS.gearBonus("crit")),true),
+      cell("Damage",Math.round((dmgBreak.baseMin+dmgBreak.baseMax)/2),"",Math.round(dmgBreak.gearBonus),false),
+      cell("Crit Chance",Math.round(PS.getCritChance()*100)-Math.round(PS.gearBonus("crit")),"%",Math.round(PS.gearBonus("crit")),true),
       cell("Crit Multiplier",PS.getCritMultiplierMax(),"x",0,false),
-      cell("Attack Speed",PS.getAttackSpeed(),"/sec",Math.round(PS.gearBonus("attack_speed")),true),
+      // v0.24.1 (E10): Attack Speed's gear bonus is a % MULTIPLIER on the base rate (see
+      // getAttackSpeed()), not a same-unit additive amount, so "total minus the delta" would
+      // give a nonsense base here -- the true pre-gear base is the class-independent constant
+      // itself. The shown "+N%" addition still reads the raw affix roll, same as every gear
+      // tooltip elsewhere in the game (it won't arithmetically sum to the total for this one
+      // multiplicative stat, same tradeoff the pre-existing Damage line's skill%/Int breakdown
+      // already accepts).
+      cell("Attack Speed",Balance.PLAYER_BASE_ATTACK_SPEED,"/sec",Math.round(PS.gearBonus("attack_speed")),true),
     ]),
     col("Defense",[
-      cell("Armor",Math.round(PS.getArmor()),"",Math.round(PS.gearBonus("armor")),false),
-      cell("Block Chance",Math.round(PS.getBlockChance()*100),"%",Math.round(PS.gearBonus("block_chance")),true),
-      cell("Poison Resist",Math.round(PS.getPoisonResistance()),"%",Math.round(PS.gearBonus("poison_resist")),true),
+      cell("Armor",Math.round(PS.getArmor())-Math.round(PS.gearBonus("armor")),"",Math.round(PS.gearBonus("armor")),false),
+      cell("Block Chance",Math.round(PS.getBlockChance()*100)-Math.round(PS.gearBonus("block_chance")),"%",Math.round(PS.gearBonus("block_chance")),true),
+      cell("Poison Resist",Math.round(PS.getPoisonResistance())-Math.round(PS.gearBonus("poison_resist")),"%",Math.round(PS.gearBonus("poison_resist")),true),
       // v0.22.7 (#1): thorns is now a flat value (no longer a %), matching the Character
       // Sheet's own gear-bonus display and the affix's new flat tier maxes.
       cell("Thorns",Math.round(PS.gearBonus("thorns")),"",0,false),
@@ -8079,28 +8328,28 @@ function screenTown(){
             h("div",{class:"venture-title"},["🌳 Venture into the Woods"]),
             h("div",{class:"muted",style:{fontSize:".85em",marginTop:"2px"}},[`Area Level: ${ventureDepth} (Tier ${tierRomanNumeral(Balance.mobTierForAreaLevel(ventureDepth))})`]),
             GF.ventureLockDepth!=null && ventureDepth>=chevronMaxDepth ? h("div",{class:"muted",style:{fontSize:".78em",marginTop:"2px",color:"#c96a4a"}},[`A trapdoor dropped you here, reach a real exit again to unlock higher area levels.`]) : null,
-            // v0.23.2: opt-in "Night delve" toggle -- the recommended v1 entry method for the
-            // night gameplay state (see generateMaze()/ensureMaze()'s isNight plumbing and
-            // mazeEyesightRadius()). Only takes effect on the NEXT maze this character enters,
-            // so it's read once, right here, by clicking into the maze below.
-            h("label",{class:"row",style:{fontSize:".78em",marginTop:"8px",gap:"7px",alignItems:"flex-start",cursor:"pointer"},onClick:(e)=>e.stopPropagation()},[
-              h("input",{type:"checkbox",checked:!!GF.isNight,style:{marginTop:"2px"},onChange:(e)=>{ GF.isNight=e.target.checked; render(); }}),
-              h("span",{},[
-                h("span",{style:{color:"#cbb0e6",fontWeight:"bold"}},["🌙 Night delve"]),
-                h("span",{class:"muted",style:{display:"block",fontSize:".92em",lineHeight:"1.4"}},["Tighter sight and more encounters, but better loot. A real risk, not just a harder walk."]),
-              ]),
-            ]),
           ]),
+          // v0.24.1 (E1+E2): the "Night delve" toggle used to live inside the clickable venture
+          // card itself (needing its own onClick:stopPropagation guard to avoid triggering the
+          // card's own "start venturing" click), and visually grew the card taller than the
+          // chevron panel beside it. Moved out into the (non-clickable) Area Lv picker panel
+          // instead, where it belongs logically with the other pre-venture options and has no
+          // click-conflict to guard against.
           h("div",{class:"panel venture-chevrons"},[
             h("div",{class:"muted",style:{fontSize:".72em"}},["Area Lv"]),
             h("button",{disabled:ventureDepth>=chevronMaxDepth,onClick:(e)=>{ e.stopPropagation(); GF.ventureDepth=Math.min(chevronMaxDepth,ventureDepth+1); render(); }},["▲"]),
             h("span",{style:{fontWeight:"bold"}},[String(ventureDepth)]),
             h("button",{disabled:ventureDepth<=1,onClick:(e)=>{ e.stopPropagation(); GF.ventureDepth=Math.max(1,ventureDepth-1); render(); }},["▼"]),
+            // v0.23.2: opt-in "Night delve" toggle -- the recommended v1 entry method for the
+            // night gameplay state (see generateMaze()/ensureMaze()'s isNight plumbing and
+            // mazeEyesightRadius()). Only takes effect on the NEXT maze this character enters,
+            // so it's read once, right here, by clicking into the maze via the card beside it.
+            h("label",{class:"row",style:{fontSize:".7em",marginTop:"8px",gap:"5px",alignItems:"flex-start",cursor:"pointer",textAlign:"left"}},[
+              h("input",{type:"checkbox",checked:!!GF.isNight,style:{marginTop:"1px"},onChange:(e)=>{ GF.isNight=e.target.checked; render(); }}),
+              h("span",{style:{color:"#cbb0e6",fontWeight:"bold",whiteSpace:"nowrap"}},["🌙 Night delve"]),
+            ]),
           ]),
         ]),
-      ]),
-      h("div",{class:"town-cell"},[
-        serviceCard("Auction House","📜","Trade with other travelers.",()=>{ Net.auctionCache=null; GF.goto("auctionHouse"); }),
       ]),
     ]),
 
@@ -8132,6 +8381,13 @@ function screenTown(){
         // (Merchant/Blacksmith/Alchemist) -- the full "Thistlewick, the Hollow Magus" name is
         // reserved for the in-screen heading (screenMagician()'s <h2>), not this button.
         serviceCard("Magician","🔮","Words older than the woods, learned for coin.",()=>GF.goto("magician")),
+      ]),
+      // v0.24.1 (E3): Auction House moved out of Row 1 (which now holds only the Venture card +
+      // Area Lv picker, see the town-row just above) and into the services row alongside
+      // Merchant/Blacksmith/Alchemist/Magician -- .town-cell's flex:1 makes a 5th cell here
+      // just as valid as 3 or 4, no layout changes needed beyond adding it.
+      h("div",{class:"town-cell"},[
+        serviceCard("Auction House","📜","Trade with other travelers.",()=>{ Net.auctionCache=null; GF.goto("auctionHouse"); }),
       ]),
     ]),
 
@@ -8345,11 +8601,6 @@ function generateMaze(depth, isNight){
   // screenMaze() -- set by onStepMaze() on horizontal movement, defaults to facing right.
   const maze={size, sizeH, cells, depth, playerIdx:0, stronghold, roamers, isNight:!!isNight, facingDir:1};
   revealAround(maze,0,mazeEyesightRadius(maze));
-
-
-
-
-  maze._justRevealed=[];
   return maze;
 }
 
@@ -8430,7 +8681,22 @@ function tickRoamingMobs(maze){
 
 
 
+// v0.24.1 (F1): strongholds used to always be the same 3x3 cross with the chest dead center,
+// unlockable by beating ANY ONE of its 4 guardians -- every stronghold looked and played
+// identically. placeStronghold() is now a dispatcher between that original layout (kept intact,
+// renamed placeStrongholdCross()) and a new placeStrongholdLine() layout: a straight corridor of
+// 2-3 guardians the player walks through in sequence to reach the chest at the far end, which
+// this time requires beating ALL of them (not just one) since there's no "other side" to unlock
+// it from. Picks one at random each time a stronghold spawns, and falls back to trying the other
+// layout if the first roll can't find a valid spot in this particular maze (rather than losing
+// the stronghold entirely, matching the previous single-layout function's reliability).
 function placeStronghold(maze, dist, exitIdx){
+  const tryLine=Math.random()<0.5;
+  const first=tryLine?placeStrongholdLine(maze,exitIdx):placeStrongholdCross(maze,exitIdx);
+  if(first) return first;
+  return tryLine?placeStrongholdCross(maze,exitIdx):placeStrongholdLine(maze,exitIdx);
+}
+function placeStrongholdCross(maze, exitIdx){
   const {size, sizeH, cells}=maze;
   const idx=(x,y)=>y*size+x;
   const dirs4=[[1,0],[-1,0],[0,1],[0,-1]];
@@ -8440,12 +8706,12 @@ function placeStronghold(maze, dist, exitIdx){
     const coords=[[cx,cy],[cx,cy-1],[cx,cy+1],[cx-1,cy],[cx+1,cy],[cx-1,cy-1],[cx+1,cy-1],[cx-1,cy+1],[cx+1,cy+1]];
     const idxs=coords.map(([x,y])=>idx(x,y));
     if(idxs.includes(0) || idxs.includes(exitIdx)) continue;
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
     const inBlock=new Set(idxs);
     const vDist=new Array(cells.length).fill(-1);
     vDist[0]=0; const q=[0];
@@ -8466,7 +8732,7 @@ function placeStronghold(maze, dist, exitIdx){
   if(!chosen) return null;
   const {cx,cy}=chosen;
   const chestIdx=idx(cx,cy);
-  const guardianCoords=[[cx,cy-1],[cx,cy+1],[cx-1,cy],[cx+1,cy]]; 
+  const guardianCoords=[[cx,cy-1],[cx,cy+1],[cx-1,cy],[cx+1,cy]];
   const cornerCoords=[[cx-1,cy-1],[cx+1,cy-1],[cx-1,cy+1],[cx+1,cy+1]];
 
   cells[chestIdx].type="stronghold_chest"; cells[chestIdx].cleared=false;
@@ -8480,10 +8746,78 @@ function placeStronghold(maze, dist, exitIdx){
   });
   cornerCoords.forEach(([fx,fy])=>{ cells[idx(fx,fy)].type="stronghold_fence"; });
 
-  return {chestIdx, guardianIdxs, guardianDefeated:[false,false,false,false], opened:false};
+  return {chestIdx, guardianIdxs, guardianDefeated:guardianIdxs.map(()=>false), opened:false, layout:"cross"};
+}
+// v0.24.1 (F1): a straight 3-5 cell line (2 or 3 guardians, oriented horizontally or vertically
+// at random, then the chest at the far end) -- the player necessarily walks across each
+// guardian's tile in turn to reach the next one, so they're fought in sequence by construction,
+// no extra boulder walls needed to force the order. Reuses the exact same random-attempt +
+// boulder-avoiding BFS-connectivity check as placeStrongholdCross() above, just against a line of
+// cells instead of a 3x3 block.
+function placeStrongholdLine(maze, exitIdx){
+  const {size, sizeH, cells}=maze;
+  const idx=(x,y)=>y*size+x;
+  const dirs4=[[1,0],[-1,0],[0,1],[0,-1]];
+  const guardianCount=2+randi(2); // 2 or 3 guardians
+  const lineLen=guardianCount+1; // + the chest cell at the far end
+  let chosen=null;
+  for(let attempt=0;attempt<200;attempt++){
+    const horizontal=Math.random()<0.5;
+    let coords;
+    if(horizontal){
+      const y=1+randi(sizeH-2);
+      const x0=1+randi(Math.max(1,size-2-lineLen+1));
+      coords=[]; for(let i=0;i<lineLen;i++) coords.push([x0+i,y]);
+    } else {
+      const x=1+randi(size-2);
+      const y0=1+randi(Math.max(1,sizeH-2-lineLen+1));
+      coords=[]; for(let i=0;i<lineLen;i++) coords.push([x,y0+i]);
+    }
+    if(coords.some(([x,y])=>x<0||x>=size||y<0||y>=sizeH)) continue;
+    const idxs=coords.map(([x,y])=>idx(x,y));
+    if(idxs.includes(0) || idxs.includes(exitIdx)) continue;
+    const inBlock=new Set(idxs);
+    const vDist=new Array(cells.length).fill(-1);
+    vDist[0]=0; const q=[0];
+    while(q.length){
+      const cur=q.shift();
+      const curx=cur%size, cury=Math.floor(cur/size);
+      for(const [dx,dy] of dirs4){
+        const nx=curx+dx, ny=cury+dy;
+        if(nx<0||nx>=size||ny<0||ny>=sizeH) continue;
+        const ni=ny*size+nx;
+        if(vDist[ni]!==-1) continue;
+        if(cells[ni].type==="boulder" && !inBlock.has(ni)) continue;
+        vDist[ni]=vDist[cur]+1; q.push(ni);
+      }
+    }
+    // v0.24.1 (F1): unlike the cross (any face is a valid entry), the line only works if its
+    // FIRST cell (coords[0], the end nearest the rest of the maze) is externally reachable --
+    // the chest sits at the opposite end, meant to be walked to only through the guardians.
+    if(vDist[idxs[0]]>=0){ chosen={coords, idxs}; break; }
+  }
+  if(!chosen) return null;
+  const {coords, idxs}=chosen;
+  const chestCoord=coords[coords.length-1];
+  const chestIdx=idx(chestCoord[0],chestCoord[1]);
+  cells[chestIdx].type="stronghold_chest"; cells[chestIdx].cleared=false;
+  const guardianIdxs=[];
+  for(let slot=0;slot<guardianCount;slot++){
+    const gi=idxs[slot];
+    const base=DL.pickRandomMonsterForArea(maze.depth||1);
+    cells[gi].type="stronghold_guardian"; cells[gi].cleared=false;
+    cells[gi].guardianMonsterId=base.id; cells[gi].guardianSlot=slot;
+    guardianIdxs.push(gi);
+  }
+  return {chestIdx, guardianIdxs, guardianDefeated:guardianIdxs.map(()=>false), opened:false, layout:"line"};
 }
 function strongholdChestUnlocked(maze){
-  return !!(maze.stronghold && maze.stronghold.guardianDefeated.some(Boolean));
+  if(!maze.stronghold) return false;
+  // v0.24.1 (F1): the line layout has no "other side" to sneak the chest open from -- it
+  // requires every guardian along the corridor down, not just one, unlike the cross.
+  return maze.stronghold.layout==="line"
+    ? maze.stronghold.guardianDefeated.every(Boolean)
+    : maze.stronghold.guardianDefeated.some(Boolean);
 }
 
 function ensureMaze(depth){
@@ -8817,8 +9151,9 @@ function screenMaze(){
   
   
   
-  const gridWidthPx=maze.size*34;
-  const gridHeightPx=maze.sizeH*34;
+  // v0.24.1 (E5): these two only feed the mazeOverlay placeholder box below (kept as an
+  // aspect-ratio, not literal pixels) now that the grid itself is fluid-width.
+  const gridAspectRatio=`${maze.size} / ${maze.sizeH}`;
 
   // v0.23.2: diegetic frame's location plaque -- reuses the exact same TOWN_NAMES-by-tier
   // derivation the Forest Reputation panel already uses (screenTown()'s repRows), rather than
@@ -8828,10 +9163,12 @@ function screenMaze(){
 
   let gridArea;
   if(GF.mazeOverlay){
-    gridArea=h("div",{style:{position:"relative",width:gridWidthPx+"px",height:gridHeightPx+"px",flex:"none"}},[mazeOverlayScreen(GF.mazeOverlay)]);
+    gridArea=h("div",{style:{position:"relative",width:"100%",aspectRatio:gridAspectRatio}},[mazeOverlayScreen(GF.mazeOverlay)]);
   } else {
     const px=maze.playerIdx%maze.size, py=Math.floor(maze.playerIdx/maze.size);
-    const grid=h("div",{class:"maze-grid",style:{gridTemplateColumns:`repeat(${maze.size},34px)`}});
+    // v0.24.1 (E5): fr-based columns (was a hardcoded `repeat(size,34px)`) so the grid fills
+    // .maze-frame's own (now-responsive) width instead of forcing a fixed total pixel size.
+    const grid=h("div",{class:"maze-grid",style:{gridTemplateColumns:`repeat(${maze.size},1fr)`}});
     for(let y=0;y<maze.sizeH;y++){
       for(let x=0;x<maze.size;x++){
         const i=y*maze.size+x; const cell=maze.cells[i];
@@ -8843,7 +9180,14 @@ function screenMaze(){
         const hidden=!!cell.wasHidden || HIDDEN_TILE_TYPES.includes(cell.type);
         const displayType=HIDDEN_TILE_TYPES.includes(cell.type)?cell.baseTerrain:cell.type;
 
-        const tile=h("div",{id:"maze-tile-"+i,class:"maze-tile",style:{cursor:isWalkable?"pointer":"default"}});
+        // v0.24.1 (E8): re-render-safe fog reveal fade -- see revealAround()'s comment. A
+        // negative animation-delay resumes the keyframe animation at the correct mid-fade point
+        // no matter when (or how many times) this tile gets rebuilt during its 500ms window.
+        const revealFadeUntil=cell._revealFadeUntil;
+        const isRevealing=revealFadeUntil!=null && Date.now()<revealFadeUntil;
+        const tileStyle={cursor:isWalkable?"pointer":"default"};
+        if(isRevealing) tileStyle.animationDelay=(-(500-(revealFadeUntil-Date.now())))+"ms";
+        const tile=h("div",{id:"maze-tile-"+i,class:"maze-tile"+(isRevealing?" mz-revealing":""),style:tileStyle});
         if(!isKnown){
           // undiscovered -- near-black fog with a faint drifting texture (.mz-fog::before),
           // feathered further by the .maze-lighting darkness overlay below. cell.discovered
@@ -8879,7 +9223,12 @@ function screenMaze(){
     // to 1) flips the walker via a CSS scaleX on the inner .mzw-flip wrapper; the outer
     // .mzw-scale wrapper anchors+shrinks the gallery's native 70x100 rig to the 34px tile.
     const walker=mazeWalkerFor(PS.class_id);
-    grid.appendChild(h("div",{id:"maze-player-marker",class:"maze-mover maze-mover-player",style:{left:(px*35)+"px",top:(py*35)+"px"}},[
+    // v0.24.1 (E7): percentage-based position AND size (was px*35/34px fixed) -- this always
+    // lands exactly on the Nth column/row of the grid's OWN box no matter how wide that box
+    // actually renders, eliminating the class of drift a fixed-pixel assumption was exposed to
+    // once the grid itself became fluid-width (see .maze-grid's own comment above).
+    const moverPct={width:(100/maze.size)+"%", height:(100/maze.sizeH)+"%"};
+    grid.appendChild(h("div",{id:"maze-player-marker",class:"maze-mover maze-mover-player",style:Object.assign({left:(px/maze.size*100)+"%",top:(py/maze.sizeH*100)+"%"},moverPct)},[
       h("div",{class:"mz-player-glow"}),
       h("div",{class:"mzw-scale"},[
         h("div",{class:"mzw-flip",style:{transform:"scaleX("+(maze.facingDir||1)+")"},html:walker.html}),
@@ -8893,7 +9242,7 @@ function screenMaze(){
         const rx=r.idx%maze.size, ry=Math.floor(r.idx/maze.size);
         const roamerColor=ROAMING_MOB_COLOR_BY_BEHAVIOR[r.behavior]||ROAMING_MOB_COLOR_BY_BEHAVIOR.regular;
         // Upright creature token + behavior-colored threat aura, replacing ROAMING_MOB_GLYPH.
-        grid.appendChild(h("div",{id:"maze-roamer-marker-"+r.roamerId,class:"maze-mover maze-mover-roamer",title:`${r.behavior||"regular"} roamer`,style:{left:(rx*35)+"px",top:(ry*35)+"px"}},[
+        grid.appendChild(h("div",{id:"maze-roamer-marker-"+r.roamerId,class:"maze-mover maze-mover-roamer",title:`${r.behavior||"regular"} roamer`,style:Object.assign({left:(rx/maze.size*100)+"%",top:(ry/maze.sizeH*100)+"%"},moverPct)},[
           h("div",{class:"mz-roamer-aura",style:{background:`radial-gradient(circle,${roamerColor}66,transparent 65%)`}}),
           h("div",{html:mazeRoamerSVG(roamerColor)}),
         ]));
@@ -8906,12 +9255,18 @@ function screenMaze(){
     // tighter radius -- visibly resize the lit area. Custom properties are set via
     // style.setProperty() rather than h()'s generic style-object assignment, since plain
     // property assignment doesn't reliably apply CSS custom properties cross-browser.
-    const centerX=(px*35+17)+"px", centerY=(py*35+17)+"px";
-    const torchRadiusPx=(mazeEyesightRadius(maze)*35+40)+"px";
+    // v0.24.1 (E7): percentage-based center + radius (was px*35-based) -- .maze-lighting/
+    // .maze-torchcast's own CSS switched from an explicit-pixel "circle Rpx" to the two-value
+    // ellipse form specifically so a percentage radius is valid here (a CSS circle's radius
+    // only accepts a <length>, never a <percentage>). "+40%-of-a-tile" world-space padding is
+    // approximated as an extra fraction of one tile-width's percentage share, same idea as the
+    // old "+40px" fixed pad, just expressed as a fraction of maze.size instead of a literal.
+    const centerX=((px+0.5)/maze.size*100)+"%", centerY=((py+0.5)/maze.sizeH*100)+"%";
+    const torchRadiusPct=((mazeEyesightRadius(maze)+0.6)/maze.size*100)+"%";
     const lighting=h("div",{class:"maze-lighting"});
-    lighting.style.setProperty("--mz-px",centerX); lighting.style.setProperty("--mz-py",centerY); lighting.style.setProperty("--mz-torch-radius",torchRadiusPx);
+    lighting.style.setProperty("--mz-px",centerX); lighting.style.setProperty("--mz-py",centerY); lighting.style.setProperty("--mz-torch-radius",torchRadiusPct);
     const torchcast=h("div",{class:"maze-torchcast"});
-    torchcast.style.setProperty("--mz-px",centerX); torchcast.style.setProperty("--mz-py",centerY); torchcast.style.setProperty("--mz-torch-radius",torchRadiusPx);
+    torchcast.style.setProperty("--mz-px",centerX); torchcast.style.setProperty("--mz-py",centerY); torchcast.style.setProperty("--mz-torch-radius",torchRadiusPct);
     grid.appendChild(lighting);
     grid.appendChild(torchcast);
 
@@ -9013,11 +9368,23 @@ function revealAround(maze,centerIdx,radius){
       if(nx<0||nx>=maze.size||ny<0||ny>=maze.sizeH) continue;
       const idx=ny*maze.size+nx;
       const cell=maze.cells[idx];
-      if(!cell.discovered) newlyRevealed.push(idx);
+      // v0.24.1 (E8): stamp a per-cell fade deadline instead of pushing into a one-shot
+      // maze._justRevealed array. The old array was only ever consumed by the NEXT
+      // animateMazeMovers() call, which is unreliable -- idleRoamerTick()'s 1s poll calls a
+      // full render() independently of player movement whenever roamers are on the map, and a
+      // fresh render() rebuilds every tile as a brand-new DOM node, discarding any in-flight
+      // JS-driven opacity transition on the old node (killing the fade partway through). It also
+      // meant the very first revealAround() at maze-generation time (no animateMazeMovers() call
+      // follows it, by design) would sit unconsumed until the player's first step, at which point
+      // the whole starting-radius reveal would flash/fade in alongside that step's tiles. A
+      // per-cell timestamp is self-describing: any render(), no matter how many times it fires
+      // during the 500ms window, can independently recompute the correct mid-fade state for a
+      // freshly-created tile node via a negative CSS animation-delay -- see the tile-building
+      // code below and the .mz-revealing rule.
+      if(!cell.discovered){ newlyRevealed.push(idx); cell._revealFadeUntil=Date.now()+500; }
       cell.discovered=true;
     }
   }
-  maze._justRevealed=(maze._justRevealed||[]).concat(newlyRevealed);
   return newlyRevealed;
 }
 
@@ -9040,7 +9407,9 @@ function tickEyesightPotion(){
 function animateMazeMovers(prevPlayerIdx, prevRoamerPositions){
   const maze=GF.overworld_snapshot;
   if(!maze) return;
-  const cellPx=(idx)=>({x:(idx%maze.size)*35+"px", y:Math.floor(idx/maze.size)*35+"px"});
+  // v0.24.1 (E7): percentage-based (was px*35-based), matching the grid-building code above --
+  // named cellPx still for minimal diff, but now returns percentages.
+  const cellPx=(idx)=>({x:(idx%maze.size)/maze.size*100+"%", y:Math.floor(idx/maze.size)/maze.sizeH*100+"%"});
   const playerEl=document.getElementById("maze-player-marker");
   if(playerEl && playerEl.parentNode && prevPlayerIdx!=null && prevPlayerIdx!==maze.playerIdx){
     const from=cellPx(prevPlayerIdx), to=cellPx(maze.playerIdx);
@@ -9074,27 +9443,12 @@ function animateMazeMovers(prevPlayerIdx, prevRoamerPositions){
   
   
   
-  if(maze._justRevealed && maze._justRevealed.length){
-    for(const idx of maze._justRevealed){
-      const el=document.getElementById("maze-tile-"+idx);
-      if(!el || !el.parentNode) continue;
-      el.style.transition="none";
-      el.style.opacity="0";
-      setTimeout(()=>{
-        el.style.transition="";
-        el.style.opacity="1";
-      },20);
-    }
-    maze._justRevealed=[];
-  }
-  
-  
-  
-  
-  
-  
-  
-  
+  // v0.24.1 (E8): the fog-of-war reveal fade no longer lives here -- it's now driven entirely
+  // by a per-cell cell._revealFadeUntil timestamp (set in revealAround()) consumed at tile-build
+  // time via the .mz-revealing CSS animation class + a negative animation-delay, which survives
+  // any number of intervening render() calls (e.g. idleRoamerTick()'s 1s poll) instead of being
+  // a one-shot JS opacity flip on DOM nodes that render() may have already replaced.
+
   if(maze._clarityReveal && maze._clarityReveal.length){
     for(const {idx,dist} of maze._clarityReveal){
       const el=document.getElementById("maze-tile-"+idx);
@@ -9135,7 +9489,10 @@ function onStepMaze(maze,targetIdx){
   if(newPx>prevPx) maze.facingDir=1;
   else if(newPx<prevPx) maze.facingDir=-1;
   maze.playerIdx=targetIdx; cell.discovered=true; cell.visited=true;
-  PS.spendStamina(Balance.STAMINA_COST_PER_STEP);
+  // v0.24.1 (F2): per-step stamina cost now scales with how much gear is currently equipped
+  // (computed fresh at step time, so swapping gear mid-delve immediately changes the cost of
+  // your NEXT step) instead of the old flat Balance.STAMINA_COST_PER_STEP.
+  PS.spendStamina(Balance.staminaCostPerStep(IF.EQUIPPED_SLOT_KEYS.filter(s=>PS.equipped[s]).length));
   
   
   
@@ -9157,8 +9514,9 @@ function onStepMaze(maze,targetIdx){
   if(roamerAlreadyHere){
     PS.tickXpBuff();
     // v0.23.1 (#7): roaming-mob collisions now route through the pre-combat Fight/Flee gate
-    // instead of starting the fight immediately -- see screenPreCombatEncounter().
-    GF.goto("preCombatEncounter",{maze_depth:maze.depth, pending_monster_id:roamerAlreadyHere.monsterId, pending_roamer_id:roamerAlreadyHere.roamerId, pending_guardian_cell_idx:null});
+    // instead of starting the fight immediately -- see screenPreCombatEncounter(). v0.24.1
+    // (C8): now gated by band + 1s delay via triggerMazeEncounter().
+    triggerMazeEncounter({maze_depth:maze.depth, pending_monster_id:roamerAlreadyHere.monsterId, pending_roamer_id:roamerAlreadyHere.roamerId, pending_guardian_cell_idx:null});
     return;
   }
 
@@ -9307,7 +9665,11 @@ function onStepMaze(maze,targetIdx){
   }
   if(cell.type==="stronghold_guardian" && !cell.cleared){
     PS.tickXpBuff();
-    GF.goto("combat",{maze_depth:maze.depth, pending_monster_id:cell.guardianMonsterId, pending_guardian_cell_idx:targetIdx, pending_roamer_id:null});
+    // v0.24.1 (C8): guardians now route through the same shared gate as every other
+    // encounter -- in practice guardians are always Rare-band or higher, so this always shows
+    // the Fight/Flee prompt (now correctly labeled "Guardian" in the announcement), plus the
+    // uniform 1s delay.
+    triggerMazeEncounter({maze_depth:maze.depth, pending_monster_id:cell.guardianMonsterId, pending_guardian_cell_idx:targetIdx, pending_roamer_id:null});
     return;
   }
   if(cell.type==="stronghold_chest" && !cell.cleared){
@@ -9347,8 +9709,9 @@ function onStepMaze(maze,targetIdx){
     
     // v0.23.1 (#7): grass-tile stumbled-into encounters now route through the pre-combat
     // Fight/Flee gate instead of starting the fight immediately -- see
-    // screenPreCombatEncounter().
-    GF.goto("preCombatEncounter",{maze_depth:maze.depth, pending_monster_id:monster.id, pending_guardian_cell_idx:null, pending_roamer_id:null});
+    // screenPreCombatEncounter(). v0.24.1 (C8): now gated by band + 1s delay via
+    // triggerMazeEncounter().
+    triggerMazeEncounter({maze_depth:maze.depth, pending_monster_id:monster.id, pending_guardian_cell_idx:null, pending_roamer_id:null});
     return;
   }
   autosave();
@@ -10078,6 +10441,29 @@ function syncCombatRoundBuffs(playerPayload){
 // portrait+rarity-band component the combat mob panel and Monster Guide already use (see
 // v0.22.1 Part A2c) -- purely for display; the actual engage first-strike roll stays entirely
 // inside POST /api/combat/start, unchanged, whichever way this screen is left.
+// v0.24.1 (C8): shared gate for every maze encounter path (grass stumble, roamer collision,
+// idle roamer catch-up, and stronghold guardian) -- adds a uniform 1s beat before ANY
+// encounter actually begins, and only routes through the Fight/Flee pre-combat prompt for
+// Mature-band monsters and up (MONSTER_BAND_INFO's Rare/Epic/Legendary internal tiers);
+// Newborn/Young monsters are considered too weak to warrant the prompt and skip straight into
+// combat, exactly like the pre-v0.23.1 behavior. Also stashes the encounter's mob type
+// (Roaming/Guardian/null) on GF for screenPreCombatEncounter() to render in its announcement.
+function triggerMazeEncounter(payload){
+  // Guards against re-entry: idleRoamerTick() polls on an interval and GF.screen stays "maze"
+  // for the full 1s delay below, so without this a still-colliding roamer would otherwise
+  // stack up multiple overlapping timers/GF.goto calls before the first one ever fires.
+  if(GF.encounterGateBusy) return;
+  GF.encounterGateBusy=true;
+  const monsterDef=MONSTERS.find(mm=>mm.id===payload.pending_monster_id);
+  const promptEligible=monsterDef && ["Rare","Epic","Legendary"].includes(monsterDef.tier);
+  GF.pendingEncounterMobType=payload.pending_guardian_cell_idx!=null?"Guardian":(payload.pending_roamer_id!=null?"Roaming":null);
+  render();
+  setTimeout(()=>{
+    GF.encounterGateBusy=false;
+    GF.goto(promptEligible?"preCombatEncounter":"combat", payload);
+  }, 1000);
+}
+
 function screenPreCombatEncounter(){
   const monsterId=GF.pending_monster_id;
   const monsterDef=MONSTERS.find(mm=>mm.id===monsterId);
@@ -10128,7 +10514,10 @@ function screenPreCombatEncounter(){
     ]):null,
     portraitWrap,
     h("div",{style:{fontWeight:"bold",textAlign:"center"}},[monsterDef?monsterDef.name:"???"]),
-    h("div",{class:"muted",style:{textAlign:"center"}},[`Area Lv ${GF.maze_depth}`]),
+    // v0.24.1 (C8): show the encounter's mob type (Roaming/Guardian) alongside Area Lv, when
+    // applicable -- see triggerMazeEncounter(), which stashes this on GF just before routing
+    // here. Ordinary grass-tile encounters have no type tag at all.
+    h("div",{class:"muted",style:{textAlign:"center"}},[`Area Lv ${GF.maze_depth}`, GF.pendingEncounterMobType?` • ${GF.pendingEncounterMobType}`:""]),
   ]);
   root.appendChild(panel);
   root.appendChild(h("div",{class:"row",style:{marginTop:"12px",justifyContent:"center"}},[
@@ -10164,7 +10553,9 @@ function screenCombat(){
   portraitWrap.innerHTML=monsterPortrait(cb.monster_id,{slain:cb.defeated});
   // v0.23.1 (#8): wraps the portrait so fireflyBurstLayer()'s motes can be absolutely
   // positioned over it (see spawnFireflyBurst(), triggered from castSpellInCombat()).
-  const portraitOuterWrap=h("div",{style:{position:"relative",width:"140px",height:"140px",margin:"0 auto 8px"}},[portraitWrap,fireflyBurstLayer()]);
+  // v0.24.1 (C9): entangleRootsLayer() stacked on top of fireflyBurstLayer() in the same
+  // absolutely-positioned wrap -- both are purely cosmetic overlays and can coexist.
+  const portraitOuterWrap=h("div",{style:{position:"relative",width:"140px",height:"140px",margin:"0 auto 8px"}},[portraitWrap,fireflyBurstLayer(),entangleRootsLayer()]);
   const busy=!!GF.combatResolving;
   
   
@@ -10286,6 +10677,14 @@ function screenCombat(){
       h("div",{style:{color:mobBorderColor,fontWeight:"bold",fontSize:".85em"}},[mobBandInfo.label]),
       h("div",{style:{color:mobBorderColor,fontSize:".8em"}},[monsterStarString(mobMonsterDef.star,mobBandInfo.size)]),
     ]):null,
+    // v0.24.1 (C11): encounter-type tag, upper-left corner -- Roaming=yellow, Guardian=orange.
+    // Red is deliberately reserved for future boss content and not used here. Ordinary
+    // grass-tile encounters (neither isRoamer nor isGuardian) get no tag at all.
+    (cb.isRoamer||cb.isGuardian)?h("div",{style:{
+      position:"absolute",top:"8px",left:"10px",fontSize:".72em",fontWeight:"bold",
+      padding:"2px 7px",borderRadius:"4px",textTransform:"uppercase",letterSpacing:".03em",
+      color:"#1a1a12",background:cb.isGuardian?"#e6923a":"#e6d23a",
+    }},[cb.isGuardian?"Guardian":"Roaming"]):null,
     portraitOuterWrap,
     h("div",{style:{fontWeight:"bold",textAlign:"center"}},[cb.name]),
     h("div",{style:{textAlign:"center"}},[`HP ${Math.round(Math.max(0,cb.hp))}/${Math.round(cb.maxHp)}`]),
@@ -10671,6 +11070,10 @@ function screenCombat(){
           // through the same generic spell_dot_ticks path as Fireflies/Verdant Siphon above.
           combatLog(cb,`You cast Entangle, rooting the ${cb.name} in crushing vines! It can't act, and you can flee freely.`);
           spawnFloat("monster","Rooted!","float-text-block");
+          // v0.24.1 (C9): green roots/vines visual cue over the target portrait, alongside the
+          // existing "Rooted!" float/log line above -- timed off the server's own rooted_until
+          // so it matches this cast's real tier-scaled duration.
+          spawnEntangleRoots(c.rooted_until-Date.now());
         }
       }
       if(result.spell_skill && result.spell_skill.leveled_up) combatLog(cb,`Your Spellcasting proficiency reaches level ${result.spell_skill.new_level}!`);
@@ -10898,7 +11301,9 @@ function screenStrongholdChest(){
 
       const gearCount=randIntRange(Balance.STRONGHOLD_CHEST_GEAR_COUNT_MIN,Balance.STRONGHOLD_CHEST_GEAR_COUNT_MAX);
       for(let i=0;i<gearCount;i++){
-        const inst=IF.generate(tier,"",pick(["Rare","Epic"]));
+        // v0.24.1 (F1): weighted Rare/Epic/(slight chance of)Legendary roll, replacing the old
+        // even pick(["Rare","Epic"]) which could never produce a Legendary at all.
+        const inst=IF.generate(tier,"",Balance.rollStrongholdChestGearRarity());
         const willAutoEquip=PS.canAutoEquip(inst);
         if(PS.addGearAutoEquip(inst)){
           entries.push({kind:"gear", inst, autoEquipped:willAutoEquip});
@@ -11386,6 +11791,13 @@ function attributesPanel(){
     return h("div",{class:"row gap",style:{alignItems:"center",marginBottom:"10px"}},[
       h("button",{disabled:PS.unspent_stat_points<=0,onClick:()=>{ PS.spendStatPoint(r.key); autosave(); render(); }},["+"]),
       h("div",{style:{flex:"1",minWidth:"0"}},[
+        // v0.24.1 (E10): this panel's own "BASE (+addition)" format (pre-gear PS.attributes[key],
+        // then the gear delta) is the reference the Player Stats readout (playerStatsCompactPanel())
+        // was brought in line with -- it used to show the POST-gear total next to the same delta,
+        // double-counting the bonus. Left as its own render here (rather than sharing DOM-building
+        // code with playerStatsGearDelta()) since its muted "from gear" wording differs slightly
+        // from Player Stats' green delta styling, but the underlying base+addition numbers now
+        // always agree between the two screens.
         h("div",{},[`${r.label}: ${PS.attributes[r.key]}`, gearAmt?h("span",{class:"muted"},[` (+${Math.round(gearAmt)} from gear)`]):null]),
         summaryLines[i]?h("div",{class:"muted",style:{fontSize:"0.85em",lineHeight:"1.3em",marginTop:"2px"}},[summaryLines[i]]):null,
       ]),
@@ -11571,7 +11983,11 @@ function equipSlotTile(slot){
 
 
 
-const RARITY_BORDER_COLORS={Common:"#9a9686",Uncommon:"#e8e4d8",Rare:"#5a9ae0",Epic:"#e0c94a",Legendary:"#d9902f"};
+// v0.24.1 (E11): "Set" was missing here too -- fell back to the neutral var(--border) at the
+// one live consumer (backpackGearGrid()'s tile border below), so a Set item's backpack tile
+// border silently stayed the default grey instead of reading green like every other rarity's
+// border already does for its own tier.
+const RARITY_BORDER_COLORS={Common:"#9a9686",Uncommon:"#e8e4d8",Rare:"#5a9ae0",Epic:"#e0c94a",Legendary:"#d9902f",Set:"#3fbf5f"};
 
 
 
@@ -12230,11 +12646,17 @@ function screenBlacksmith(){
     
     
     
+    // v0.24.1 (E9): the 4 Blacksmith actions now lay out 2-over-2 instead of one crowded row --
+    // wrapped in their own grid div (rather than changing the shared .gear-row-actions class
+    // gearRow() also uses for Vault/Sell's single-button rows) so only the Blacksmith is
+    // affected. This also frees horizontal space for the item info column beside it.
     root.appendChild(gearRow(inst,[
-      h("button",{disabled:PS.materials<cost||PS.gold<goldCost||busy,title:"Rerolls every existing affix's VALUE only: keeps the exact same stats, just re-rolls their numbers.",onClick:()=>rerollBlacksmithItem(inst.instance_id)},[GF.rerolling===inst.instance_id?"Rerolling...":`Reroll (${cost} mat, ${goldCost}g)`]),
-      h("button",{disabled:PS.materials<reforgeMatCost||PS.gold<reforgeGoldCost||busy,title:"Lets you pick ONE existing affix to replace with a fresh, different stat (never a duplicate already on the item), rolling its value from scratch. Every other affix stays untouched.",onClick:()=>openReforgeStatPicker(inst)},[GF.reforging===inst.instance_id?"Reforging...":`Reforge (${reforgeMatCost} mat, ${reforgeGoldCost}g)`]),
-      h("button",{disabled:PS.materials<refineMatCost||PS.gold<refineGoldCost||busy,title:"Lets you pick ONE existing affix to keep its stat but reroll its VALUE from scratch. The priciest crafting option, for when every stat on the item is right and you just want a better number on one of them.",onClick:()=>openRefineStatPicker(inst)},[GF.refining===inst.instance_id?"Refining...":`Refine (${refineMatCost} mat, ${refineGoldCost}g)`]),
-      h("button",{disabled:busy,title:"Breaks the item down for materials outright. Cannot be undone.",onClick:()=>{PS.salvageGear(inst.instance_id);autosave();render();}},[`Salvage (+${Balance.salvageValue(inst.tier,slots)} mat)`]),
+      h("div",{class:"blacksmith-actions-grid"},[
+        h("button",{disabled:PS.materials<cost||PS.gold<goldCost||busy,title:"Rerolls every existing affix's VALUE only: keeps the exact same stats, just re-rolls their numbers.",onClick:()=>rerollBlacksmithItem(inst.instance_id)},[GF.rerolling===inst.instance_id?"Rerolling...":`Reroll (${cost} mat, ${goldCost}g)`]),
+        h("button",{disabled:PS.materials<reforgeMatCost||PS.gold<reforgeGoldCost||busy,title:"Lets you pick ONE existing affix to replace with a fresh, different stat (never a duplicate already on the item), rolling its value from scratch. Every other affix stays untouched.",onClick:()=>openReforgeStatPicker(inst)},[GF.reforging===inst.instance_id?"Reforging...":`Reforge (${reforgeMatCost} mat, ${reforgeGoldCost}g)`]),
+        h("button",{disabled:PS.materials<refineMatCost||PS.gold<refineGoldCost||busy,title:"Lets you pick ONE existing affix to keep its stat but reroll its VALUE from scratch. The priciest crafting option, for when every stat on the item is right and you just want a better number on one of them.",onClick:()=>openRefineStatPicker(inst)},[GF.refining===inst.instance_id?"Refining...":`Refine (${refineMatCost} mat, ${refineGoldCost}g)`]),
+        h("button",{disabled:busy,title:"Breaks the item down for materials outright. Cannot be undone.",onClick:()=>{PS.salvageGear(inst.instance_id);autosave();render();}},[`Salvage (+${Balance.salvageValue(inst.tier,slots)} mat)`]),
+      ]),
     ]));
   }
 
@@ -13523,7 +13945,11 @@ function bridgeTrialView(progress, tier, opts={}){
   const resolving=!!opts.resolving;
   const failed=!!opts.failed;
   const onStep=opts.onStep||(()=>{});
-  const plankCols=h("div",{class:"row gap",style:{overflowX:"auto",paddingBottom:"6px"}});
+  // v0.24.1 (E4): the shared ".row" class ships flex-wrap:wrap by default, which on a narrow
+  // mobile viewport was wrapping the 10 step-columns onto multiple lines instead of respecting
+  // this element's own overflowX:auto -- flexWrap:"nowrap" here forces a real horizontal
+  // scrollbar instead, matching the original intent (scroll through all 10 steps, don't wrap).
+  const plankCols=h("div",{class:"row gap",style:{overflowX:"auto",paddingBottom:"6px",flexWrap:"nowrap"}});
   for(let i=0;i<rows;i++){
     const discoveredPlank=progress.discoveredSides[i];
     const isCurrent=interactive && i===progress.discoveredSides.length && !failed;
@@ -14056,7 +14482,7 @@ function adminAccountsTab(){
 function adminResetLadderTab(){
   const root=h("div",{});
   root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},[
-    "Resets a single character's class rank, level, and current XP back to Class I / Level 1: gear, gold, stash, materials, consumables, herbs, and skills are all kept untouched. No bulk action; reset each character one at a time.",
+    "Resets a single character's class rank, level, and current XP back to Class I / Level 1: gear, gold, stash, materials, consumables, herbs, and skills are all kept untouched. No bulk action; reset each character one at a time. Each row also has a Grant tool for crediting gold and/or materials to that character (e.g. compensation) -- both actions apply even if the player is currently online.",
   ]));
   root.appendChild(h("div",{class:"row gap",style:{marginBottom:"8px"}},[
     h("button",{onClick:async ()=>{
@@ -14086,28 +14512,54 @@ function adminResetLadderTab(){
       root.appendChild(h("div",{class:"muted"},["No characters found."]));
     } else {
       for(const entry of GF.admin_reset_ladder_cache){
-        root.appendChild(h("div",{class:"tile row",style:{justifyContent:"space-between",alignItems:"center",marginBottom:"6px",gap:"10px"}},[
-          h("div",{},[
+        const goldInput=h("input",{type:"number",min:"0",placeholder:"Gold",style:{width:"90px"}});
+        const materialsInput=h("input",{type:"number",min:"0",placeholder:"Materials",style:{width:"90px"}});
+        root.appendChild(h("div",{class:"tile col gap",style:{marginBottom:"6px",gap:"6px"}},[
+          h("div",{class:"row",style:{justifyContent:"space-between",alignItems:"center",gap:"10px"}},[
             h("div",{},[
-              h("span",{style:{fontWeight:"bold"}},[entry.character_name]),
-              h("span",{class:"muted"},[` (${entry.username}, acct #${entry.account_id}, slot ${entry.slot})`]),
+              h("div",{},[
+                h("span",{style:{fontWeight:"bold"}},[entry.character_name]),
+                h("span",{class:"muted"},[` (${entry.username}, acct #${entry.account_id}, slot ${entry.slot})`]),
+              ]),
+              h("div",{class:"muted"},[`Lv ${entry.level} ${entry.class_display_name} (${tierRomanNumeral(entry.highest_tier_reached)})`]),
             ]),
-            h("div",{class:"muted"},[`Lv ${entry.level} ${entry.class_display_name} (${tierRomanNumeral(entry.highest_tier_reached)})`]),
+            h("button",{class:"danger",onClick:()=>{
+              askConfirm(`Reset "${entry.character_name}" to Class I, Level 1? Gear, gold, stash, materials, consumables, herbs, and skills are kept.`,async ()=>{
+                try{
+                  const result=await Net.adminResetLadder(entry.account_id,entry.slot,GF.admin_token||"");
+                  entry.class_display_name=result.class_display_name;
+                  entry.level=result.level;
+                  entry.highest_tier_reached=result.highest_tier_reached;
+                  setToast(`Reset ${result.character_name} to ${result.class_display_name}.`);
+                }catch(err){
+                  GF.admin_reset_ladder_error=err.message||"Could not reset that character.";
+                }
+                render();
+              },{confirmLabel:"Reset"});
+            }},["Reset"]),
           ]),
-          h("button",{class:"danger",onClick:()=>{
-            askConfirm(`Reset "${entry.character_name}" to Class I, Level 1? Gear, gold, stash, materials, consumables, herbs, and skills are kept.`,async ()=>{
-              try{
-                const result=await Net.adminResetLadder(entry.account_id,entry.slot,GF.admin_token||"");
-                entry.class_display_name=result.class_display_name;
-                entry.level=result.level;
-                entry.highest_tier_reached=result.highest_tier_reached;
-                setToast(`Reset ${result.character_name} to ${result.class_display_name}.`);
-              }catch(err){
-                GF.admin_reset_ladder_error=err.message||"Could not reset that character.";
-              }
-              render();
-            },{confirmLabel:"Reset"});
-          }},["Reset"]),
+          // v0.24.1 (A4): compensation grant -- pick a character from this same list (no
+          // separate lookup UI needed), enter gold and/or materials, confirm. Lands through the
+          // save-seq-fenced + forced-reload admin write, so it applies even if that player is
+          // online right now.
+          h("div",{class:"row gap",style:{alignItems:"center"}},[
+            goldInput, materialsInput,
+            h("button",{onClick:()=>{
+              const gold=parseInt(goldInput.value,10)||0;
+              const materials=parseInt(materialsInput.value,10)||0;
+              if(!gold && !materials){ setToast("Enter a gold or materials amount first."); render(); return; }
+              askConfirm(`Grant ${entry.character_name}${gold?` ${gold} gold`:""}${gold&&materials?" and":""}${materials?` ${materials} materials`:""}?`,async ()=>{
+                try{
+                  const result=await Net.adminGrant(entry.account_id,entry.slot,gold,materials,GF.admin_token||"");
+                  setToast(`Granted ${result.character_name}${gold?` ${gold} gold`:""}${gold&&materials?" and":""}${materials?` ${materials} materials`:""}.`);
+                  goldInput.value=""; materialsInput.value="";
+                }catch(err){
+                  GF.admin_reset_ladder_error=err.message||"Could not grant to that character.";
+                }
+                render();
+              },{confirmLabel:"Grant"});
+            }},["Grant"]),
+          ]),
         ]));
       }
     }
@@ -14316,6 +14768,24 @@ function legacyGearSection(){
 
 
 const CHANGELOG=[
+  { version:"v0.24.1", date:"2026-08-04 16:24", notes:[
+    "New quest: The Pacifist, for those who'd rather let their gear do the fighting.",
+    "The Elder of the Thicket's old quest is now The Ascendant Hunt, a five-part questline that sends you after every monster band in order, one step at a time.",
+    "The Simmering Cauldron now asks for 7 distinct potion recipes brewed, not just 7 brews of anything.",
+    "Fixed the exploration quest so it can be completed at any area level, and corrected its reward text to say Max HP.",
+    "Strongholds now sometimes place their guardians in a line you have to fight through in order, instead of always the same four-guardian cross, and their chests carry better loot: fewer common potions, more (and better) gear, with a small chance at something legendary.",
+    "Each step through a maze now costs a bit more stamina for every item you have equipped, so a fully-geared character drains faster than a lightly-equipped one.",
+    "Rebalanced critical hits: the crit multiplier ladder and the crit-chance gear affix both came down slightly.",
+    "Fixed a display bug where a gear item's crit multiplier bonus could show the wrong number.",
+    "Renamed the \"Attack Rating\" gear stat to \"Accuracy\" everywhere it appears.",
+    "Entangle now shows a visible tangle of roots over its target while the effect is active.",
+    "Maze encounters (roamers, guardians, stumbling into a monster on the grass) now show what you're about to fight and give a short beat before combat starts, with a Roaming/Guardian tag on the combat screen.",
+    "Restored the smooth fade-in when new tiles are revealed by your torchlight, it had gone choppy for a while.",
+    "The Blacksmith's four actions (Reroll/Reforge/Refine/Salvage) are now laid out two over two, giving everything more room to breathe.",
+    "Player Stats now consistently show BASE (+bonus from gear) for every stat, matching the Attributes panel's format.",
+    "Set items now render green (border and icon) wherever they appear, not just in their name text.",
+    "Fixed a bug where an endgame Keeper choice from a previous character could bleed into a freshly loaded one, and where your Tier could show as stale after a ladder reset.",
+  ]},
   { version:"v0.24", date:"2026-08-04 10:24", notes:[
     "Every class now has its own distinct traveler sprite in the maze, replacing the single hooded wanderer. Each class's look draws on its own robes, armor, and gear, with a walking gait animation and a left/right flip as you move.",
     "Spells now have five tiers each (I through V), purchased one after another as you level up, instead of a single fixed version. Each tier costs its own gold price and unlocks at its own level, and upgrades the spell's mana cost, cooldown, and magnitude along the way. Anyone who already owned a spell keeps it for free at Tier I.",
@@ -14958,6 +15428,12 @@ function screenItemization(){
   Balance.AFFIX_POOL.forEach((stat,i)=>{
     const maxCells=Array.from({length:Balance.ITEM_TIER_MAX},(_,ti)=>{
       const max=Balance.affixMaxForTier(stat,ti+1);
+      // v0.24.1 (C7): crit_multiplier is stored/rolled as a raw integer (10-50) but consumed
+      // divided by 100 (see getCritMultiplierBonus()) -- this table was showing the raw
+      // pre-divide value ("+10") instead of the real in-game bonus ("+0.10"). Mirrors the
+      // same /100 special-case already used everywhere else crit_multiplier is displayed
+      // (affixValueLine(), statHeader(), the equip-slot hover box).
+      if(stat==="crit_multiplier") return `+${(max/100).toFixed(2)}`;
       return IF.affixIsPercent(stat)?`${max}%`:`+${max}`;
     });
     affixPanel.appendChild(gridRow([IF.affixLabel(stat),...maxCells],{cols,noBorder:i===Balance.AFFIX_POOL.length-1}));
@@ -15659,8 +16135,9 @@ function idleRoamerTick(){
   if(wanderedIn){
     PS.tickXpBuff();
     // v0.23.1 (#7): roaming-mob collisions now route through the pre-combat Fight/Flee gate
-    // instead of starting the fight immediately -- see screenPreCombatEncounter().
-    GF.goto("preCombatEncounter",{maze_depth:maze.depth, pending_monster_id:wanderedIn.monsterId, pending_roamer_id:wanderedIn.roamerId, pending_guardian_cell_idx:null});
+    // instead of starting the fight immediately -- see screenPreCombatEncounter(). v0.24.1
+    // (C8): now gated by band + 1s delay via triggerMazeEncounter().
+    triggerMazeEncounter({maze_depth:maze.depth, pending_monster_id:wanderedIn.monsterId, pending_roamer_id:wanderedIn.roamerId, pending_guardian_cell_idx:null});
     return;
   }
   
