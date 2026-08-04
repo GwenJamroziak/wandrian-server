@@ -43,6 +43,12 @@ body{
 #hud-footer .hud-bars{flex:1;display:flex;flex-direction:column;gap:7px;min-width:0;}
 .hud-rail-title{font-family:Cinzel,Georgia,serif;font-size:12px;letter-spacing:.6px;color:var(--muted);
   text-transform:uppercase;margin-bottom:4px;}
+
+#hud-rail .player-stats-grid{display:block !important;}
+#hud-rail .player-stats-grid > *{width:100% !important;max-width:100% !important;min-width:0 !important;
+  margin-bottom:9px;}
+#hud-rail .player-stats-grid .row{flex-wrap:wrap;}
+#hud-rail *{min-width:0;overflow-wrap:anywhere;}
 .hud-idname{font-family:Cinzel,Georgia,serif;font-size:18px;line-height:1.2;}
 .hud-idsub{font-size:12px;color:var(--muted);margin-top:2px;}
 
@@ -56,8 +62,9 @@ body{
              radial-gradient(circle at 50% 108%, rgba(0,0,0,.55), rgba(0,0,0,0) 55%);}
 .hud-globe .glbl{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
   font-family:Cinzel,Georgia,serif;text-shadow:0 2px 5px rgba(0,0,0,.95);pointer-events:none;}
-.hud-globe .glbl .gn{font-size:16px;line-height:1;}
-.hud-globe .glbl .gt{font-size:9px;letter-spacing:1.5px;color:rgba(255,255,255,.68);margin-top:3px;}
+
+.hud-globe .glbl .gn{font-size:21px;line-height:1;}
+.hud-globe .glbl .gt{font-size:11px;letter-spacing:1.5px;color:rgba(255,255,255,.72);margin-top:3px;}
 .hud-globe.hp .gfill{background:linear-gradient(180deg,#e35b5b,#8e2020);}
 .hud-globe.hp.poisoned .gfill{background:linear-gradient(180deg,#8fd06a,#3f7a2a);}
 .hud-globe.mana .gfill{background:linear-gradient(180deg,#5ba2ea,#1d4a86);}
@@ -183,7 +190,7 @@ input[type=checkbox]:checked::after{content:"✓";position:absolute;top:-3px;lef
 .chat-birth-msg{color:#6fcf6f;}
 .chat-admin-msg{color:#7fb6ff;font-weight:bold;}
 
-.known-issues-banner{margin-bottom:8px;padding:8px 12px;border-radius:8px;font-size:.9em;font-weight:bold;
+.known-issues-banner{white-space:pre-line;margin-bottom:8px;padding:8px 12px;border-radius:8px;font-size:.9em;font-weight:bold;
   color:#ffd489;background:rgba(214,150,40,.14);border:1px solid rgba(214,150,40,.55);
   display:flex;align-items:flex-start;gap:8px;}
 .known-issues-banner .kib-icon{flex:0 0 auto;}
@@ -410,8 +417,8 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 
 .compare-box .compare-title{color:var(--accent);}
 
-.compare-box .stat-delta-good{color:var(--good);font-weight:bold;}
-.compare-box .stat-delta-bad{color:var(--bad);font-weight:bold;}
+.stat-delta-good{color:var(--good);font-weight:bold;}
+.stat-delta-bad{color:var(--bad);font-weight:bold;}
 .plank-row{display:flex;gap:8px;margin:6px 0;}
 .plank-row button.locked-safe{background:#254a25;color:#9fe89f;border-color:#3a7a3a;}
 .plank-row button.locked-fail{background:#4a2020;color:#e89f9f;border-color:#7a3a3a;}
@@ -441,7 +448,9 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 .town-row{display:flex;gap:14px;align-items:stretch;}
 .town-row>*{min-width:0;}
 .town-row .panel{height:100%;margin-bottom:0;}
-.town-cell{flex:1 1 0;}
+
+.town-cell{flex:1 1 0;display:flex;}
+.town-cell > *{flex:1;}
 .town-cell-wide{flex:2 1 0;}
 
 .town-cell-stretch{display:flex;flex-direction:column;}
@@ -523,6 +532,37 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 .maze-overlay-text{color:#e8d24a;font-size:1.8em;font-weight:bold;letter-spacing:1.5px;text-shadow:0 0 18px rgba(232,210,74,.6);padding:0 10px;white-space:pre-line;}
 
 .maze-overlay-text.shrine{font-size:1.15em;line-height:1.5;}
+
+.maze-toast-layer{position:absolute;left:0;right:0;bottom:12px;display:flex;flex-direction:column-reverse;
+  align-items:center;gap:6px;pointer-events:none;z-index:30;}
+.maze-toast{max-width:82%;text-align:center;padding:7px 14px;border-radius:9px;font-size:.92em;font-weight:bold;
+  background:rgba(12,14,9,.88);border:1px solid var(--border);color:var(--text);
+  box-shadow:0 6px 20px rgba(0,0,0,.6);animation:mazeToastLife var(--mzt-life,3200ms) ease-out forwards;white-space:pre-line;}
+.maze-toast.good{border-color:rgba(111,207,111,.65);color:#9fe39f;}
+.maze-toast.bad{border-color:rgba(224,104,95,.65);color:#f0a09a;}
+.maze-toast.shrine{border-color:rgba(158,89,217,.65);color:#c9a0f0;}
+@keyframes mazeToastLife{
+  0%{opacity:0;transform:translateY(10px) scale(.96);}
+  9%{opacity:1;transform:translateY(0) scale(1);}
+  78%{opacity:1;transform:translateY(0) scale(1);}
+  100%{opacity:0;transform:translateY(-8px) scale(.98);}}
+
+.maze-tools{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;}
+.mztool{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 4px 6px;
+  border-radius:9px;border:1px solid var(--border);background:linear-gradient(180deg,var(--panel2),var(--panel));
+  cursor:pointer;transition:.14s;}
+.mztool:hover:not(.disabled){border-color:#6fa050;transform:translateY(-2px);}
+.mztool.disabled{opacity:.38;cursor:default;filter:grayscale(1);}
+.mztool .mzt-key{font-size:9.5px;letter-spacing:1.4px;color:var(--muted);font-weight:bold;line-height:1;}
+.mztool .mzt-key b{color:var(--text);}
+.mztool .mzt-ico{font-size:21px;line-height:1;}
+.mztool .mzt-ico svg{width:24px;height:24px;}
+.mztool .mzt-qty{position:absolute;right:3px;bottom:2px;font-size:10px;font-weight:bold;
+  background:rgba(0,0,0,.62);border-radius:9px;padding:0 5px;color:var(--text);}
+
+.maze-tile{transition:opacity .42s ease, filter .42s ease, background-color .42s ease, box-shadow .42s ease;}
+
+.maze-mover-player{transition:left .16s cubic-bezier(.35,.02,.28,1), top .16s cubic-bezier(.35,.02,.28,1);}
 
 .venture-card{padding:18px;display:flex;flex-direction:column;gap:12px;min-height:64px;box-sizing:border-box;}
 .venture-title{font-size:1.25em;font-weight:bold;}
@@ -626,7 +666,8 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 <body>
 <div id="app"></div>
 <div id="modalRoot"></div>
-<div class="version-tag" id="versionTag"></div>
+
+<div class="version-tag" id="versionTag" style="display:none"></div>
 <div class="changelog-link" id="changelogLink">Changelog</div>
 <script>
 "use strict";
@@ -1293,7 +1334,8 @@ async function claimQuestReward(questId){
       setToast(reward.done ? `${name} complete!` : `Step ${reward.step}/${reward.step_count} of ${name} complete.`);
     }
     if(questId==="wardens" && typeof reward.step==="number"){
-      setToast(reward.done ? "The Four Wardens complete! No stronghold in these woods still stands against you." : `Step ${reward.step}/${reward.step_count} of The Four Wardens complete, a longer delve awaits.`);
+      const wardenName=Balance.QUEST_DEFS.NAMES.wardens;
+      setToast(reward.done ? `${wardenName} complete! No stronghold in these woods still stands against you.` : `Step ${reward.step}/${reward.step_count} of ${wardenName} complete, a longer delve awaits.`);
     }
     autosave();
   }catch(e){
@@ -1592,7 +1634,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.25-web",
+  GAME_VERSION:"v0.25.2-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
 
@@ -1728,7 +1770,7 @@ const Balance = {
   QUEST_DEFS:{
     IDS:["explore","wardens","gatherer","wanderers","streak","cauldron","elder","palisade","pacifist","trader","cleanse"],
     NAMES:{
-      explore:"Every Root and Hollow", wardens:"The Four Wardens", gatherer:"The Gatherer's Dozen",
+      explore:"Every Root and Hollow", wardens:"The Warden Trials", gatherer:"The Gatherer's Dozen",
       wanderers:"Thin the Wanderers", streak:"The Unbroken Chain", cauldron:"The Simmering Cauldron",
       elder:"The Ascendant Hunt", palisade:"Behind the Palisade", pacifist:"The Pacifist",
       trader:"The Long Road to Market", cleanse:"Cleanse the Forest",
@@ -1774,7 +1816,7 @@ const Balance = {
       {band:"Legendary", count:1, stat_points:5, xp:15000},
     ],
 
-    CAULDRON_ATTR_POTION_REQUIRED:false,
+    CAULDRON_ATTR_POTION_REQUIRED:true,
     ATTR_POTION_IDS:["potion_of_might","potion_of_swiftness","potion_of_intellect"],
 
     REWARDS:{
@@ -2880,6 +2922,13 @@ const Net = {
       render();
     }catch(e){  }
   },
+  async adminGrant(payload){
+    const res=await fetch(this.apiBase()+"/api/admin/grant",{method:"POST",headers:Object.assign(this.authHeaders({"Content-Type":"application/json"}),{"X-Admin-Token":GF.admin_token||""}),body:JSON.stringify(payload)});
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.error||"Could not apply that grant.");
+    if(data.account_gold!=null) this.accountGold=data.account_gold;
+    return data;
+  },
   async setAdminAnnouncement(message,adminToken){
     const res=await fetch(this.apiBase()+"/api/admin/announcement",{method:"POST",headers:Object.assign(this.authHeaders({"Content-Type":"application/json"}),{"X-Admin-Token":adminToken}),body:JSON.stringify({message})});
     const data=await res.json().catch(()=>({}));
@@ -3137,7 +3186,17 @@ const PS = {
     for(const id of (this.owned_spells||[])) if(!this.owned_spell_tiers[id]) this.owned_spell_tiers[id]=1;
   },
 
-  getSpellTier(spellId){ return (this.owned_spell_tiers&&this.owned_spell_tiers[spellId])||0; },
+  getOwnedSpellTier(spellId){ return (this.owned_spell_tiers&&this.owned_spell_tiers[spellId])||0; },
+
+  getSpellTier(spellId){
+    const owned=this.getOwnedSpellTier(spellId);
+    if(!owned) return 0;
+    for(let t=owned;t>=1;t--){
+      const def=Balance.spellAtTier(spellId,t);
+      if(def && this.level>=(def.level_req||1)) return t;
+    }
+    return 0;
+  },
 
   ownsSpell(spellId){ return this.getSpellTier(spellId)>0; },
 
@@ -4254,12 +4313,28 @@ function critFloatFontSizeEm(rolledMult, maxMult, floorOverride){
   return 2.4;
 }
 
+let _bulkNotifyDepth=0, _bulkGold=0, _bulkMaterials=0;
+function beginBulkNotify(){
+  if(_bulkNotifyDepth===0){ _bulkGold=0; _bulkMaterials=0; }
+  _bulkNotifyDepth++;
+}
+function endBulkNotify(){
+  _bulkNotifyDepth=Math.max(0,_bulkNotifyDepth-1);
+  if(_bulkNotifyDepth>0) return;
+  const gold=_bulkGold, materials=_bulkMaterials;
+  _bulkGold=0; _bulkMaterials=0;
+  if(gold) spawnFloat("gold",`${gold>0?"+":""}${Math.round(gold)}g`,"float-text-gold");
+  if(materials) spawnFloat("materials",`${materials>0?"+":""}${Math.round(materials)} materials`,materials>0?"float-text-gold":"float-text-dmg");
+}
 function notifyGoldChange(delta){
+  if(!delta) return;
+  if(_bulkNotifyDepth>0){ _bulkGold+=delta; return; }
   spawnFloat("gold",`${delta>0?"+":""}${delta}g`,"float-text-gold");
 }
 
 function notifyMaterialsChange(delta){
   if(!delta) return;
+  if(_bulkNotifyDepth>0){ _bulkMaterials+=delta; return; }
   spawnFloat("materials",`${delta>0?"+":""}${delta} materials`,delta>0?"float-text-gold":"float-text-dmg");
 }
 
@@ -4531,6 +4606,12 @@ function hudRail(){
   const c=PS.getClassData();
   const buffIcons=activePotionBuffIcons();
   const rail=h("div",{id:"hud-rail"});
+
+  rail.appendChild(h("div",{class:"row",style:{justifyContent:"space-between",alignItems:"center",
+    marginBottom:"2px",fontSize:"11.5px"}},[
+    h("span",{class:"linklike",onClick:()=>{ autosave(); GF.goto("mainMenuSlots"); }},["← Menu"]),
+    h("span",{class:"linklike muted",onClick:()=>{ GF._preChangelogScreen=GF.screen; GF.goto("changelog"); }},[`${Balance.GAME_VERSION} Changelog`]),
+  ]));
   if(PS.current_slot<0){
 
     return rail;
@@ -4557,22 +4638,41 @@ function hudRail(){
         onClick:GF.screen==="inventory"?null:()=>GF.goto("inventory",{inventory_return_to:GF.screen})},["Character Sheet"]),
       characterSheetEntryIcon(),
     ]),
+
+    questRailEntry(),
+
+    h("div",{style:{marginTop:"9px"}},[
+      h("div",{class:"hud-rail-title"},["Spells"]),
+      spellSlotIconRow(),
+    ]),
   ]));
   rail.appendChild(h("div",{class:"panel"},[hudCombatSummary()]));
   rail.appendChild(h("div",{class:"panel"},[playerStatsCompactPanel()]));
   return rail;
 }
 
+function questRailEntry(){
+  let ready=0;
+  const entries=(PS.quests&&PS.quests.entries)||{};
+  for(const qid in entries) if(entries[qid] && entries[qid].status==="ready") ready++;
+  return h("div",{class:"row gap",style:{alignItems:"center",marginTop:"5px"}},[
+    h("div",{class:"linklike",style:{fontWeight:"bold",fontSize:"12.5px",cursor:GF.screen==="quests"?"default":"pointer"},
+      onClick:GF.screen==="quests"?null:()=>GF.goto("quests",{quests_return_to:GF.screen})},["Quests"]),
+    ready>0?h("span",{style:{background:"var(--gold)",color:"#1a1a10",borderRadius:"9px",padding:"0 6px",
+      fontSize:"11px",fontWeight:"bold"}},[`${ready} ready`]):null,
+  ]);
+}
 function hudCombatSummary(){
+
   const d=PS.getDamageBreakdown();
   const total=Math.round((d.totalMin+d.totalMax)/2);
   const parts=[
-    `Base (level and attributes): ${Math.round(d.baseMin)} to ${Math.round(d.baseMax)}`,
+    `Base (level and attributes): ${Math.round((d.baseMin+d.baseMax)/2)}`,
     `Gear: +${Math.round(d.gearBonus)}`,
   ];
   if(d.weaponSkillBonus) parts.push(`Weapon proficiency: +${Math.round(d.weaponSkillBonus)} (+${Math.round(d.weaponSkillPct)}%)`);
   if(d.intDmgBonus) parts.push(`Intelligence: +${Math.round(d.intDmgBonus)}`);
-  parts.push(`Total range: ${Math.round(d.totalMin)} to ${Math.round(d.totalMax)}`);
+  parts.push(`Total: ${total}`);
   return h("div",{},[
     h("div",{class:"hud-rail-title"},["Damage"]),
     h("div",{class:"tooltip",style:{fontSize:"19px",fontWeight:"bold",cursor:"help",display:"inline-block",
@@ -4612,56 +4712,6 @@ function refreshStatHeaderInPlace(smooth){
   if(hpTip) hpTip.setAttribute("data-tip",`Life ${Math.round(PS.current_hp)} / ${Math.round(maxHp)}`);
   const manaTip=document.getElementById("hud-globe-mana");
   if(manaTip) manaTip.setAttribute("data-tip",`Mana ${Math.round(PS.current_mana)} / ${Math.round(maxMana)}`);
-  return true;
-}
-function refreshStatHeaderInPlaceLegacyUnused(smooth){
-  const el=document.getElementById("stat-header-panel");
-  if(!el || !el.parentNode) return false;
-
-  const hpText=document.getElementById("stat-hp-text");
-  const hpFill=document.getElementById("stat-hp-bar-fill");
-  const stText=document.getElementById("stat-stamina-text");
-  const stFill=document.getElementById("stat-stamina-bar-fill");
-  if(!hpText||!hpFill||!stText||!stFill) return false;
-  hpText.textContent=`HP ${Math.round(PS.current_hp)}/${Math.round(PS.getMaxHp())}`;
-  hpFill.style.width=clampf(PS.current_hp/PS.getMaxHp()*100,0,100)+"%";
-  stText.textContent=`Stamina ${Math.round(PS.current_stamina)}/${Math.round(PS.getMaxStamina())}`;
-  stFill.style.width=clampf(PS.current_stamina/PS.getMaxStamina()*100,0,100)+"%";
-
-  const manaText=document.getElementById("stat-mana-text");
-  const manaFill=document.getElementById("stat-mana-bar-fill");
-  if(manaText) manaText.textContent=`Mana ${Math.round(PS.current_mana)}/${Math.round(PS.getMaxMana())}`;
-  if(manaFill){ manaFill.style.width=clampf(PS.current_mana/PS.getMaxMana()*100,0,100)+"%"; manaFill.className="bar-fill bar-mana"+(smooth?" bar-fill-slow-tick":""); }
-
-  const healPreviewFill=document.getElementById("stat-hp-heal-preview");
-  if(healPreviewFill) healPreviewFill.style.width=clampf((PS.current_hp+PS.getPendingHealAmount())/PS.getMaxHp()*100,0,100)+"%";
-
-  const staminaHealPreviewFill=document.getElementById("stat-stamina-heal-preview");
-  if(staminaHealPreviewFill) staminaHealPreviewFill.style.width=clampf((PS.current_stamina+PS.getPendingStaminaHealAmount())/PS.getMaxStamina()*100,0,100)+"%";
-
-  const poisoned=PS.isPoisoned();
-  hpText.className=poisoned?"hp-text hp-text-poisoned":"hp-text";
-  hpFill.className="bar-fill "+(poisoned?"bar-hp-poisoned":"bar-hp")+(smooth?" bar-fill-slow-tick":"");
-  stFill.className="bar-fill bar-stamina"+(smooth?" bar-fill-slow-tick":"");
-  const poisonIcon=document.getElementById("stat-poison-icon");
-  if(poisonIcon){
-    poisonIcon.style.opacity=poisoned?"1":"0";
-    if(poisoned) poisonIcon.setAttribute("title",`Poisoned: draining ${PS.getPoisonHpPerSec().toFixed(1)} HP/sec for ${formatMsAsMinSec(PS.getPoisonMsLeft())} more (won't drop you below 1 HP on its own).`);
-  }
-
-  const healingText=document.getElementById("stat-healing-text");
-  if(healingText){
-    const healPerSec=PS.getHealPerSecond();
-    healingText.style.display=healPerSec>0?"inline":"none";
-    healingText.textContent=`(healing +${healPerSec.toFixed(1)}/sec)`;
-  }
-
-  const staminaHealingText=document.getElementById("stat-stamina-healing-text");
-  if(staminaHealingText){
-    const staminaHealPerSec=PS.getStaminaHealPerSecond();
-    staminaHealingText.style.display=staminaHealPerSec>0?"inline":"none";
-    staminaHealingText.textContent=`(recovering +${staminaHealPerSec.toFixed(1)}/sec)`;
-  }
   return true;
 }
 
@@ -4908,34 +4958,6 @@ function inventoryPreview(){
   ]);
 }
 
-function damageLine(){
-  const d=PS.getDamageBreakdown();
-
-  const baseFlat=Math.round((d.baseMin+d.baseMax)/2);
-  const gearPart=d.gearBonus>0?`, +${Math.round(d.gearBonus)} from gear`:"";
-
-  const skillTip=d.weaponSkillPct>0?`\nFrom skill bonuses: +${Math.round(d.weaponSkillPct*100)}%`:"";
-
-  const intTip=d.intDmgBonus>0?`\nFrom Intelligence: +${Math.round(d.intDmgBonus)}`:"";
-
-  const skillPart=d.weaponSkillPct>0?`, +${Math.round(d.weaponSkillBonus)} from skill`:"";
-
-  const intPart=d.intDmgBonus>0?`, +${Math.round(d.intDmgBonus)} from Intelligence`:"";
-
-  const flatTotal=Math.round((d.totalMin+d.totalMax)/2);
-  const children=[
-    h("span",{class:"muted tooltip",style:{fontSize:".85em"},"data-tip":`Base (level + attributes): ${baseFlat}\nFrom equipped gear: +${Math.round(d.gearBonus)}${skillTip}${intTip}`},[
-      `Damage: ${flatTotal} (${baseFlat} base${gearPart}${skillPart}${intPart})`
-    ]),
-  ];
-
-  if(PS.hasQuadDamage()){
-    const quadFlat=flatTotal*4;
-    children.push(h("span",{class:"tooltip quad-damage-text",style:{fontSize:".85em",marginLeft:"6px"},"data-tip":`Quad Damage: 4x damage output for ${PS.quad_dmg_rounds_left} more combat round(s).`},[`⚡ Quad Damage: ${quadFlat}`]));
-  }
-  return h("div",{},children);
-}
-
 function formatMsAsMinSec(ms){
   const totalSec=Math.max(0,Math.ceil(ms/1000));
   const m=Math.floor(totalSec/60), s=totalSec%60;
@@ -5003,17 +5025,6 @@ function forestReputationTooltipText(rep){
     return `Negative standing with this tier's forest: ${-rep} extra roaming mob${rep<-1?"s":""} spawn while exploring it.`;
   }
   return "Neutral standing with this tier's forest, no bonus or penalty yet. Squash a Critter encounter to lower it, or spare one to raise it.";
-}
-
-function secondaryStatsPanel(){
-
-  return h("div",{class:"col gap",style:{flex:"1",minWidth:"0",alignItems:"flex-end",textAlign:"right"}},[
-    damageLine(),
-
-    PS.kill_streak>0?h("div",{class:"muted"},[`Kill streak: ${PS.kill_streak} (+${PS.kill_streak*Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL}% Magic Find)`]):null,
-
-    h("div",{class:"tooltip muted","data-tip":forestReputationTooltipText(PS.getCurrentForestReputation())},[`Forest Reputation (Tier ${tierRomanNumeral(PS.getClassData().tier||1)}): ${PS.getCurrentForestReputation()}`]),
-  ]);
 }
 
 function playerStatsGearDelta(amount,isPercent){
@@ -5096,85 +5107,6 @@ function playerStatsCompactPanel(){
 
 function statHeader(opts={}){
   return h("div",{class:"hud-legacy-stat-header"});
-}
-function statHeaderLegacyUnused(opts={}){
-  const compact=!!opts.compact;
-  const c=PS.getClassData();
-  const buffIcons=activePotionBuffIcons();
-
-  return h("div",{id:"stat-header-panel",class:"panel",style:{marginBottom:compact?"0":"14px"}},[
-    h("div",{class:"row",style:{justifyContent:"space-between",alignItems:"flex-start"}},[
-      h("div",{},[
-        h("div",{style:{fontWeight:"bold"}},[PS.character_name, PS.hardcore?h("span",{style:{color:"#e07a7a"}},[" [Hardcore]"]):null]),
-        h("div",{class:"muted"},[`Lv ${PS.level} ${c.display_name||""}`]),
-        buffIcons.length?h("div",{style:{marginTop:"2px"}},buffIcons):null,
-      ]),
-      h("div",{class:"row gap",style:{alignItems:"center"}},[
-
-        h("div",{class:"linklike",style:{fontWeight:"bold",cursor:GF.screen==="inventory"?"default":"pointer"},onClick:GF.screen==="inventory"?null:()=>GF.goto("inventory",{inventory_return_to:GF.screen})},["Character Sheet"]),
-
-        characterSheetEntryIcon(),
-
-        (PS.unspent_stat_points>0 && GF.screen!=="inventory")?h("span",{class:"stat-point-cta",title:`${PS.unspent_stat_points} unspent stat point${PS.unspent_stat_points===1?"":"s"}, click to assign them`,onClick:()=>GF.goto("inventory",{inventory_return_to:GF.screen})},["+"]):null,
-
-        GF.screen!=="quests"?questsButton():null,
-      ]),
-      h("div",{class:"col",style:{alignItems:"flex-end"}},[
-
-        h("div",{style:{position:"relative"}},[
-          h("div",{class:"gold-text"},[`${PS.gold} gold`]),
-          floatLayer("gold"),
-        ]),
-
-        h("div",{style:{position:"relative"}},[
-          h("div",{class:"muted"},[`${PS.materials} materials`]),
-          floatLayer("materials"),
-        ]),
-      ]),
-    ]),
-    h("div",{class:"row",style:{marginTop:"8px",alignItems:"flex-start",gap:"14px"}},[
-      h("div",{class:"col",style:{gap:compact?"3px":"6px",flex:"0 0 33%",maxWidth:"33%",minWidth:"0"}},[
-
-        h("div",{class:"col",style:{gap:"1px"}},[
-
-        h("div",{},[h("span",{class:"xp-text"},[`XP ${PS.xp}/${PS.xp_to_next}`]), PS.xp_buff_encounters_left>0?h("span",{class:"tooltip","data-tip":`Experience shrine active: bonus XP for ${PS.xp_buff_encounters_left} more battle${PS.xp_buff_encounters_left===1?"":"s"}.`,style:{marginLeft:"4px"}},["✨"]):null]),
-
-        h("div",{style:{position:"relative"}},[bar(PS.xp/PS.xp_to_next*100,"bar-xp bar-fill-xp-grow",compact,"stat-xp-bar-fill"), floatLayer("xpbar")]),
-        ]),
-        h("div",{class:"col",style:{gap:"1px"}},[
-
-        h("div",{},[h("span",{id:"stat-hp-text",class:PS.isPoisoned()?"hp-text hp-text-poisoned":"hp-text"},[`HP ${Math.round(PS.current_hp)}/${Math.round(PS.getMaxHp())}`]), PS.isPoisoned()?h("span",{id:"stat-poison-icon",class:"poison-icon",title:`Poisoned: draining ${PS.getPoisonHpPerSec().toFixed(1)} HP/sec for ${formatMsAsMinSec(PS.getPoisonMsLeft())} more (won't drop you below 1 HP on its own).`,style:{marginLeft:"4px",opacity:"1"}},["🤢"]):null,
-
-        PS.isInvulnerable()?h("span",{class:"tooltip","data-tip":`Touch of Unicorn: immune to damage/poison for ${PS.invuln_rounds_left} more round(s) (combat or traps).`,style:{marginLeft:"4px"}},["🦄"]):null,
-
-        PS.eyesight_potion_steps_left>0?h("span",{class:"tooltip","data-tip":`Elixir of Eyesight: maze reveal widened to 5×5 for ${PS.eyesight_potion_steps_left} more step${PS.eyesight_potion_steps_left===1?"":"s"}.`,style:{marginLeft:"4px"}},["👁️"]):null,
-
-        PS.hasMagicFindShrineBuff()?h("span",{class:"tooltip","data-tip":`Magic Find Shrine: +${Balance.SHRINE_MAGIC_FIND_PCT}% Magic Find for ${PS.magic_find_rounds_left} more round${PS.magic_find_rounds_left===1?"":"s"}.`,style:{marginLeft:"4px"}},["🔍"]):null,
-
-        h("span",{id:"stat-healing-text",class:"muted",style:{marginLeft:"4px",display:PS.getHealPerSecond()>0?"inline":"none"}},[`(healing +${PS.getHealPerSecond().toFixed(1)}/sec)`])]),
-        hpBar(compact),
-        ]),
-
-        h("div",{class:"col",style:{gap:"1px"}},[
-        h("div",{},[h("span",{id:"stat-mana-text",class:"mana-text"},[`Mana ${Math.round(PS.current_mana)}/${Math.round(PS.getMaxMana())}`]),
-        h("span",{id:"stat-mana-healing-text",class:"muted",style:{marginLeft:"4px",display:PS.getManaHealPerSecond()>0?"inline":"none"}},[`(recovering +${PS.getManaHealPerSecond().toFixed(1)}/sec)`])]),
-        manaBar(compact),
-        ]),
-
-        h("div",{class:"col",style:{gap:"1px"}},[
-        h("div",{},[h("span",{id:"stat-stamina-text",class:"stamina-text"},[`Stamina ${Math.round(PS.current_stamina)}/${Math.round(PS.getMaxStamina())}`]), PS.stamina_shrine_buff>0?h("span",{class:"tooltip","data-tip":`Stamina shrine active: ${Math.round(PS.stamina_shrine_buff)} bonus stamina in reserve.`,style:{marginLeft:"4px"}},["✨"]):null,
-
-        h("span",{id:"stat-stamina-healing-text",class:"muted",style:{marginLeft:"4px",display:PS.getStaminaHealPerSecond()>0?"inline":"none"}},[`(recovering +${PS.getStaminaHealPerSecond().toFixed(1)}/sec)`])]),
-        staminaBar(compact),
-        ]),
-
-        spellSlotIconRow(),
-      ]),
-      secondaryStatsPanel(),
-    ]),
-
-    compact?null:playerStatsCompactPanel(),
-  ]);
 }
 
 function wandrianHeader(){
@@ -6114,6 +6046,14 @@ function getVentureDepth(){
   return GF.ventureDepth;
 }
 
+function cancelBonfireWarmthOnLeavingTown(){
+  if(!GF.bonfireKindle) return;
+  GF.bonfireKindle=null;
+  if(GF.bonfireInterval){ clearInterval(GF.bonfireInterval); GF.bonfireInterval=null; }
+
+  PS.active_heals=[]; PS.active_stamina_heals=[]; PS.active_mana_heals=[];
+  setToast("You leave the fire before it has done its work.");
+}
 function kindleBonfirePanel(){
   const WARM_MS=Balance.POTION_HEAL_DURATION_MS, HOLD_MS=900, FADE_MS=750;
 
@@ -6148,7 +6088,8 @@ function kindleBonfirePanel(){
   }
 
   const isActive=warming||holding||fading;
-  const label=warming?"Warming...":(holding?"Fully restored!":"Kindle the Bonfire");
+
+  const label=warming?"Warming...":(holding?"You feel fully restored":"Kindle the Bonfire");
 
   const subtext=isActive
     ? (warming?"Warming yourself by the flames...":(holding?"Fully healed and rested.":""))
@@ -6207,7 +6148,7 @@ function screenTown(){
     h("div",{class:"town-row"},[
       h("div",{class:"town-cell"},[
         h("div",{class:"row venture-row"},[
-          h("div",{class:"panel venture-card venture-fill venture-clickable",onClick:()=>{ PS.resetKillStreak(); GF.goto("maze",{maze_depth: ventureDepth}); }},[
+          h("div",{class:"panel venture-card venture-fill venture-clickable",onClick:()=>{ cancelBonfireWarmthOnLeavingTown(); PS.resetKillStreak(); GF.goto("maze",{maze_depth: ventureDepth}); }},[
             h("div",{class:"venture-title"},["🌳 Venture into the Woods"]),
             h("div",{class:"muted",style:{fontSize:".85em",marginTop:"2px"}},[`Area Level: ${ventureDepth} (Tier ${tierRomanNumeral(Balance.mobTierForAreaLevel(ventureDepth))})`]),
 
@@ -6222,17 +6163,24 @@ function screenTown(){
 
             h("label",{class:"row",style:{fontSize:".7em",marginTop:"8px",gap:"5px",alignItems:"flex-start",cursor:"pointer",textAlign:"left"}},[
               h("input",{type:"checkbox",checked:!!GF.isNight,style:{marginTop:"1px"},onChange:(e)=>{ GF.isNight=e.target.checked; render(); }}),
-              h("span",{style:{color:"#cbb0e6",fontWeight:"bold",whiteSpace:"nowrap"}},["🌙 Night delve"]),
+
+              h("span",{class:"tooltip",style:{color:"#cbb0e6",fontWeight:"bold",whiteSpace:"nowrap",cursor:"help"},
+                "data-tip":`Night delve:\n+${Math.round((Balance.NIGHT_ENCOUNTER_CHANCE_MULT-1)*100)}% chance of a monster encounter per step\n+${Balance.NIGHT_MAGIC_FIND_BONUS_PCT}% Magic Find\n+${Balance.NIGHT_GOLD_FIND_BONUS_PCT}% Gold Find\n${Math.round(Balance.NIGHT_ROAMER_CHARGING_BIAS_CHANCE*100)}% of roaming monsters actively charge you instead of wandering\nTorchlight reaches one tile less far\nTakes effect on the next maze you enter.`},["🌙 Night delve"]),
             ]),
           ]),
         ]),
       ]),
+
+      h("div",{class:"town-cell"},[kindleBonfirePanel()]),
     ]),
 
     h("div",{class:"town-row"},[
-      h("div",{class:"town-cell"},[kindleBonfirePanel()]),
       h("div",{class:"town-cell"},[
         serviceCard("Storage Vault","🗝","Stash gear safely away from your backpack.",()=>{ Net.vaultCache=null; GF.goto("vault"); }),
+      ]),
+
+      h("div",{class:"town-cell"},[
+        serviceCard("Auction House","📜","Trade with other travelers.",()=>{ Net.auctionCache=null; GF.goto("auctionHouse"); }),
       ]),
       h("div",{class:"town-cell"},[
 
@@ -6259,10 +6207,6 @@ function screenTown(){
         serviceCard("Magician","🔮","Words older than the woods, learned for coin.",()=>GF.goto("magician")),
       ]),
 
-      h("div",{class:"town-cell"},[
-
-        serviceCard("Auction House","📜","Trade with other travelers.",()=>{ Net.auctionCache=null; GF.goto("auctionHouse"); }),
-      ]),
     ]),
 
     h("div",{class:"town-row"},[
@@ -6299,11 +6243,6 @@ function screenTown(){
     ]) : null,
   ]));
 
-  root.appendChild(h("hr"));
-  root.appendChild(h("div",{class:"row"},[
-    h("span",{class:"linklike",onClick:()=>{ autosave(); GF.goto("mainMenuSlots"); }},["← Return to Menu"]),
-    h("span",{class:"linklike",style:{marginLeft:"auto"},onClick:()=>GF.goto("adminPanel")},["dev tools"]),
-  ]));
   return root;
 }
 
@@ -6804,10 +6743,6 @@ function screenMaze(){
 
   root.appendChild(statHeader());
 
-  root.appendChild(h("h2",{},[`The Woods, Area Level ${depth} (Tier ${tierRomanNumeral(Balance.mobTierForAreaLevel(depth))})`]));
-
-  root.appendChild(h("div",{class:"lore"},["Overgrown paths wind through the trees, arrows or click to move."]));
-
   if(!PS.hasInventorySpace()){
     root.appendChild(h("div",{class:"panel",style:{marginBottom:"10px",background:"rgba(160,40,40,.28)",borderColor:"#a04a4a"}},[
       h("div",{style:{color:"#e07a7a",fontWeight:"bold"}},["⚠ Your backpack is full."]),
@@ -6817,7 +6752,7 @@ function screenMaze(){
 
   const gridAspectRatio=`${maze.size} / ${maze.sizeH}`;
 
-  const forestName=Balance.TOWN_NAMES[Math.min(Balance.TOWN_NAMES.length-1, Balance.mobTierForAreaLevel(depth)-1)];
+  const forestName=Balance.TOWN_NAMES[Math.min(Balance.TOWN_NAMES.length-1, (PS.getClassData().tier||1)-1)];
   const plaqueText=`${forestName} · Area Level ${depth}${maze.isNight?" · Nightfall":""}`;
 
   let gridArea;
@@ -6910,6 +6845,8 @@ function screenMaze(){
   const mazeFrame=h("div",{class:"maze-frame"+(maze.isNight?" maze-night":"")},[
     h("div",{class:"maze-plaque"},[plaqueText]),
     gridArea,
+
+    mazeToastLayer(),
   ]);
 
   root.appendChild(h("div",{class:"maze-wrap"},[mazeFrame,
@@ -6927,37 +6864,76 @@ function screenMaze(){
         h("button",{disabled:!!GF.mazeOverlay,onClick:()=>attemptMazeMove(-1,0)},["←"]), h("div",{}), h("button",{disabled:!!GF.mazeOverlay,onClick:()=>attemptMazeMove(1,0)},["→"]),
         h("div",{}), h("button",{disabled:!!GF.mazeOverlay,onClick:()=>attemptMazeMove(0,1)},["↓"]), h("div",{}),
       ]),
-      h("div",{class:"row gap"},[
 
-        h("button",{disabled:!!GF.mazeOverlay||!PS.canUseConsumable(PS.lowestAvailableConsumable("health")),onClick:()=>{ PS.useConsumable(PS.lowestAvailableConsumable("health")); autosave(); render(); }},[`Use Health Potion (${getKeyboardShortcuts().healthPotion.toUpperCase()})`]),
-        h("button",{disabled:!!GF.mazeOverlay||!PS.canUseConsumable(PS.lowestAvailableConsumable("stamina")),onClick:()=>{ PS.useConsumable(PS.lowestAvailableConsumable("stamina")); autosave(); render(); }},[`Use Stamina Potion (${getKeyboardShortcuts().staminaPotion.toUpperCase()})`]),
-
-        h("button",{disabled:!!GF.mazeOverlay||!PS.canUseConsumable("antidote"),onClick:()=>{ PS.useConsumable("antidote"); autosave(); render(); }},[`Use Antidote (${getKeyboardShortcuts().antidote.toUpperCase()})`]),
-
-        h("button",{disabled:!!GF.mazeOverlay||!PS.canUseConsumable(PS.lowestAvailableConsumable("mana")),onClick:()=>{ PS.useConsumable(PS.lowestAvailableConsumable("mana")); autosave(); render(); }},[`Use Mana Potion (${getKeyboardShortcuts().manaPotion.toUpperCase()})`]),
-
-        h("button",{disabled:!!GF.mazeOverlay||!PS.canUseConsumable("elixir_of_clarity"),onClick:()=>{
-          const px=maze.playerIdx%maze.size, py=Math.floor(maze.playerIdx/maze.size);
-          const ripple=[];
-          for(let i=0;i<maze.cells.length;i++){
-            if(!maze.cells[i].discovered){
-              const cx=i%maze.size, cy=Math.floor(i/maze.size);
-              ripple.push({idx:i, dist:Math.abs(cx-px)+Math.abs(cy-py)});
-            }
-          }
-          PS.useConsumable("elixir_of_clarity");
-          maze._clarityReveal=ripple;
-          autosave(); render(); animateMazeMovers(null,null);
-        }},[`Use Elixir of Clairvoyance (${PS.getTotalClarityChargesRemaining()} left)`]),
-      ]),
-
-      h("button",{disabled:!!GF.mazeOverlay,onClick:()=>{ askConfirm("Try a different route through this area? Your current position and any progress on this maze layout (fog of war, cleared chests/shrines, the Stronghold) will be lost, your area level stays the same.",()=>{ GF.overworld_snapshot=null; GF.goto("maze",{maze_depth:depth}); },{confirmLabel:"Try a Different Route"}); }},["Try a Different Route"]),
-      h("button",{disabled:!!GF.mazeOverlay,onClick:()=>{ resetMazePositionToStart(); GF.goto("town"); }},["← Retreat to Town"]),
+      mazeToolGrid(maze),
     ]),
   ]));
 
-  root.appendChild(mazeLogBox());
   return root;
+}
+
+function mazeTool(keyLabel, icon, qty, disabled, tip, onClick){
+  const node=h("div",{class:"mztool tooltip"+(disabled?" disabled":""),"data-tip":tip,
+    onClick:disabled?null:onClick},[
+    h("div",{class:"mzt-key"},keyLabel?["--",h("b",{},[keyLabel.toUpperCase()]),"--"]:["\u00a0"]),
+    h("div",{class:"mzt-ico"},[icon]),
+    qty!=null?h("div",{class:"mzt-qty"},[`${qty}`]):null,
+  ]);
+  return node;
+}
+function mazeToolGrid(maze){
+  const keys=getKeyboardShortcuts();
+  const busy=!!GF.mazeOverlay;
+
+  const totalOf=(kind)=>{
+    let total=0;
+    for(const itemId in PS.consumables){
+      const item=DL.getItem(itemId);
+      if(!item) continue;
+      if(kind==="health"&&item.heal_amount) total+=PS.consumables[itemId];
+      else if(kind==="stamina"&&item.stamina_amount) total+=PS.consumables[itemId];
+      else if(kind==="mana"&&item.mana_amount) total+=PS.consumables[itemId];
+    }
+    return total;
+  };
+  const quaff=(kind)=>{
+
+    const itemId=PS.bestAvailableConsumable(kind);
+    if(!PS.canUseConsumable(itemId)) return;
+    PS.useConsumable(itemId); autosave(); render();
+  };
+  const tools=[
+    mazeTool(keys.healthPotion,"\u2764\ufe0f",totalOf("health"),busy||!PS.canUseConsumable(PS.bestAvailableConsumable("health")),
+      "Drink a Health Potion. Uses your strongest one first.",()=>quaff("health")),
+    mazeTool(keys.manaPotion,"\ud83d\udd35",totalOf("mana"),busy||!PS.canUseConsumable(PS.bestAvailableConsumable("mana")),
+      "Drink a Mana Potion. Uses your strongest one first.",()=>quaff("mana")),
+    mazeTool(keys.staminaPotion,"\u26a1",totalOf("stamina"),busy||!PS.canUseConsumable(PS.bestAvailableConsumable("stamina")),
+      "Drink a Stamina Potion. Uses your strongest one first.",()=>quaff("stamina")),
+    mazeTool(keys.antidote,"\ud83e\uddea",PS.consumables.antidote||0,busy||!PS.canUseConsumable("antidote"),
+      "Cure poison with an Antidote.",()=>{ PS.useConsumable("antidote"); autosave(); render(); }),
+    mazeTool(null,"\ud83d\udd2e",PS.getTotalClarityChargesRemaining(),busy||!PS.canUseConsumable("elixir_of_clarity"),
+      "Elixir of Clairvoyance: reveals the maze around you.",()=>{
+        const px=maze.playerIdx%maze.size, py=Math.floor(maze.playerIdx/maze.size);
+        const ripple=[];
+        for(let i=0;i<maze.cells.length;i++){
+          if(!maze.cells[i].discovered){
+            const cx=i%maze.size, cy=Math.floor(i/maze.size);
+            ripple.push({idx:i, dist:Math.abs(cx-px)+Math.abs(cy-py)});
+          }
+        }
+        PS.useConsumable("elixir_of_clarity");
+        maze._clarityReveal=ripple;
+        autosave(); render(); animateMazeMovers(null,null);
+      }),
+
+    mazeTool(null,"\u267b\ufe0f",null,busy,
+      "Try a different route: regenerates this area at the same level. Fog of war, roamers and the stronghold all reset.",
+      ()=>{ askConfirm("Try a different route through this area? Your current position and any progress on this maze layout (fog of war, cleared guardians, opened chests) will be lost.",()=>{ GF.overworld_snapshot=null; GF.goto("maze",{maze_depth:GF.maze_depth}); }); }),
+    mazeTool(null,"\ud83d\udeaa",null,busy,
+      "Retreat to town. Your kill streak ends.",
+      ()=>{ resetMazePositionToStart(); GF.goto("town"); }),
+  ];
+  return h("div",{class:"maze-tools"},tools);
 }
 
 function revealAround(maze,centerIdx,radius){
@@ -7033,7 +7009,7 @@ function animateMazeMovers(prevPlayerIdx, prevRoamerPositions){
 function onStepMaze(maze,targetIdx){
 
   if(PS.current_stamina<=0){
-    mazeLog("You're exhausted and can't go any further. Use a Stamina Potion, or retreat to town to rest.");
+    mazeToast("You're exhausted and can't go any further.\nDrink a Stamina Potion, or retreat to town to rest.","bad");
     render();
     return;
   }
@@ -7059,7 +7035,7 @@ function onStepMaze(maze,targetIdx){
 
   revealAround(maze,targetIdx,mazeEyesightRadius(maze));
   if(PS.current_stamina<=0){
-    mazeLog("You're exhausted. Use a Stamina Potion, or retreat to town to rest, before you can move again.");
+    mazeToast("You're exhausted.\nDrink a Stamina Potion, or retreat to town to rest.","bad");
   }
 
   const roamerAlreadyHere=maze.roamers && maze.roamers.find(r=>!r.defeated && r.idx===maze.playerIdx);
@@ -7092,7 +7068,7 @@ function onStepMaze(maze,targetIdx){
     if(outcome==="fall"){
 
       if(trapWardPct>0 && Math.random()*100<trapWardPct){
-        mazeLog("You avoided a fall through the trapdoor.");
+        mazeToast("You avoided a fall through the trapdoor.","good");
         autosave(); render(); animateMazeMovers(prevPlayerIdx,prevRoamerPositions); return;
       }
       const dmg=randRange(Balance.TRAP_DAMAGE_MIN,Balance.TRAP_DAMAGE_MAX);
@@ -7148,7 +7124,8 @@ function onStepMaze(maze,targetIdx){
     else { PS.applyMagicFindShrineBuff(); mazeLog(`A glimmering shrine sharpens your eye for treasure, +${Balance.SHRINE_MAGIC_FIND_PCT}% Magic Find for ${Balance.SHRINE_MAGIC_FIND_ROUNDS} rounds!`); shrineOverlayText=`🔍 Glimmering Shrine\n+${Balance.SHRINE_MAGIC_FIND_PCT}% Magic Find for ${Balance.SHRINE_MAGIC_FIND_ROUNDS} rounds!`; }
 
     autosave();
-    GF.mazeOverlay={text:shrineOverlayText, shrine:true, durationMs:2800};
+
+    mazeToast(shrineOverlayText,"shrine",3600);
     render(); animateMazeMovers(prevPlayerIdx,prevRoamerPositions); return;
   }
   if(cell.type==="herb" && !cell.cleared){
@@ -7372,6 +7349,8 @@ function screenSettings(){
 
     keyboardShortcutRow("spellSlot3","Cast Spell Slot 3","Casts whichever spell is in your third spell slot (Wizard Set 6-piece bonus). Only works in combat."),
   ]));
+
+  root.appendChild(devToolsSettingsSection());
   return root;
 }
 
@@ -7429,13 +7408,14 @@ window.addEventListener("keydown",(e)=>{
 
   if(keyLower===shortcuts.healthPotion){
     e.preventDefault();
-    const id=PS.lowestAvailableConsumable("health");
+
+    const id=PS.bestAvailableConsumable("health");
     if(PS.canUseConsumable(id)){ PS.useConsumable(id); autosave(); render(); }
     return;
   }
   if(keyLower===shortcuts.staminaPotion){
     e.preventDefault();
-    const id=PS.lowestAvailableConsumable("stamina");
+    const id=PS.bestAvailableConsumable("stamina");
     if(PS.canUseConsumable(id)){ PS.useConsumable(id); autosave(); render(); }
     return;
   }
@@ -7446,7 +7426,7 @@ window.addEventListener("keydown",(e)=>{
   }
   if(keyLower===shortcuts.manaPotion){
     e.preventDefault();
-    const id=PS.lowestAvailableConsumable("mana");
+    const id=PS.bestAvailableConsumable("mana");
     if(PS.canUseConsumable(id)){ PS.useConsumable(id); autosave(); render(); }
     return;
   }
@@ -7531,11 +7511,24 @@ async function startCombatSession(monsterId, guardianCellIdx, roamerId){
 
 function combatLog(cb,msg){ cb.log.push(msg); if(cb.log.length>10) cb.log.shift(); }
 
-function mazeLog(msg){ GF.mazeLog.push(msg); if(GF.mazeLog.length>3) GF.mazeLog.shift(); }
+function mazeLog(msg,kind,lifeMs){ mazeToast(msg,kind,lifeMs); }
+function mazeToast(text,kind,lifeMs){
+  if(!text) return;
+  GF.mazeToasts=(GF.mazeToasts||[]).filter(t=>Date.now()-t.at<t.life);
+  GF.mazeToasts.push({id:++_mazeToastSeq, text, kind:kind||"", at:Date.now(), life:lifeMs||3200});
 
-function mazeLogBox(){
-  return h("div",{class:"muted panel",style:{marginTop:"6px",marginBottom:"6px"}},
-    GF.mazeLog.length===0?[h("div",{},["Nothing has happened yet. Explore..."])]:GF.mazeLog.map(l=>h("div",{},[l])));
+  if(GF.mazeToasts.length>6) GF.mazeToasts.shift();
+  const layer=document.getElementById("maze-toast-layer");
+  if(layer) layer.appendChild(mazeToastNode(GF.mazeToasts[GF.mazeToasts.length-1]));
+}
+let _mazeToastSeq=0;
+function mazeToastNode(t){
+  return h("div",{class:"maze-toast"+(t.kind?" "+t.kind:""),style:{"--mzt-life":t.life+"ms"}},[t.text]);
+}
+function mazeToastLayer(){
+  const now=Date.now();
+  GF.mazeToasts=(GF.mazeToasts||[]).filter(t=>now-t.at<t.life);
+  return h("div",{class:"maze-toast-layer",id:"maze-toast-layer"},GF.mazeToasts.map(mazeToastNode));
 }
 
 function grantLoot(lootTable, mult){
@@ -9965,6 +9958,7 @@ function sellAllGearOfRarity(rarityName){
   askConfirm(
     `Sell all ${matches.length} ${displayName} item${matches.length===1?"":"s"} in your backpack for ${total}g? This cannot be undone.`,
     ()=>{
+      beginBulkNotify();
       let sold=0, earned=0;
 
       for(const id of matches.map((inst)=>inst.instance_id)){
@@ -9973,6 +9967,7 @@ function sellAllGearOfRarity(rarityName){
         const value=Balance.sellValue(inst.tier,IF.slotCount(inst));
         if(PS.sellGear(id)!==false){ sold++; earned+=value; }
       }
+      endBulkNotify();
       PS.saveGame();
       setToast(`Sold ${sold} ${displayName} item${sold===1?"":"s"} for ${earned}g.`);
       render();
@@ -10043,7 +10038,8 @@ async function magicianSlotSpell(slotIndex,spellId){
 
 function magicianSpellCard(spellId){
   const spellDef=Balance.SPELLS[spellId];
-  const ownedTier=PS.getSpellTier(spellId);
+
+  const ownedTier=PS.getOwnedSpellTier(spellId);
   const owned=ownedTier>0;
   const maxed=ownedTier>=5;
   const nextTier=ownedTier+1;
@@ -11004,12 +11000,40 @@ function adminResetLadderTab(){
   return root;
 }
 
+function devToolsSettingsSection(){
+  const wrap=h("div",{style:{marginTop:"18px"}});
+  wrap.appendChild(h("h3",{},["Dev Tools"]));
+  if(GF.admin_unlocked){
+    wrap.appendChild(h("div",{class:"muted",style:{marginBottom:"7px"}},["Unlocked for this session."]));
+    wrap.appendChild(h("button",{onClick:()=>{ GF._preAdminScreen=GF.screen; GF.goto("admin"); }},["Open Dev Tools"]));
+    return wrap;
+  }
+  wrap.appendChild(h("div",{class:"muted",style:{marginBottom:"7px"}},[
+    "Enter the server's admin token to unlock. The token is verified by the server and is never saved to disk or to this browser, so it must be entered once per session.",
+  ]));
+  const input=h("input",{type:"password",placeholder:"Admin token",style:{maxWidth:"280px"}});
+  wrap.appendChild(h("div",{class:"row gap",style:{alignItems:"center",flexWrap:"wrap"}},[
+    input,
+    h("button",{onClick:async ()=>{
+      const token=(input.value||"").trim();
+      if(!token){ setToast("Enter the admin token first."); render(); return; }
+      try{
+        await Net.verifyAdminToken(token);
+        GF.admin_token=token; GF.admin_unlocked=true;
+        GF._preAdminScreen=GF.screen;
+        GF.goto("admin");
+      }catch(e){ setToast(e.message||"That token was not accepted."); render(); }
+    }},["Unlock"]),
+  ]));
+  return wrap;
+}
+
 function adminAnnouncementTab(){
   const root=h("div",{});
   root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},[
-    "Shown to every player in a warning banner above the community experience panel, and stored on the server so it survives a restart. Keep it to one short line, for example \"Known issue: Fireflies kills can freeze combat, fix incoming\". Leave it empty and press Clear to take the banner down.",
+    "Shown to every player in a warning banner above the community experience panel, and stored on the server so it survives a restart. Up to 500 characters, and line breaks are kept, so a short bulleted summary works. Leave it empty and press Clear to take the banner down.",
   ]));
-  const messageInput=h("textarea",{rows:"2",style:{width:"100%",maxWidth:"480px",resize:"vertical"},placeholder:"Known issue to show all players..."});
+  const messageInput=h("textarea",{rows:"5",maxlength:"500",style:{width:"100%",maxWidth:"560px",resize:"vertical"},placeholder:"Known issues to show all players. Line breaks are kept."});
   messageInput.value=Net.announcement||"";
   root.appendChild(h("div",{style:{marginBottom:"8px"}},[messageInput]));
   const apply=async (message,doneToast)=>{
@@ -11039,6 +11063,42 @@ function adminAnnouncementTab(){
     h("div",{class:"muted",style:{marginBottom:"4px"}},["Currently live:"]),
     live?h("div",{class:"known-issues-banner"},[h("span",{class:"kib-icon"},["\u26A0"]),h("span",{},[live])])
         :h("div",{class:"muted"},["Nothing is being announced right now."]),
+  ]));
+  return root;
+}
+
+function adminGrantTab(){
+  const root=h("div",{});
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"9px"}},[
+    "Adjust a player's gold or materials. Gold is account-wide, so only the account username is needed. Materials belong to a single character, so a character name is required for those. Negative amounts are allowed, to undo a mistake. The player receives a mailbox message explaining the adjustment.",
+  ]));
+  const userInput=h("input",{placeholder:"Account username",style:{maxWidth:"220px"}});
+  const charInput=h("input",{placeholder:"Character name (materials only)",style:{maxWidth:"260px"}});
+  const goldInput=h("input",{type:"number",placeholder:"Gold",style:{maxWidth:"140px"}});
+  const matsInput=h("input",{type:"number",placeholder:"Materials",style:{maxWidth:"140px"}});
+  root.appendChild(h("div",{class:"col gap",style:{marginBottom:"10px",maxWidth:"420px"}},[
+    userInput, charInput,
+    h("div",{class:"row gap"},[goldInput, matsInput]),
+  ]));
+  root.appendChild(h("div",{class:"row gap"},[
+    h("button",{disabled:!!GF.admin_grant_busy,onClick:async ()=>{
+      const username=(userInput.value||"").trim();
+      const character_name=(charInput.value||"").trim();
+      const gold=Math.floor(Number(goldInput.value)||0);
+      const materials=Math.floor(Number(matsInput.value)||0);
+      if(!username){ setToast("Enter the account username."); render(); return; }
+      if(!gold && !materials){ setToast("Enter an amount of gold, materials, or both."); render(); return; }
+      GF.admin_grant_busy=true; render();
+      try{
+        const result=await Net.adminGrant({username,character_name,gold,materials});
+        const bits=[];
+        if(gold) bits.push(`${gold>0?"+":""}${gold.toLocaleString()} gold`);
+        if(materials) bits.push(`${materials>0?"+":""}${materials.toLocaleString()} materials`);
+        setToast(`Granted ${bits.join(" and ")} to ${result.username}${result.character_name?" / "+result.character_name:""}.`);
+        goldInput.value=""; matsInput.value="";
+      }catch(e){ setToast(e.message||"Could not apply that grant."); }
+      GF.admin_grant_busy=false; render();
+    }},[GF.admin_grant_busy?"Applying...":"Apply grant"]),
   ]));
   return root;
 }
@@ -11109,6 +11169,7 @@ function screenAdminPanel(){
     adminTabButton("reset","Reset Ladder"),
     adminTabButton("broadcast","Broadcast"),
     adminTabButton("announcement","Known Issues"),
+    adminTabButton("grant","Grant"),
   ]));
   if(GF.adminTab==="leaderboard") root.appendChild(adminLeaderboardTab());
   else if(GF.adminTab==="accounts") root.appendChild(adminAccountsTab());
@@ -11116,6 +11177,7 @@ function screenAdminPanel(){
   else if(GF.adminTab==="reset") root.appendChild(adminResetLadderTab());
   else if(GF.adminTab==="broadcast") root.appendChild(adminBroadcastTab());
   else if(GF.adminTab==="announcement") root.appendChild(adminAnnouncementTab());
+  else if(GF.adminTab==="grant") root.appendChild(adminGrantTab());
   else root.appendChild(adminSpawnTab());
 
   return root;
@@ -11222,6 +11284,28 @@ function legacyGearSection(){
 }
 
 const CHANGELOG=[
+  { version:"v0.25.2", date:"2026-08-04 22:30", notes:[
+    "The Four Wardens is now called The Warden Trials, since the old name only described its first step.",
+    "The Simmering Cauldron once again asks for at least one Potion of Might, Swiftness or Intellect among the recipes you brew, in every town rather than only the later ones.",
+  ]},
+  { version:"v0.25.1", date:"2026-08-04 21:40", notes:[
+    "The maze view is rebuilt for the wider screen. The heading above the board is gone, giving the frame more room, and the potions, elixirs, reroute and retreat are now icon buttons beside the board, each showing its own shortcut key and how many you have left.",
+    "The Adventure Log is gone. Everything it used to report, running out of stamina, traps, shrines, slipping past a monster, now appears as a short message over the board that fades on its own. Shrines no longer black out the screen for several seconds.",
+    "Potion shortcuts and buttons now reach for your STRONGEST potion first instead of your weakest.",
+    "Fog of war fades in smoothly, and your character glides between tiles instead of snapping.",
+    "The frame's plaque now names your own forest rather than the area's, so a Tier II character no longer sees the Tier I town's name.",
+    "Spell tiers you have bought are never lost. If a Broken Bridge Trial drops you below a tier's level requirement, the spell simply falls back to the highest tier you can still cast and climbs again as you re-level. Nothing needs to be bought twice.",
+    "Bulk selling and bulk salvaging now show one combined total instead of one number per item.",
+    "Red and green comparison values are back everywhere they belong. They were only ever styled inside one of the two hover boxes, so the item you were actually hovering showed them in plain white.",
+    "Your damage is shown as a single number everywhere, never a range.",
+    "The bonfire says \"You feel fully restored\", mentions resting rather than explaining itself, lights up when any of your Life, Stamina or Mana is low, and no longer keeps healing you after you have walked out of town.",
+    "Kindle the Bonfire moved up beside Venture, where it belongs. Town rows are now Venture, services, the four NPCs, and the Trial.",
+    "The version and changelog link, and Return to Menu, moved to the top of the left rail. Quests are reachable from there too, on every screen, with a count of rewards waiting.",
+    "Dev Tools moved out of the town screen and into Settings, still behind the admin token.",
+    "The Night delve toggle now explains exactly what it changes.",
+    "Larger numbers on both globes, and the stat panel no longer runs off the edge of the rail.",
+    "Your slotted spells and their hotkeys are shown in the left rail, visible on every screen rather than only in town.",
+  ]},
   { version:"v0.25", date:"2026-08-04 20:15", notes:[
     "The game now fills your whole screen. Your Life and Mana are round globes in the bottom corners, with Stamina and a taller, tick-marked Experience bar between them, and everything about your character now lives in a rail down the left side. The middle of the screen belongs entirely to the game.",
     "Your class now shows its back while walking upward through a maze, instead of facing you the whole way.",

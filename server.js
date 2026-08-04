@@ -45,9 +45,11 @@ const VAULT_CAPACITY = 200;
 // "Admin Token" field in-game. Without it set, the admin endpoints below refuse to
 // run at all (rather than silently accepting an empty/guessable token).
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || null;
-// v0.24.2: the known-issues banner is meant to be one short line above the community XP
-// panel, not a changelog -- capped here rather than trusting the Dev Tools textarea.
-const ADMIN_ANNOUNCEMENT_MAX_LEN = 300;
+// v0.24.2 / v0.25.1: the known-issues banner's length cap. Raised from 300 to 500 at Gwen's
+// request so a short multi-issue summary fits. Newlines inside the message are deliberately
+// PRESERVED (only leading/trailing whitespace is trimmed at the route), so an admin can write a
+// few bulleted lines; the client renders the banner with white-space:pre-line to match.
+const ADMIN_ANNOUNCEMENT_MAX_LEN = 500;
 if (!ADMIN_TOKEN) {
   console.warn("ADMIN_TOKEN is not set -- leaderboard moderation endpoints are disabled until you set it.");
 }
@@ -1039,7 +1041,7 @@ const QUEST_DEFS = {
   // by rewarding Auction House sales; "cleanse" is the season-long lifetime-kill chase.
   IDS: ["explore", "wardens", "gatherer", "wanderers", "streak", "cauldron", "elder", "palisade", "pacifist", "trader", "cleanse"],
   NAMES: {
-    explore: "Every Root and Hollow", wardens: "The Four Wardens", gatherer: "The Gatherer's Dozen",
+    explore: "Every Root and Hollow", wardens: "The Warden Trials", gatherer: "The Gatherer's Dozen",
     wanderers: "Thin the Wanderers", streak: "The Unbroken Chain", cauldron: "The Simmering Cauldron",
     // v0.24.1 (B4): renamed from "Elder of the Thicket" -- now a 5-step questline through every
     // band, not a single Elder-band kill. See ASCENDANT_HUNT_STEPS below.
@@ -1067,7 +1069,8 @@ const QUEST_DEFS = {
     // continuous delve) -- see questTrackStrongholdChestReport() below.
     palisade_chests: 1,
   },
-  // v0.24.2 (credit: Gwen): "The Four Wardens" is now a 5-step questline, mirroring
+  // v0.24.2 / v0.25.2 (credit: Gwen): "The Warden Trials" (renamed from "The Four Wardens",
+  // which only ever described its first step) is a 5-step questline, mirroring
   // ASCENDANT_HUNT_STEPS' shape exactly -- each step is claimed at the board before
   // the next unlocks, and the card shows "Step N/5" so a rising target reads as progression.
   // Two changes to how a guardian kill counts, both per Gwen:
@@ -1138,13 +1141,15 @@ const QUEST_DEFS = {
     { count: 100000, stat_points: 50, gold: 300000 },
   ],
   CAULDRON_DISTINCT_TARGET: 7,
-  // v0.24.2: this used to be a per-town array ([false, true, true, true, true]) requiring at
-  // least one attribute potion among the distinct recipes from town 2 onward. Under the
-  // de-scaling rule it takes town 1's value, false, so the sub-requirement is inactive
-  // everywhere and "brew 7 different potions" is the whole objective. Kept as a single flag
-  // rather than deleted so it can be switched back on for every town with a one-word edit,
-  // and so entry.attr_potion_brewed keeps being tracked either way.
-  CAULDRON_ATTR_POTION_REQUIRED: false,
+  // v0.24.2 / v0.25.2 (credit: Gwen): this used to be a per-town array
+  // ([false, true, true, true, true]) requiring at least one attribute potion among the distinct
+  // recipes from town 2 onward. De-scaling briefly took town 1's value (false, i.e. off
+  // everywhere); Gwen has since confirmed the intent was the opposite, so it is now ON in every
+  // town. That is a genuine de-scaling either way -- the requirement no longer depends on which
+  // town you are standing in -- it just resolves to "always" rather than "never". At least one
+  // of the distinct recipes brewed toward the target must be a Potion of Might, Swiftness or
+  // Intellect (see ATTR_POTION_IDS and questTrackBrewReport()'s attr_potion_brewed flag).
+  CAULDRON_ATTR_POTION_REQUIRED: true,
   ATTR_POTION_IDS: ["potion_of_might", "potion_of_swiftness", "potion_of_intellect"],
   // v-quest: every valid brew RESULT item id (mirrors index.html's ALCHEMY_RECIPES result_item
   // list verbatim) -- COMBAT_CONSUMABLES above is deliberately narrower (only what combat's
@@ -4320,6 +4325,26 @@ const SPELL_SLOT_COUNT = 2;
 // effect's magnitude field(s)), so every existing effect-resolution branch can keep reading
 // spell.heal_amount/hit_min/hit_max/etc. unchanged. Returns null for an unknown spell id or an
 // out-of-range tier. Mirrors index.html's identical spellAtTier() exactly.
+// v0.25.1 (credit: Gwen): a character keeps every spell tier it has ever bought, but can only
+// CAST the highest one whose level requirement it currently meets. This matters because a Broken
+// Bridge Trial resets the character to level 1 while leaving purchased spell tiers intact -- so a
+// spell bought up to Tier V became completely uncastable, and the only way back was to re-buy
+// the lower tiers that were already owned. Now the tier simply steps back down on its own and
+// climbs again as the character re-levels, with nothing to re-purchase and no UI to operate.
+// owned_spell_tiers still records the highest tier PURCHASED, which is what the Magician prices
+// the next upgrade against; this function answers the different question of what can be cast
+// right now. Mirrors PS.getSpellTier() in index.html.
+function combatEffectiveSpellTier(data, spellId) {
+  const owned = (data.owned_spell_tiers && data.owned_spell_tiers[spellId]) || 0;
+  if (!owned) return 0;
+  const level = data.level || 1;
+  for (let t = owned; t >= 1; t--) {
+    const def = spellAtTier(spellId, t);
+    if (def && level >= (def.level_req || 1)) return t;
+  }
+  return 0;
+}
+
 function spellAtTier(spellId, tier) {
   const base = SPELLS[spellId];
   if (!base || !Number.isInteger(tier) || tier < 1 || tier > 5) return null;
@@ -5194,7 +5219,10 @@ app.post("/api/combat/:sessionId/cast", requireAuth, (req, res) => {
 
   // v0.24: casting resolves against the character's currently-OWNED tier of this spell (loadCharacterRow
   // already ran migrateSpellTiers(), so a pre-v0.24 owner reads as Tier I here for free).
-  const ownedTier = data.owned_spell_tiers[spellId] || 0;
+  // v0.25.1: the CASTABLE tier, which steps down below the purchased tier when the character's
+  // level no longer supports it (see combatEffectiveSpellTier). Returning 0 here means no tier of
+  // this spell is usable yet, which the ownership check below reports.
+  const ownedTier = combatEffectiveSpellTier(data, spellId);
   if (ownedTier < 1) return res.status(400).json({ error: "You don't know that spell." });
   const spell = spellAtTier(spellId, ownedTier);
   const spellSlots = Array.isArray(data.spell_slots) ? data.spell_slots : [];
@@ -6026,6 +6054,53 @@ app.post("/api/admin/broadcast", requireAuth, requireAdmin, (req, res) => {
 // v0.24.2: the known-issues banner. GET is deliberately public and unauthenticated -- it is
 // read on the login screen too, before any token exists, and carries nothing private. Only
 // the setter is admin-gated.
+// v0.25.1 (credit: Gwen): compensate a player directly -- the case that prompted it being a
+// tester who spent heavily on reroll costs just before a legacy-gear rebalance. Gold is
+// account-bound so it is credited to the account; materials live per-character, so a materials
+// grant needs a specific character and is matched by name. Both are optional and independent:
+// granting only gold needs no character name at all.
+app.post("/api/admin/grant", requireAuth, requireAdmin, (req, res) => {
+  const username = String(req.body?.username || "").trim();
+  const characterName = String(req.body?.character_name || "").trim();
+  const gold = Math.floor(Number(req.body?.gold) || 0);
+  const materials = Math.floor(Number(req.body?.materials) || 0);
+  if (!username) return res.status(400).json({ error: "An account username is required." });
+  if (!gold && !materials) return res.status(400).json({ error: "Specify an amount of gold, materials, or both." });
+  // Negative amounts are allowed on purpose: the same tool has to be able to undo a mistake,
+  // and an admin who has just been trusted with the token can be trusted to subtract too.
+  const account = db.prepare("SELECT id, username FROM accounts WHERE LOWER(username) = LOWER(?)").get(username);
+  if (!account) return res.status(404).json({ error: "No account with that username." });
+
+  const result = { ok: true, username: account.username };
+  if (gold) result.account_gold = creditAccountGold(account.id, gold);
+
+  if (materials) {
+    if (!characterName) return res.status(400).json({ error: "Materials are stored per character, so a character name is required." });
+    const rows = db.prepare("SELECT slot, data FROM characters WHERE account_id = ?").all(account.id);
+    let matched = null;
+    for (const row of rows) {
+      try {
+        const d = JSON.parse(row.data);
+        if ((d.character_name || "").toLowerCase() === characterName.toLowerCase()) { matched = { slot: row.slot, data: d }; break; }
+      } catch (e) { /* skip a corrupt row rather than failing the whole grant */ }
+    }
+    if (!matched) return res.status(404).json({ error: "That account has no character with that name." });
+    matched.data.materials = Math.max(0, (matched.data.materials || 0) + materials);
+    saveCharacterRow(account.id, matched.slot, matched.data);
+    result.character_name = matched.data.character_name;
+    result.materials = matched.data.materials;
+  }
+
+  // Delivered as a private mailbox message so the player is told what happened and why, rather
+  // than silently discovering a changed balance. Live over the socket if they're connected.
+  const parts = [];
+  if (gold) parts.push(`${gold > 0 ? "+" : ""}${gold.toLocaleString()} gold`);
+  if (materials) parts.push(`${materials > 0 ? "+" : ""}${materials.toLocaleString()} materials`);
+  sendPrivateMessage(account.id, `An administrator has adjusted your account: ${parts.join(" and ")}.`, result.account_gold != null ? { gold: result.account_gold } : {});
+  console.log(`[admin] ${req.account.username} granted ${parts.join(" and ")} to ${account.username}${result.character_name ? " / " + result.character_name : ""}`);
+  res.json(result);
+});
+
 app.get("/api/announcement", (req, res) => {
   res.json(getAdminAnnouncement());
 });
