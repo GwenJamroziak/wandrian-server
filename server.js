@@ -2961,7 +2961,17 @@ const COMBAT_RARITY_TABLE = [{ name: "Common", slots: 1, weight: 60 }, { name: "
 const CB = {
   // v0.25 (credit: Gwen): every class gains this much max Mana per point of total Intelligence.
   // Mirrors Balance.MANA_PER_INTELLIGENCE in index.html.
+  // v0.26.3 (credit: Gwen): Intelligence grants flat Mana to every class, but not equally. The
+  // Wizard path lives on Intelligence and gets the most; the two hybrid tiers that drift INTO
+  // Intelligence (Treesinger, Shadowbloom) get an intermediate rate, so the drift pays for itself
+  // in a number rather than only in flavour text. Must stay identical to Balance's copy in
+  // index.html -- combatGetMaxMana() and PS.getMaxMana() have to agree exactly or the client will
+  // show a mana pool the server refuses to let you spend.
   MANA_PER_INTELLIGENCE: 2,
+  MANA_PER_INTELLIGENCE_ARCANE: 5,
+  MANA_PER_INTELLIGENCE_HYBRID: 3,
+  ARCANE_CLASS_IDS: ["wizard", "sorcerer", "warlock", "summoner", "archmage"],
+  INT_HYBRID_CLASS_IDS: ["treesinger", "shadowbloom"],
   // v0.22.7 (#18): player crit floor dropped from 1.75 to 1.5, mirroring index.html's
   // Balance.CRIT_MULTIPLIER. Monsters no longer use this constant as their own floor at all
   // (see combatGetMonsterCritFloor()/combatGetMonsterCritCeiling() below) -- CB.CRIT_MULTIPLIER
@@ -3509,7 +3519,10 @@ function combatGetMaxMana(data) {
   // level-derived points, manually assigned points, quest-granted points, gear affixes and
   // Potion of Intellect alike. combatGetTotalAttr() is exactly the choke point that sums all
   // of those, the same way combatGetMaxHp() reads Vitality through it.
-  const intMana = combatGetTotalAttr(data, "int") * CB.MANA_PER_INTELLIGENCE;
+  const manaPerInt = CB.ARCANE_CLASS_IDS.includes(data.class_id) ? CB.MANA_PER_INTELLIGENCE_ARCANE
+    : CB.INT_HYBRID_CLASS_IDS.includes(data.class_id) ? CB.MANA_PER_INTELLIGENCE_HYBRID
+    : CB.MANA_PER_INTELLIGENCE;
+  const intMana = combatGetTotalAttr(data, "int") * manaPerInt;
   return Math.round((c.base_mana || 0) + levelUpBonus + intMana + combatGearBonus(data, "mana"));
 }
 // v0.22 (batch2 #5): Health Regen (the "regen" affix key, unchanged internally -- only its
@@ -4880,6 +4893,9 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
 
   const mobBlocked = Math.random() < combatMobBlockChance(session.area_level);
   let playerHit = null, weaponSkill = null, newMonsterHp = session.hp;
+  // v0.26.2: how much Life on Hit healed on this swing, reported back so the client can log it
+  // and float it off the player rather than the heal happening invisibly.
+  let playerLifeOnHit = 0;
   if (!mobBlocked) {
     // v0.19.2 (#19): player damage is now a flat number (the average of what used to be its
     // min-max range) instead of an independent per-hit RNG roll -- per Gwen's exact spec,
@@ -4905,13 +4921,35 @@ app.post("/api/combat/:sessionId/attack", requireAuth, (req, res) => {
       dmg *= cbRandRange(1 - CB.PLAYER_DAMAGE_JITTER, 1 + CB.PLAYER_DAMAGE_JITTER);
     }
     if (quadActiveThisRound) dmg *= 4;
+    // v0.26.2 BUG FIX (credit: Gwen, third report of decimals in the combat log -- and my two
+    // previous fixes both missed this). `dmg` is a float: the crit multiplier and the per-hit
+    // jitter band above both scale it. The number REPORTED to the player was rounded (see
+    // playerHit below), but the number SUBTRACTED FROM THE MONSTER was not -- so from the very
+    // first swing session.hp carried a fractional part, and everything downstream that clamps to
+    // it inherited that fraction. A Thorns reflect or a spell DOT landing the killing blow does
+    // Math.min(session.hp, ...), which is exactly how "reflect 3.1999999999999997 damage" reached
+    // the log. Rounding the monster's spawn HP and rounding the log line both treated symptoms;
+    // this is the source. Every write to session.hp is integral now, so no clamp anywhere can
+    // produce a fraction again.
+    dmg = Math.round(dmg);
     newMonsterHp = session.hp - dmg;
     // v0.24.1 (B5/C2): a landed physical swing always counts as "direct damage" for The
     // Pacifist quest -- mutated in place here so combatFinalizeMonsterKill() (if this swing is
     // also the killing blow) sees it immediately; persisted below regardless of which branch
     // (monsterDefeated or not) actually runs.
     session.player_dealt_direct_damage = 1;
-    playerHit = { damage: Math.round(dmg), crit, crit_mult: critMult, quad_damage: quadActiveThisRound };
+    // v0.26.2 BUG FIX (credit: Gwen): "Life on Hit" rolled on gear, showed on the Character Sheet
+    // and had no consumer anywhere -- it healed nothing and logged nothing, because it was never
+    // wired up. It heals a flat amount on every LANDED physical swing (not a miss, not a spell,
+    // not a Thorns reflect), which is what the affix name promises. Clamped to missing health so
+    // it can never overheal, and rounded like every other pool figure.
+    const lifeOnHit = Math.round(combatGearBonus(data, "life_on_hit"));
+    if (lifeOnHit > 0) {
+      const maxHpNow = combatGetMaxHp(data);
+      const healed = Math.min(lifeOnHit, Math.max(0, maxHpNow - (data.current_hp || 0)));
+      if (healed > 0) { data.current_hp = (data.current_hp || 0) + healed; playerLifeOnHit = healed; }
+    }
+    playerHit = { damage: dmg, crit, crit_mult: critMult, quad_damage: quadActiveThisRound, life_on_hit: playerLifeOnHit };
     // v0.22.3 (#20, credit: Gwen): no weapon-skill XP from a hit swung with an equipped
     // weapon that no longer meets its level/class requirement (e.g. after a demotion) --
     // mirrors the same combatCanEquipGear() gate used everywhere else gear validity matters.
