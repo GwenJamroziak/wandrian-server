@@ -35,7 +35,7 @@ body{
 #app{display:grid;grid-template-columns:288px 1fr;grid-template-rows:1fr auto;
   height:100vh;height:100dvh;width:100%;max-width:none;margin:0;padding:0;transition:opacity .18s ease;}
 
-.hud-header-band{position:sticky;top:0;z-index:40;background:#0f1a12;height:46px;
+.hud-header-band{position:sticky;top:0;z-index:40;background:#0f1a12;height:58px;
   display:flex;align-items:center;
   border-bottom:1px solid #3f4a35;box-shadow:0 2px 8px rgba(0,0,0,.35);}
 #hud-rail .hud-header-band{margin:0 -12px 12px;padding:0 12px;}
@@ -72,6 +72,7 @@ body{
 
 .rail-menu-btn{padding:4px 12px;font-size:13px;line-height:1.2;}
 
+.rail-days-in-dev{font-size:10.5px;color:#7f8a72;letter-spacing:.3px;white-space:nowrap;}
 .rail-version-num{font-size:11px;color:var(--muted);letter-spacing:.3px;white-space:nowrap;}
 .rail-version-link{font-size:12.5px;color:rgba(180,210,150,.75);cursor:pointer;letter-spacing:.3px;
   white-space:nowrap;}
@@ -221,6 +222,9 @@ input[type=checkbox]:checked::after{content:"✓";position:absolute;top:-3px;lef
 .spell-slot-locked-mask span{font-size:1.3em;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,.9));}
 .spell-slot-locked-req{position:absolute;bottom:-16px;left:50%;transform:translateX(-50%);white-space:nowrap;
   font-size:.72em;font-weight:bold;color:#ff8f8f;pointer-events:none;}
+
+.spell-slot-cd-text{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-weight:bold;font-size:.82em;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.9);pointer-events:none;z-index:10;}
 
 @keyframes mobFadeIn{from{opacity:0;transform:scale(.88);}to{opacity:1;transform:scale(1);}}
 .mob-fade-in{animation:mobFadeIn .55s ease-out both;}
@@ -468,24 +472,27 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 }
 
 .gear-compare-wrap{position:relative;display:inline-block;}
+
+.gear-compare-wrap .item-hover-stack{
+  display:none;position:absolute;bottom:120%;left:0;z-index:120;
+  flex-direction:row;align-items:flex-end;gap:12px;
+}
+.gear-compare-wrap:hover .item-hover-stack,.gear-compare-wrap.compare-open .item-hover-stack{display:flex;}
 .gear-compare-wrap .compare-box{
-  display:none;position:absolute;bottom:120%;left:calc(100% + 12px);background:#000;color:#fff;
-  padding:7px 10px;border-radius:4px;font-size:.8em;width:max-content;min-width:210px;max-width:320px;z-index:119;
+  display:block;position:static;background:#000;color:#fff;
+  padding:7px 10px;border-radius:4px;font-size:.8em;width:max-content;min-width:210px;max-width:320px;
   box-shadow:0 2px 8px rgba(0,0,0,.6);border:1px solid var(--accent);
 }
 
-.gear-compare-wrap:hover .compare-box,.gear-compare-wrap.compare-open .compare-box{display:block;}
-
 .gear-compare-wrap .hover-item-box{
-  display:none;position:absolute;bottom:120%;left:0;background:#000;color:#fff;
-  padding:7px 10px;border-radius:4px;font-size:.8em;z-index:120;
+  display:block;position:static;background:#000;color:#fff;
+  padding:7px 10px;border-radius:4px;font-size:.8em;
   width:max-content;min-width:230px;max-width:340px;
   box-shadow:0 2px 8px rgba(0,0,0,.6);border:1px solid var(--border);
 }
 .hover-item-box .affix-line,.compare-box .affix-line{white-space:nowrap;}
 
 .hover-item-box .affix-loss-line{padding-left:21px;white-space:nowrap;}
-.gear-compare-wrap:hover .hover-item-box,.gear-compare-wrap.compare-open .hover-item-box{display:block;}
 
 .compare-box .compare-title,.hover-item-box .compare-title{
   font-weight:bold;text-transform:uppercase;font-size:.82em;
@@ -677,6 +684,8 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
   background:rgba(0,0,0,.62);border-radius:9px;padding:0 5px;color:var(--text);line-height:1.45;}
 .mztool .mzt-ico{font-size:27px;line-height:1;}
 .mztool .mzt-ico svg{width:30px;height:30px;}
+
+.combat-tools .mztool{width:62px;}
 .maze-toolrail .mztool{width:100%;padding:7px 2px 6px;}
 .maze-toolrail .mztool .mzt-ico{font-size:25px;}
 .mztool .mzt-qty{position:absolute;right:3px;bottom:2px;font-size:10px;font-weight:bold;
@@ -1781,7 +1790,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.27.4-web",
+  GAME_VERSION:"v0.28.3-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
 
@@ -1990,6 +1999,17 @@ const Balance = {
   MANA_PER_INTELLIGENCE:2,
   MANA_PER_INTELLIGENCE_ARCANE:5,
   MANA_PER_INTELLIGENCE_HYBRID:3,
+
+  SPELL_POWER_PCT_PER_INT:0.5,
+  SPELL_POWER_PCT_PER_INT_ARCANE:1.5,
+  SPELL_POWER_PCT_PER_INT_HYBRID:1.0,
+  spellPowerPerIntelligence(classId){
+    if(this.ARCANE_CLASS_IDS.includes(classId)) return this.SPELL_POWER_PCT_PER_INT_ARCANE;
+    if(this.INT_HYBRID_CLASS_IDS.includes(classId)) return this.SPELL_POWER_PCT_PER_INT_HYBRID;
+    return this.SPELL_POWER_PCT_PER_INT;
+  },
+
+  SPELL_CDR_CAP_PCT:50,
   ARCANE_CLASS_IDS:["wizard","sorcerer","warlock","summoner","archmage"],
   INT_HYBRID_CLASS_IDS:["treesinger","shadowbloom"],
   manaPerIntelligence(classId){
@@ -3421,8 +3441,12 @@ const PS = {
     return {leveledUp:after>before, newLevel:after};
   },
 
+  getSpellCdrPct(){ return clampf(this.gearBonus("spell_cdr"),0,Balance.SPELL_CDR_CAP_PCT); },
+  getSpellCooldownMs(baseMs){ return Math.round((baseMs||0)*(1-this.getSpellCdrPct()/100)); },
   getSpellPowerPct(){
     let pct=this.gearBonus("spell_power");
+
+    pct+=this.getTotalAttr("int")*Balance.spellPowerPerIntelligence(this.class_id);
     const wiz=IF.setBonusesFor("wizard_set");
     if(wiz.count>=3) pct+=Balance.WIZARD_SET_3PC_SPELL_POWER_PCT;
     if(wiz.count>=4) pct+=this.getMaxMana()*Balance.WIZARD_SET_4PC_SPELL_POWER_PCT_PER_MANA;
@@ -4693,7 +4717,8 @@ function activePlayersLine(){
   const entries=Net.activePlayersCache;
   if(entries===null||entries===undefined) return h("div",{class:"muted",style:{fontSize:".85em",marginBottom:"6px"}},["Currently playing: loading..."]);
 
-  if(entries.length===0) return h("div",{style:{display:"none"}});
+  const otherPlayers=entries.filter(e=>(e.character_name||e)!==PS.character_name);
+  if(otherPlayers.length===0) return h("div",{style:{display:"none"}});
   const shown=entries.slice(0,5).map(e=>e.character_name);
   const others=entries.length-shown.length;
   const text="Currently playing: "+shown.join(", ")+(others>0?`, and ${others} other${others===1?"":"s"}`:"");
@@ -4878,6 +4903,16 @@ function hudFooter(){
   ]);
 }
 
+const DEV_START_UTC=Date.UTC(2026,6,19);
+function daysInDev(){
+  const today=new Date();
+  const todayUtc=Date.UTC(today.getFullYear(),today.getMonth(),today.getDate());
+  return Math.max(1,Math.floor((todayUtc-DEV_START_UTC)/86400000)+1);
+}
+function daysInDevLabel(){
+  const d=daysInDev();
+  return `${d} ${d===1?"day":"days"} in dev`;
+}
 function hudRail(){
   const c=PS.getClassData();
   const buffIcons=activePotionBuffIcons();
@@ -4888,6 +4923,7 @@ function hudRail(){
     h("button",{class:"rail-menu-btn",onClick:()=>{ autosave(); GF.goto("mainMenuSlots"); }},["← Menu"]),
 
     h("div",{style:{textAlign:"right",lineHeight:"1.25"}},[
+      h("div",{class:"rail-days-in-dev"},[daysInDevLabel()]),
       h("div",{class:"rail-version-num"},[Balance.GAME_VERSION]),
       h("div",{class:"rail-version-link",onClick:()=>{ GF._preChangelogScreen=GF.screen; GF.goto("changelog"); }},["Changelog"]),
     ]),
@@ -4922,6 +4958,18 @@ function hudRail(){
       h("span",{style:{fontWeight:"bold"}},[`${PS.getCurrentForestReputation()}`]),
     ]),
 
+    PS.kill_streak>0?(()=>{
+      const mf=Math.round(PS.getMagicFind());
+      const capped=mf>=Balance.MAGIC_FIND_CAP_PCT;
+      return h("div",{class:"row tooltip",style:{justifyContent:"space-between",cursor:"help"},
+        "data-tip":`Your kill streak grants +${Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL}% Magic Find per kill, on top of gear, shrines and night delves.\nTotal Magic Find is capped at ${Balance.MAGIC_FIND_CAP_PCT}%${capped?", and you are at the cap: further streak does not improve your loot.":"."}`},[
+        h("span",{class:"muted",style:{fontSize:"12.5px"}},["Kill Streak"]),
+        h("span",{style:{fontWeight:"bold"}},[`${PS.kill_streak}`,
+          h("span",{class:"muted",style:{fontWeight:"normal",fontSize:"11.5px",marginLeft:"5px"}},
+            [`${mf}% MF${capped?" (cap)":""}`])]),
+      ]);
+    })():null,
+
     h("div",{class:"row gap",style:{alignItems:"center",marginTop:"9px"}},[
       h("div",{class:"linklike",style:{fontWeight:"bold",fontSize:"12.5px",cursor:GF.screen==="inventory"?"default":"pointer"},
         onClick:GF.screen==="inventory"?null:()=>GF.goto("inventory",{inventory_return_to:GF.screen})},["Character Sheet"]),
@@ -4936,6 +4984,9 @@ function hudRail(){
     ]),
   ]));
   rail.appendChild(h("div",{class:"panel"},[hudCombatSummary()]));
+
+  const spellPanel=hudSpellSummary();
+  if(spellPanel) rail.appendChild(spellPanel);
   rail.appendChild(h("div",{class:"panel"},[playerStatsCompactPanel()]));
   return rail;
 }
@@ -4949,6 +5000,54 @@ function questRailEntry(){
       onClick:GF.screen==="quests"?null:()=>GF.goto("quests",{quests_return_to:GF.screen})},["Quests"]),
     ready>0?h("span",{style:{background:"var(--gold)",color:"#1a1a10",borderRadius:"9px",padding:"0 6px",
       fontSize:"11px",fontWeight:"bold"}},[`${ready} ready`]):null,
+  ]);
+}
+
+function hudSpellSummary(){
+  const slots=PS.spell_slots||[];
+  let best=null;
+  for(const spellId of slots){
+    if(!spellId) continue;
+    const tier=PS.getSpellTier(spellId);
+    if(!tier) continue;
+    const def=Balance.spellAtTier(spellId,tier);
+    if(!def) continue;
+
+    const min=def.hit_min!=null?def.hit_min:def.dmg_min, max=def.hit_max!=null?def.hit_max:def.dmg_max;
+    if(min==null||max==null) continue;
+
+    const hits=Balance.SPELLS[spellId].hit_count||1;
+    const avg=(min+max)/2*hits*PS.getSpellEffectivenessMult();
+    const cdMs=PS.getSpellCooldownMs(def.cooldown_ms||1000);
+    const dps=cdMs>0?avg/(cdMs/1000):avg;
+    if(!best||dps>best.dps) best={spellId,def,tier,avg,cdMs,dps,name:Balance.SPELLS[spellId].name};
+  }
+  if(!best) return null;
+  const cdr=Math.round(PS.getSpellCdrPct());
+  const power=Math.round(PS.getSpellPowerPct());
+  const casts=best.cdMs>0?(1000/best.cdMs):1;
+  const parts=[
+    `${best.name} (Tier ${tierRomanNumeral(best.tier)})`,
+    `Hit: ${Math.round(best.avg)} average, after +${power}% Spell Power`,
+    `Cooldown: ${(best.cdMs/1000).toFixed(2)}s${cdr>0?` (reduced ${cdr}%)`:""}`,
+    `Spell DPS: ${Math.round(best.avg)} / ${(best.cdMs/1000).toFixed(2)}s = ${Math.round(best.dps)}`,
+  ];
+  return h("div",{class:"panel"},[
+    h("div",{class:"dps-block"},[
+      h("div",{class:"hud-rail-title",style:{textAlign:"center",marginBottom:"1px"}},["Spell DPS"]),
+      h("div",{class:"tooltip dps-headline","data-tip":parts.join("\n")},[`${Math.round(best.dps)}`]),
+      h("div",{class:"dps-factors"},[
+        h("div",{class:"dps-factor"},[
+          h("div",{class:"hud-rail-title"},["Spell Hit"]),
+          h("div",{class:"tooltip dps-factor-num","data-tip":`${best.name}, Tier ${tierRomanNumeral(best.tier)}.\nAverage hit after +${power}% Spell Power.`},[`${Math.round(best.avg)}`]),
+        ]),
+        h("div",{class:"dps-times"},["\u00f7"]),
+        h("div",{class:"dps-factor"},[
+          h("div",{class:"hud-rail-title"},["Cooldown"]),
+          h("div",{class:"tooltip dps-factor-num","data-tip":`${(best.cdMs/1000).toFixed(2)} seconds between casts${cdr>0?`, reduced ${cdr}% by Spell Cooldown Reduction`:""}.\nThat is ${casts.toFixed(2)} casts per second.`},[`${(best.cdMs/1000).toFixed(1)}s`]),
+        ]),
+      ]),
+    ]),
   ]);
 }
 function hudCombatSummary(){
@@ -4984,14 +5083,6 @@ function hudCombatSummary(){
         ]),
       ]),
     ]),
-
-    PS.kill_streak>0?(()=>{
-      const mf=Math.round(PS.getMagicFind());
-      const capped=mf>=Balance.MAGIC_FIND_CAP_PCT;
-      return h("div",{class:"tooltip muted",style:{marginTop:"7px",fontSize:"12px",cursor:"help"},
-        "data-tip":`Your kill streak grants +${Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL}% Magic Find per kill, on top of gear, shrines and night delves.\nTotal Magic Find is capped at ${Balance.MAGIC_FIND_CAP_PCT}%${capped?", and you are at the cap: further streak does not improve your loot.":"."}`},
-        [`Kill streak ${PS.kill_streak} (Magic Find ${mf}%${capped?", capped":""})`]);
-    })():null,
 
   ]);
 }
@@ -8177,26 +8268,51 @@ async function startCombatSession(monsterId, guardianCellIdx, roamerId){
   render();
 }
 
-function combatLog(cb,msg){ cb.log.push(msg); if(cb.log.length>10) cb.log.shift(); }
+function combatLog(cb,msg){ cb.log.push(msg); if(cb.log.length>200) cb.log.shift(); }
 
 function mazeLog(msg,kind,lifeMs){ mazeToast(msg,kind,lifeMs); }
+
+const MAZE_TOAST_LIFE_MS=3200;
+
+const MAZE_TOAST_FADE_IN_FRACTION=0.09;
+const MAZE_TOAST_MAX_LIFE_MS=9000;
 function mazeToast(text,kind,lifeMs){
   if(!text) return;
-  GF.mazeToasts=(GF.mazeToasts||[]).filter(t=>Date.now()-t.at<t.life);
-  GF.mazeToasts.push({id:++_mazeToastSeq, text, kind:kind||"", at:Date.now(), life:lifeMs||3200});
+  const now=Date.now();
+  GF.mazeToasts=(GF.mazeToasts||[]).filter(t=>now-t.at<t.life);
+  const life=lifeMs||MAZE_TOAST_LIFE_MS;
+  const existing=GF.mazeToasts.find(t=>t.text===text&&t.kind===(kind||""));
+  if(existing){
 
-  if(GF.mazeToasts.length>6) GF.mazeToasts.shift();
+    existing.at=now-Math.round(existing.life*MAZE_TOAST_FADE_IN_FRACTION);
+    existing.life=Math.min(Math.max(existing.life,life),MAZE_TOAST_MAX_LIFE_MS);
+  } else {
+    GF.mazeToasts.push({id:++_mazeToastSeq, text, kind:kind||"", at:now, life});
+
+    if(GF.mazeToasts.length>4) GF.mazeToasts.shift();
+  }
   const layer=document.getElementById("maze-toast-layer");
-  if(layer) layer.appendChild(mazeToastNode(GF.mazeToasts[GF.mazeToasts.length-1]));
+  if(layer) mazeRefreshToastLayer(layer);
 }
 let _mazeToastSeq=0;
 function mazeToastNode(t){
-  return h("div",{class:"maze-toast"+(t.kind?" "+t.kind:""),style:{"--mzt-life":t.life+"ms"}},[t.text]);
+
+  const elapsed=Math.max(0,Date.now()-t.at);
+  return h("div",{class:"maze-toast"+(t.kind?" "+t.kind:""),style:{
+    "--mzt-life":t.life+"ms",
+    animationDelay:(-elapsed)+"ms",
+  }},[t.text]);
 }
-function mazeToastLayer(){
+function mazeRefreshToastLayer(layer){
   const now=Date.now();
   GF.mazeToasts=(GF.mazeToasts||[]).filter(t=>now-t.at<t.life);
-  return h("div",{class:"maze-toast-layer",id:"maze-toast-layer"},GF.mazeToasts.map(mazeToastNode));
+  layer.innerHTML="";
+  for(const t of GF.mazeToasts) layer.appendChild(mazeToastNode(t));
+}
+function mazeToastLayer(){
+  const layer=h("div",{class:"maze-toast-layer",id:"maze-toast-layer"});
+  mazeRefreshToastLayer(layer);
+  return layer;
 }
 
 function grantLoot(lootTable, mult){
@@ -8629,6 +8745,7 @@ function screenCombat(){
   ]);
 
   const logDiv=h("div",{class:"muted panel",style:{flex:"1",minWidth:"0",minHeight:"0",overflowY:"auto"}},cb.log.map(l=>h("div",{},[l])));
+  requestAnimationFrame(()=>{ if(logDiv.isConnected) logDiv.scrollTop=logDiv.scrollHeight; });
   root.appendChild(h("div",{class:"row",style:{alignItems:"stretch",gap:"14px"}},[mobPanel,logDiv]));
 
   if(cb.defeated){
@@ -8867,12 +8984,36 @@ function screenCombat(){
     h("circle",{class:"flee-cooldown-fill",cx:"10",cy:"10",r:"8",style:{strokeDasharray:"50.27",animationDuration:Balance.FLEE_BUTTON_COOLDOWN_MS+"ms",animationDelay:(-fleeElapsedMs)+"ms"}},[]),
   ]):null;
 
-  root.appendChild(h("div",{class:"row",style:{marginTop:"10px"}},[
-    h("button",{disabled:busyDisabled||!PS.canUseConsumable(PS.bestAvailableConsumable("health")),onClick:()=>useItemInCombat(PS.bestAvailableConsumable("health"))},["Use Health Potion"]),
-    h("button",{disabled:busyDisabled||!PS.canUseConsumable(PS.bestAvailableConsumable("stamina")),onClick:()=>useItemInCombat(PS.bestAvailableConsumable("stamina"))},["Use Stamina Potion"]),
-    h("button",{disabled:busyDisabled||!PS.canUseConsumable("antidote"),onClick:()=>useItemInCombat("antidote")},["Use Antidote"]),
-
-    h("button",{disabled:busyDisabled||!PS.canUseConsumable(PS.bestAvailableConsumable("mana")),onClick:()=>useItemInCombat(PS.bestAvailableConsumable("mana"))},["Use Mana Potion"]),
+  const combatKeys=getKeyboardShortcuts();
+  const combatTotalOf=(kind)=>{
+    let total=0;
+    for(const itemId in PS.consumables){
+      const item=DL.getItem(itemId);
+      if(!item) continue;
+      if(kind==="health"&&item.heal_amount) total+=PS.consumables[itemId];
+      else if(kind==="stamina"&&item.stamina_amount) total+=PS.consumables[itemId];
+      else if(kind==="mana"&&item.mana_amount) total+=PS.consumables[itemId];
+    }
+    return total;
+  };
+  const combatQuaff=(kind)=>{
+    const id=PS.bestAvailableConsumable(kind);
+    if(!PS.canUseConsumable(id)) return;
+    useItemInCombat(id);
+  };
+  root.appendChild(h("div",{class:"row combat-tools",style:{marginTop:"10px",alignItems:"center"}},[
+    mazeTool(combatKeys.healthPotion,"\u2764\ufe0f",combatTotalOf("health"),
+      busyDisabled||!PS.canUseConsumable(PS.bestAvailableConsumable("health")),
+      "Drink a Health Potion. Uses your strongest one first.",()=>combatQuaff("health")),
+    mazeTool(combatKeys.manaPotion,"\ud83d\udd35",combatTotalOf("mana"),
+      busyDisabled||!PS.canUseConsumable(PS.bestAvailableConsumable("mana")),
+      "Drink a Mana Potion. Uses your strongest one first.",()=>combatQuaff("mana")),
+    mazeTool(combatKeys.staminaPotion,"\u26a1",combatTotalOf("stamina"),
+      busyDisabled||!PS.canUseConsumable(PS.bestAvailableConsumable("stamina")),
+      "Drink a Stamina Potion. Uses your strongest one first.",()=>combatQuaff("stamina")),
+    mazeTool(combatKeys.antidote,"\ud83e\uddea",PS.consumables.antidote||0,
+      busyDisabled||!PS.canUseConsumable("antidote"),
+      "Cure poison with an Antidote.",()=>{ useItemInCombat("antidote"); }),
 
     h("div",{class:"flee-cooldown-wrap"},[
       h("button",{class:"danger",disabled:busyDisabled||fleeCooldownActive,onClick:attemptFlee},["Flee"]),
@@ -8908,14 +9049,18 @@ function screenCombat(){
       wrap.appendChild(h("div",{class:"spell-slot-locked-req"},[`Lv ${levelReq}`]));
     }
     if(cdActive && !levelLocked){
-      const elapsedMs=spell.cooldown_ms-(cdUntil-Date.now());
+
+      const effectiveCdMs=PS.getSpellCooldownMs(spell.cooldown_ms);
+      const elapsedMs=effectiveCdMs-(cdUntil-Date.now());
       wrap.appendChild(h("svg",{class:"spell-slot-cooldown-mask",width:size,height:size,viewBox:`0 0 ${size} ${size}`},[
         h("circle",{class:"spell-slot-cooldown-fill",cx:size/2,cy:size/2,r:size/4,style:{
           strokeWidth:size/2,strokeDasharray:"100.53",
-          animationDuration:spell.cooldown_ms+"ms",
+          animationDuration:effectiveCdMs+"ms",
           animationDelay:(-elapsedMs)+"ms",
         }},[]),
       ]));
+
+      wrap.appendChild(h("div",{class:"spell-slot-cd-text"},[`${Math.max(0,(cdUntil-Date.now())/1000).toFixed(1)}s`]));
     }
     return wrap;
   }
@@ -9347,15 +9492,20 @@ function gearHoveredItemContent(inst,opts){
 function gearCompareWrap(triggerEl, inst){
   return h("div",{class:"gear-compare-wrap"},[
     triggerEl,
-    h("div",{class:"hover-item-box"},gearHoveredItemContent(inst)),
-    h("div",{class:"compare-box"},gearComparisonContent(inst)),
+    h("div",{class:"item-hover-stack"},[
+      h("div",{class:"hover-item-box"},gearHoveredItemContent(inst)),
+      h("div",{class:"compare-box"},gearComparisonContent(inst)),
+    ]),
   ]);
 }
 
 function gearHoverBox(triggerEl, inst, opts){
   return h("div",{class:"gear-compare-wrap"},[
     triggerEl,
-    h("div",{class:"hover-item-box"},gearHoveredItemContent(inst,opts)),
+
+    h("div",{class:"item-hover-stack"},[
+      h("div",{class:"hover-item-box"},gearHoveredItemContent(inst,opts)),
+    ]),
   ]);
 }
 
@@ -12011,6 +12161,32 @@ function legacyGearSection(){
 }
 
 const CHANGELOG=[
+  { version:"v0.28.3", date:"2026-08-06 00:45", notes:[
+    "Maze messages no longer pile up. Walking into a wall while exhausted showed the same warning six times over; an identical message now simply stays up longer instead of appearing again.",
+    "Messages also keep their own clock. They used to restart from the beginning on every single step, so they blinked back into view and never faded while you kept walking. They now fade out on time no matter what else is happening.",
+  ]},
+  { version:"v0.28.2", date:"2026-08-06 00:10", notes:[
+    "The sidebar shows how many days Wandrian has been in development, counted from Sunday 19 July. It ticks over on its own each midnight without needing an update.",
+  ]},
+  { version:"v0.28.1", date:"2026-08-05 23:15", notes:[
+    "Found and fixed the last source of decimals in the combat log. A fourth, separate Thorns calculation fires only on the monster's first strike at the very start of a fight, and it was the one still reading an unrounded value, which is why the fraction only ever appeared on the first line.",
+    "The combat log keeps a whole fight now instead of the last ten lines, and stays scrolled to the newest.",
+    "Spell cooldowns sweep like a clock over the real, reduced cooldown and show the seconds remaining.",
+    "Combat potions use the same icon buttons as the maze, with their shortcut key and quantity in the corners.",
+  ]},
+  { version:"v0.28", date:"2026-08-05 22:30", notes:[
+    "Intelligence now makes your spells hit harder, not just fill your mana pool. Every point grants Spell Power, most of all on the Wizard path and more on the two hybrids that lean into Intelligence than on anyone else, so a caster grows through the character they build rather than only through which spell tiers they could afford.",
+    "Spell Cooldown Reduction works. It rolled on gear and did nothing at all; it now genuinely shortens the wait between casts, capped at 50%.",
+    "A Spell DPS panel appears beside your weapon DPS whenever you have a damaging spell slotted, showing what a cast is worth and how often you can cast it.",
+    "Fixed the sidebar banner being too short for its own contents once the stats pane was expanded, which pushed the Menu button against the top edge and knocked the two banner halves out of line.",
+    "The \"Currently playing\" line no longer appears when you are the only one online. It was listing you to yourself.",
+  ]},
+  { version:"v0.27.6", date:"2026-08-05 21:35", notes:[
+    "Your kill streak now sits with Gold, Materials and Forest Reputation instead of under your damage, with the Magic Find it is currently worth beside it.",
+  ]},
+  { version:"v0.27.5", date:"2026-08-05 21:15", notes:[
+    "Fixed the Currently Equipped comparison hiding behind the item card. The two now sit side by side and always will, whatever width either of them takes.",
+  ]},
   { version:"v0.27.4", date:"2026-08-05 20:50", notes:[
     "The damage panel now reads as the equation it is: DPS on top, with Damage and Attack Speed beneath it either side of a multiplication sign, so you can see at a glance which half of the product is holding you back.",
   ]},

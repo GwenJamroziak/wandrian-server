@@ -2970,6 +2970,18 @@ const CB = {
   MANA_PER_INTELLIGENCE: 2,
   MANA_PER_INTELLIGENCE_ARCANE: 5,
   MANA_PER_INTELLIGENCE_HYBRID: 3,
+  // v0.28 (credit: Gwen): Spell Power percentage granted per point of total Intelligence, on the
+  // same three class bands as the mana grant above. An Archmage at 60 Intelligence carries +90%
+  // Spell Power from attributes alone, before any gear -- which is the point: a caster's power
+  // should come from the character they built, not only from which spell tiers they could afford.
+  SPELL_POWER_PCT_PER_INT: 0.5,
+  SPELL_POWER_PCT_PER_INT_ARCANE: 1.5,
+  SPELL_POWER_PCT_PER_INT_HYBRID: 1.0,
+  // v0.28: Spell Cooldown Reduction was rolled on gear, shown on the Character Sheet, and read by
+  // nothing -- the exact same dead-affix state Life on Hit was in. It is a caster's attack speed,
+  // so it now actually shortens cooldowns. Hard-capped, because a cooldown approaching zero turns
+  // every fight into a single spell spammed without limit and makes mana the only real cost.
+  SPELL_CDR_CAP_PCT: 50,
   ARCANE_CLASS_IDS: ["wizard", "sorcerer", "warlock", "summoner", "archmage"],
   INT_HYBRID_CLASS_IDS: ["treesinger", "shadowbloom"],
   // v0.22.7 (#18): player crit floor dropped from 1.75 to 1.5, mirroring index.html's
@@ -3460,8 +3472,25 @@ function combatGetFleeChanceBonus(data) {
 // lookup table); every affix's percent-ness is implicit in whichever combatGet*() consumer
 // divides its combatGearBonus() sum by 100, exactly like combatGetBlockChance()/
 // combatGetFleeChanceBonus() just above. Feeds combatGetSpellEffectivenessMult() below.
+// v0.28 (credit: Gwen): Intelligence now feeds Spell Power directly, which is what gives a
+// caster a build to grow rather than a shopping list of spell tiers to buy. It mirrors exactly
+// how Strength feeds weapon damage: a flat percentage per point, from every source (assigned
+// points, level-derived points, quest points, gear affixes, a Potion of Intellect), read through
+// the same combatGetTotalAttr() choke point.
+//
+// The rate is deliberately class-dependent and uses the SAME three bands as the mana grant, so a
+// path's relationship with Intelligence is one fact rather than two: the arcane path gets the
+// most, the two hybrids that drift into Intelligence get an intermediate rate, and a Strength or
+// Dexterity class still gets something for the points it spends there but never enough to make
+// Intelligence its best investment.
+function combatSpellPowerPerIntelligence(data) {
+  if (CB.ARCANE_CLASS_IDS.includes(data.class_id)) return CB.SPELL_POWER_PCT_PER_INT_ARCANE;
+  if (CB.INT_HYBRID_CLASS_IDS.includes(data.class_id)) return CB.SPELL_POWER_PCT_PER_INT_HYBRID;
+  return CB.SPELL_POWER_PCT_PER_INT;
+}
 function combatGetSpellPowerPct(data) {
   let pct = combatGearBonus(data, "spell_power");
+  pct += combatGetTotalAttr(data, "int") * combatSpellPowerPerIntelligence(data);
   // v0.23.6 (Item 4): Wizard Set 3pc/4pc bonuses -- mirrors index.html's PS.getSpellPowerPct().
   const wiz = combatSetBonusesFor(data, "wizard_set");
   if (wiz.count >= 3) pct += CB.WIZARD_SET_3PC_SPELL_POWER_PCT;
@@ -3598,6 +3627,16 @@ function combatGetSpellcastingEffectivenessPct(data) {
 // amount and Fireflies' per-hit damage are, per Gwen's exact spec.
 function combatGetSpellEffectivenessMult(data) {
   return 1 + combatGetSpellPowerPct(data) / 100 + combatGetSpellcastingEffectivenessPct(data) / 100;
+}
+// v0.28: the player's total Spell Cooldown Reduction, clamped to the cap. Kept as its own
+// function so the client can mirror the identical clamp -- if the two disagreed, the client would
+// offer a cast the server then refuses as still on cooldown.
+function combatGetSpellCdrPct(data) {
+  return cbClampf(combatGearBonus(data, "spell_cdr"), 0, CB.SPELL_CDR_CAP_PCT);
+}
+// A spell's effective cooldown for this character, in milliseconds.
+function combatGetSpellCooldownMs(data, baseCooldownMs) {
+  return Math.round((baseCooldownMs || 0) * (1 - combatGetSpellCdrPct(data) / 100));
 }
 function combatGetDamageRange(data) {
   const c = COMBAT_CLASSES[data.class_id] || {};
@@ -4653,9 +4692,15 @@ app.post("/api/combat/start", requireAuth, (req, res) => {
     data.current_hp = Math.max(1, (data.current_hp || 0) - Math.round(mdmg));
     firstStrike = { damage: Math.round(mdmg), crit, crit_mult: critMult };
     log.push(`The ${name} strikes first, hitting you for ${Math.round(mdmg)} damage${crit ? ` (Critical! x${critMult.toFixed(2)})` : ""} before you can react!`);
-    const thorns = combatGearBonus(data, "thorns");
+    // v0.28.1 BUG FIX (credit: Gwen, FOURTH report of decimals in the combat log). This is the
+    // site every previous fix missed: a fourth, separate Thorns application that only fires on the
+    // monster's first-strike at combat START, and which read combatGearBonus() raw while the two
+    // in combatResolveMonsterTurn() were rounded. That is exactly why the fraction always appeared
+    // on the FIRST line of the log and never again -- every later reflect came from the rounded
+    // paths. Rounded here too, and the log line is built from the rounded value.
+    const thorns = Math.round(combatGearBonus(data, "thorns"));
     if (thorns > 0) {
-      engageThornsDamage = Math.min(maxHp, thorns);
+      engageThornsDamage = Math.round(Math.min(maxHp, thorns));
       log.push(`Your Thorns reflect ${engageThornsDamage} damage back at the ${name}!`);
     }
   }
@@ -5334,7 +5379,9 @@ app.post("/api/combat/:sessionId/cast", requireAuth, (req, res) => {
   // set this spell's cooldown, and increment the B9 spellcasting hit counter -- committed
   // regardless of which effect branch fires next.
   data.current_mana = currentMana - effectiveManaCost;
-  cooldowns[spellId] = now + spell.cooldown_ms;
+  // v0.28 (credit: Gwen): Spell Cooldown Reduction finally does something. This is the one place
+  // a cooldown is started, so applying it here covers every spell without touching any of them.
+  cooldowns[spellId] = now + combatGetSpellCooldownMs(data, spell.cooldown_ms);
   const skillResult = combatRegisterSpellcastHit(data);
 
   const mult = combatGetSpellEffectivenessMult(data);
