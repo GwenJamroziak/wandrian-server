@@ -35,20 +35,32 @@ body{
 #app{display:grid;grid-template-columns:288px 1fr;grid-template-rows:1fr auto;
   height:100vh;height:100dvh;width:100%;max-width:none;margin:0;padding:0;transition:opacity .18s ease;}
 
-.hud-header-band{position:sticky;top:0;z-index:60;background:#0f1a12;
+.hud-header-band{position:sticky;top:0;z-index:40;background:#0f1a12;height:46px;
+  display:flex;align-items:center;
   border-bottom:1px solid #3f4a35;box-shadow:0 2px 8px rgba(0,0,0,.35);}
-#hud-rail .hud-header-band{margin:-14px -12px 12px;padding:10px 12px;}
-#hud-main .hud-header-band{margin:-24px -22px 14px;padding:10px 22px;}
-#hud-rail{grid-column:1;grid-row:1;overflow-y:auto;overflow-x:hidden;padding:14px 12px 18px;
+#hud-rail .hud-header-band{margin:0 -12px 12px;padding:0 12px;}
+#hud-main .hud-header-band{margin:0 -22px 18px;padding:0 22px;}
+
+#hud-main > *:first-child:not(.hud-header-band){margin-top:20px;}
+#hud-rail{grid-column:1;grid-row:1;overflow-y:auto;overflow-x:hidden;padding:0 12px 18px;
   border-right:1px solid var(--border);background:linear-gradient(180deg,#161911,#12140f);
   display:flex;flex-direction:column;gap:10px;}
 
-#hud-main{grid-column:2;grid-row:1;overflow-y:auto;overflow-x:hidden;padding:24px 22px 26px;}
+#hud-main{grid-column:2;grid-row:1;overflow-y:auto;overflow-x:hidden;padding:0 22px 26px;}
 #hud-footer{grid-column:1 / -1;grid-row:2;border-top:1px solid var(--border);
   background:linear-gradient(180deg,#161911,#0d0f0b);display:flex;align-items:center;gap:22px;padding:10px 26px;}
 #hud-footer .hud-bars{flex:1;display:flex;flex-direction:column;gap:7px;min-width:0;}
 .hud-rail-title{font-family:Cinzel,Georgia,serif;font-size:12px;letter-spacing:.6px;color:var(--muted);
   text-transform:uppercase;margin-bottom:4px;}
+
+.dps-block{text-align:center;}
+.dps-headline{font-size:26px;font-weight:bold;line-height:1.05;cursor:help;display:inline-block;
+  border-bottom:1px dotted var(--muted);margin-bottom:9px;}
+.dps-factors{display:grid;grid-template-columns:1fr 18px 1fr;align-items:center;gap:0 4px;}
+.dps-factor .hud-rail-title{margin-bottom:2px;font-size:10.5px;letter-spacing:.4px;}
+.dps-factor-num{font-size:16px;font-weight:bold;cursor:help;display:inline-block;
+  border-bottom:1px dotted var(--muted);}
+.dps-times{font-size:15px;color:var(--muted);align-self:center;padding-top:12px;}
 
 #hud-rail .player-stats-grid{display:block !important;}
 #hud-rail .player-stats-grid > *{width:100% !important;max-width:100% !important;min-width:0 !important;
@@ -457,8 +469,8 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 
 .gear-compare-wrap{position:relative;display:inline-block;}
 .gear-compare-wrap .compare-box{
-  display:none;position:absolute;bottom:120%;left:225px;background:#000;color:#fff;
-  padding:6px 8px;border-radius:4px;font-size:.8em;width:220px;z-index:11;
+  display:none;position:absolute;bottom:120%;left:calc(100% + 12px);background:#000;color:#fff;
+  padding:7px 10px;border-radius:4px;font-size:.8em;width:max-content;min-width:210px;max-width:320px;z-index:119;
   box-shadow:0 2px 8px rgba(0,0,0,.6);border:1px solid var(--accent);
 }
 
@@ -466,9 +478,13 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 
 .gear-compare-wrap .hover-item-box{
   display:none;position:absolute;bottom:120%;left:0;background:#000;color:#fff;
-  padding:6px 8px;border-radius:4px;font-size:.8em;width:220px;z-index:12;
+  padding:7px 10px;border-radius:4px;font-size:.8em;z-index:120;
+  width:max-content;min-width:230px;max-width:340px;
   box-shadow:0 2px 8px rgba(0,0,0,.6);border:1px solid var(--border);
 }
+.hover-item-box .affix-line,.compare-box .affix-line{white-space:nowrap;}
+
+.hover-item-box .affix-loss-line{padding-left:21px;white-space:nowrap;}
 .gear-compare-wrap:hover .hover-item-box,.gear-compare-wrap.compare-open .hover-item-box{display:block;}
 
 .compare-box .compare-title,.hover-item-box .compare-title{
@@ -1765,7 +1781,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.27.2-web",
+  GAME_VERSION:"v0.27.4-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
 
@@ -4951,17 +4967,21 @@ function hudCombatSummary(){
   const dps=Math.round(total*attackSpeed);
   parts.push(`Attack Speed: ${attackSpeed.toFixed(2)} per second`);
   parts.push(`DPS: ${total} x ${attackSpeed.toFixed(2)} = ${dps}`);
+
   return h("div",{},[
-    h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"2px 10px"}},[
-      h("div",{},[
-        h("div",{class:"hud-rail-title"},["DPS"]),
-        h("div",{class:"tooltip",style:{fontSize:"19px",fontWeight:"bold",cursor:"help",display:"inline-block",
-          borderBottom:"1px dotted var(--muted)"},"data-tip":parts.join("\n")},[`${dps}`]),
-      ]),
-      h("div",{},[
-        h("div",{class:"hud-rail-title"},["Atk Speed"]),
-        h("div",{class:"tooltip",style:{fontSize:"19px",fontWeight:"bold",cursor:"help",display:"inline-block",
-          borderBottom:"1px dotted var(--muted)"},"data-tip":`${attackSpeed.toFixed(2)} attacks per second.`},[`${attackSpeed.toFixed(2)}`]),
+    h("div",{class:"dps-block"},[
+      h("div",{class:"hud-rail-title",style:{textAlign:"center",marginBottom:"1px"}},["DPS"]),
+      h("div",{class:"tooltip dps-headline","data-tip":parts.join("\n")},[`${dps}`]),
+      h("div",{class:"dps-factors"},[
+        h("div",{class:"dps-factor"},[
+          h("div",{class:"hud-rail-title"},["Damage"]),
+          h("div",{class:"tooltip dps-factor-num","data-tip":parts.slice(0,-2).join("\n")},[`${total}`]),
+        ]),
+        h("div",{class:"dps-times"},["\u00d7"]),
+        h("div",{class:"dps-factor"},[
+          h("div",{class:"hud-rail-title"},["Attack Speed"]),
+          h("div",{class:"tooltip dps-factor-num","data-tip":`${attackSpeed.toFixed(2)} attacks per second.`},[`${attackSpeed.toFixed(2)}`]),
+        ]),
       ]),
     ]),
 
@@ -9315,7 +9335,8 @@ function gearHoveredItemContent(inst,opts){
     let firstMissing=true;
     for(const stat in equippedMap){
       if(!(stat in hoveredMap)){
-        nodes.push(h("div",{style:firstMissing?{marginTop:"6px"}:{}},[`(no ${IF.affixLabel(stat)})`, affixDeltaSpan(stat,-equippedMap[stat])]));
+
+        nodes.push(h("div",{class:"affix-loss-line",style:firstMissing?{marginTop:"6px"}:{}},[`(no ${IF.affixLabel(stat)})`, affixDeltaSpan(stat,-equippedMap[stat])]));
         firstMissing=false;
       }
     }
@@ -11990,6 +12011,14 @@ function legacyGearSection(){
 }
 
 const CHANGELOG=[
+  { version:"v0.27.4", date:"2026-08-05 20:50", notes:[
+    "The damage panel now reads as the equation it is: DPS on top, with Damage and Attack Speed beneath it either side of a multiplication sign, so you can see at a glance which half of the product is holding you back.",
+  ]},
+  { version:"v0.27.3", date:"2026-08-05 20:20", notes:[
+    "Fixed the strip of ordinary page colour appearing above the top banner as soon as you scrolled, and the one-pixel step where the sidebar's banner met the main one. Both halves are now exactly the same height and sit flush against the top.",
+    "Page titles no longer slide under the banner, and item cards no longer get clipped by it.",
+    "Item cards are wider, so a stat like Max Health % fits on one line instead of wrapping, and the \"no such stat\" comparison lines line up with the stats above them.",
+  ]},
   { version:"v0.27.2", date:"2026-08-05 19:30", notes:[
     "Roll medals are now drawn icons rather than emoji, and they look identical everywhere. Every item surface in the game shows the same card, with rarity colouring and comparison values, instead of some screens showing a rich card and others a plain text tooltip.",
     "The item quality percentage no longer appears on Crude or Common gear, where one or two stats make a perfect score too easy to be worth anything. Individual stat medals still show on them.",
