@@ -32,22 +32,29 @@ body{
   color:var(--text); min-height:100vh;
 }
 
-#app{display:grid;grid-template-columns:288px 1fr;grid-template-rows:1fr auto;
+#app{display:grid;grid-template-columns:288px 1fr;grid-template-rows:auto 1fr auto;
   height:100vh;height:100dvh;width:100%;max-width:none;margin:0;padding:0;transition:opacity .18s ease;}
 
-.hud-header-band{position:sticky;top:0;z-index:40;background:#0f1a12;height:70px;
-  display:flex;align-items:center;
-  border-bottom:1px solid #3f4a35;box-shadow:0 2px 8px rgba(0,0,0,.35);}
-#hud-rail .hud-header-band{margin:0 -12px 12px;padding:0 12px;}
-#hud-main .hud-header-band{margin:0 -22px 18px;padding:0 22px;}
-
-#hud-main > *:first-child:not(.hud-header-band){margin-top:20px;}
-#hud-rail{grid-column:1;grid-row:1;overflow-y:auto;overflow-x:hidden;padding:0 12px 18px;
+#hud-header{grid-column:1 / -1;grid-row:1;display:flex;align-items:stretch;
+  background:#0f1a12;border-bottom:1px solid #3f4a35;box-shadow:0 2px 8px rgba(0,0,0,.35);z-index:40;}
+.hud-header-left{flex:0 0 288px;display:flex;align-items:center;justify-content:space-between;
+  gap:8px;padding:8px 12px;border-right:1px solid var(--border);}
+.hud-header-right{flex:1;min-width:0;display:flex;align-items:center;padding:8px 22px;}
+.hud-header-right > *{width:100%;}
+@media (max-width:1000px){
+  #hud-header{flex-direction:column;align-items:stretch;}
+  .hud-header-left{flex:1 1 auto;border-right:none;border-bottom:1px solid var(--border);}
+  .hud-header-right{padding:8px 14px;}
+}
+#hud-rail{grid-column:1;grid-row:2;overflow-y:auto;overflow-x:hidden;padding:14px 12px 18px;
   border-right:1px solid var(--border);background:linear-gradient(180deg,#161911,#12140f);
   display:flex;flex-direction:column;gap:10px;}
 
-#hud-main{grid-column:2;grid-row:1;overflow-y:auto;overflow-x:hidden;padding:0 22px 26px;}
-#hud-footer{grid-column:1 / -1;grid-row:2;border-top:1px solid var(--border);
+#hud-main{grid-column:2;grid-row:2;overflow-y:auto;overflow-x:hidden;padding:16px 22px 26px;}
+
+#hud-main.centered{display:flex;flex-direction:column;padding-top:26px;}
+#hud-main.centered > *{margin-block:auto;margin-inline:auto;width:100%;max-width:1180px;}
+#hud-footer{grid-column:1 / -1;grid-row:3;border-top:1px solid var(--border);
   background:linear-gradient(180deg,#161911,#0d0f0b);display:flex;align-items:center;gap:22px;padding:10px 26px;}
 #hud-footer .hud-bars{flex:1;display:flex;flex-direction:column;gap:7px;min-width:0;}
 .hud-rail-title{font-family:Cinzel,Georgia,serif;font-size:12px;letter-spacing:.6px;color:var(--muted);
@@ -596,6 +603,15 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 @media (max-width:1050px){ .merchant-item-grid.cols-2{grid-template-columns:repeat(2,minmax(0,1fr));} }
 
 .gear-row-affixes{display:flex;flex-direction:column;gap:1px;margin-top:2px;}
+
+.recipe-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:stretch;}
+.recipe-row{margin-bottom:0;align-items:flex-start;flex-wrap:wrap;gap:8px;}
+.recipe-ingredients{font-size:.85em;margin-top:3px;line-height:1.45;}
+.recipe-ing-label{color:var(--muted);font-weight:bold;}
+
+.recipe-row-locked{opacity:.45;filter:saturate(.55);}
+.recipe-row-locked .tooltip{cursor:help;}
+@media (max-width:900px){ .recipe-grid{grid-template-columns:1fr;} }
 @media (max-width:1400px){ .merchant-item-grid{grid-template-columns:repeat(4,minmax(0,1fr));} }
 @media (max-width:1100px){ .merchant-item-grid{grid-template-columns:repeat(3,minmax(0,1fr));} }
 @media (max-width:900px){ .merchant-item-grid{grid-template-columns:repeat(2,minmax(0,1fr));} }
@@ -640,6 +656,7 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 
 .maze-overlay-text.shrine{font-size:1.15em;line-height:1.5;}
 
+.combat-notice-layer{bottom:14px;z-index:20;}
 .combat-log-cell{flex:1;min-width:0;min-height:0;position:relative;overflow:hidden;}
 .combat-log-list{position:absolute;inset:8px 10px;overflow-y:auto;}
 .maze-toast-layer{position:absolute;left:0;right:0;bottom:12px;display:flex;flex-direction:column-reverse;
@@ -1012,12 +1029,12 @@ const RECIPES = [
 
 const LOOT_TABLES = {
 
-  common:[{type:"nothing",weight:155},{type:"gear",weight:50},{type:"consumable",weight:66,item_id:"minor_health_potion"},{type:"herb",weight:1,herb_id:"sunpetal"},{type:"consumable",weight:26,item_id:"dry_branch"}],
-  uncommon:[{type:"nothing",weight:139},{type:"gear",weight:66},{type:"consumable",weight:50,item_id:"health_potion"},{type:"herb",weight:1,herb_id:"emberroot"},{type:"consumable",weight:26,item_id:"dry_branch"}],
-  rare:[{type:"nothing",weight:112},{type:"gear",weight:99},{type:"consumable",weight:50,item_id:"medium_health_potion"},{type:"herb",weight:1,herb_id:"frostvine"},{type:"consumable",weight:20,item_id:"dry_branch"}],
-  epic:[{type:"nothing",weight:83},{type:"gear",weight:149},{type:"consumable",weight:50,item_id:"greater_health_potion"},{type:"herb",weight:1,herb_id:"frostvine"},{type:"consumable",weight:17,item_id:"dry_branch"}],
+  common:[{type:"nothing",weight:155},{type:"gear",weight:50},{type:"consumable",weight:33,item_id:"minor_health_potion"},{type:"consumable",weight:33,item_id:"minor_mana_potion"},{type:"herb",weight:1,herb_id:"sunpetal"},{type:"consumable",weight:26,item_id:"dry_branch"}],
+  uncommon:[{type:"nothing",weight:139},{type:"gear",weight:66},{type:"consumable",weight:25,item_id:"health_potion"},{type:"consumable",weight:25,item_id:"mana_potion"},{type:"herb",weight:1,herb_id:"emberroot"},{type:"consumable",weight:26,item_id:"dry_branch"}],
+  rare:[{type:"nothing",weight:112},{type:"gear",weight:99},{type:"consumable",weight:25,item_id:"medium_health_potion"},{type:"consumable",weight:25,item_id:"medium_mana_potion"},{type:"herb",weight:1,herb_id:"frostvine"},{type:"consumable",weight:20,item_id:"dry_branch"}],
+  epic:[{type:"nothing",weight:83},{type:"gear",weight:149},{type:"consumable",weight:25,item_id:"greater_health_potion"},{type:"consumable",weight:25,item_id:"greater_mana_potion"},{type:"herb",weight:1,herb_id:"frostvine"},{type:"consumable",weight:17,item_id:"dry_branch"}],
 
-  legendary:[{type:"nothing",weight:60},{type:"gear",weight:180},{type:"consumable",weight:50,item_id:"supreme_health_potion"},{type:"herb",weight:1,herb_id:"starveil"},{type:"consumable",weight:14,item_id:"dry_branch"}],
+  legendary:[{type:"nothing",weight:60},{type:"gear",weight:180},{type:"consumable",weight:25,item_id:"supreme_health_potion"},{type:"consumable",weight:25,item_id:"supreme_mana_potion"},{type:"herb",weight:1,herb_id:"starveil"},{type:"consumable",weight:14,item_id:"dry_branch"}],
 };
 
 const PORTRAITS = {
@@ -1253,7 +1270,8 @@ function questBuildEntry(qid){
   } else if(qid==="trader"){
     entry={step:1, progress:0, target:Balance.QUEST_DEFS.TRADER_STEPS[0].count, status:questInitialStatus(qid)};
   } else if(qid==="cleanse"){
-    entry={step:1, progress:0, target:Balance.QUEST_DEFS.CLEANSE_STEPS[0].count, status:questInitialStatus(qid)};
+
+    entry={step:1, progress:0, target:Balance.QUEST_DEFS.CLEANSE_STEPS[0].count, status:questInitialStatus(qid), _kill_base:null};
   } else {
     entry={progress:0, target:questTargetFor(qid), status:questInitialStatus(qid)};
   }
@@ -1354,16 +1372,29 @@ function questsButton(){
 
 const ASCENDANT_HUNT_BAND_DISPLAY={Common:"Newborn", Uncommon:"Young", Rare:"Mature", Epic:"Elder", Legendary:"Ancient"};
 
+function questStepCount(qid){
+  if(qid==="wardens") return Balance.QUEST_DEFS.WARDEN_TRIAL_STEPS.length;
+  if(qid==="elder") return Balance.QUEST_DEFS.ASCENDANT_HUNT_STEPS.length;
+  if(qid==="trader") return Balance.QUEST_DEFS.TRADER_STEPS.length;
+  if(qid==="cleanse") return Balance.QUEST_DEFS.CLEANSE_STEPS.length;
+  return 0;
+}
+function questDisplayName(qid,entry){
+  const base=Balance.QUEST_DEFS.NAMES[qid]||qid;
+  const total=questStepCount(qid);
+  if(!total) return base;
+  const step=(entry&&entry.step)||1;
+  return `${base}, Part ${step}`;
+}
 function questObjectiveText(qid,entry){
   const T=Balance.QUEST_DEFS.TARGETS;
-  const stepOf=(num,total)=>`Step ${num}/${total}: `;
 
   if(qid==="explore") return `In one delve, wear every grass tile down to bare dirt (three steps each) and clear every roamer, guardian, chest, herb node and shrine in the maze.`;
   if(qid==="wardens"){
     const steps=Balance.QUEST_DEFS.WARDEN_TRIAL_STEPS;
     const stepNum=(entry&&entry.step)||1;
     const step=steps[stepNum-1]||steps[0];
-    return `${stepOf(stepNum,steps.length)}fell ${step.count} stronghold guardians in a single delve, at any area level. Returning to town or dying starts the count over.`;
+    return `Fell ${step.count} stronghold guardians in a single delve, at any area level. Returning to town or dying starts the count over.`;
   }
   if(qid==="gatherer") return `Harvest ${T.gatherer_herbs} herb nodes across the mazes.`;
   if(qid==="wanderers") return `Slay ${T.wanderers_roamers} roaming monsters as they wander the maze.`;
@@ -1377,19 +1408,19 @@ function questObjectiveText(qid,entry){
     const stepNum=(entry&&entry.step)||1;
     const step=steps[stepNum-1]||steps[0];
     const band=ASCENDANT_HUNT_BAND_DISPLAY[step.band]||step.band;
-    return `${stepOf(stepNum,steps.length)}defeat ${step.count>1?step.count+" "+band+"-band monsters":"a "+band+"-band monster"}.`;
+    return `Defeat ${step.count>1?step.count+" "+band+"-band monsters":"a "+band+"-band monster"}.`;
   }
   if(qid==="trader"){
     const steps=Balance.QUEST_DEFS.TRADER_STEPS;
     const stepNum=(entry&&entry.step)||1;
     const step=steps[stepNum-1]||steps[0];
-    return `${stepOf(stepNum,steps.length)}sell ${step.count===1?"an item":step.count+" items"} on the Auction House. Sales count for the character who listed them, and progress carries across towns.`;
+    return `Sell ${step.count===1?"an item":step.count+" items"} on the Auction House. Sales count for the character who listed them, and carry across towns and Broken Bridge Trials.`;
   }
   if(qid==="cleanse"){
     const steps=Balance.QUEST_DEFS.CLEANSE_STEPS;
     const stepNum=(entry&&entry.step)||1;
     const step=steps[stepNum-1]||steps[0];
-    return `${stepOf(stepNum,steps.length)}slay ${step.count.toLocaleString()} monsters. Counts every monster this character has ever killed, and survives promotions.`;
+    return `Slay ${step.count.toLocaleString()} monsters. The count restarts whenever you attempt a Broken Bridge Trial, win or lose. Your lifetime total is kept separately for the Leaderboard.`;
   }
   if(qid==="palisade") return `Open ${T.palisade_chests>1?T.palisade_chests+" stronghold chests":"a stronghold chest"} (progress carries across the whole town, not just one delve).`;
 
@@ -1495,7 +1526,7 @@ async function claimQuestReward(questId){
     }
     if(questId==="wardens" && typeof reward.step==="number"){
       const wardenName=Balance.QUEST_DEFS.NAMES.wardens;
-      setToast(reward.done ? `${wardenName} complete! No stronghold in these woods still stands against you.` : `Step ${reward.step}/${reward.step_count} of ${wardenName} complete, a longer delve awaits.`);
+      setToast(reward.done ? `${wardenName} complete! No stronghold in these woods still stands against you.` : `${wardenName}, Part ${reward.step} complete. A longer delve awaits.`);
     }
     autosave();
   }catch(e){
@@ -1803,7 +1834,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.28.4-web",
+  GAME_VERSION:"v0.29-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
 
@@ -1944,7 +1975,8 @@ const Balance = {
       elder:"The Ascendant Hunt", palisade:"Behind the Palisade", pacifist:"The Pacifist",
       trader:"The Long Road to Market", cleanse:"Cleanse the Forest",
     },
-    LEVEL_REQ:{explore:1, wardens:1, gatherer:1, wanderers:6, streak:3, cauldron:2, elder:8, palisade:1, pacifist:1, trader:1, cleanse:1},
+
+    LEVEL_REQ:{explore:1, wardens:1, gatherer:1, wanderers:1, streak:1, cauldron:1, elder:1, palisade:1, pacifist:1, trader:1, cleanse:1},
 
     TARGETS:{
       gatherer_herbs:12,
@@ -3581,8 +3613,6 @@ const PS = {
     if(c.chain==="thornguard") statBonus=this.getTotalAttr("str");
     else if(c.chain==="windrider") statBonus=this.getTotalAttr("dex");
 
-    else if(c.chain==="wizard"){ intDmgBonus=this.getTotalAttr("int")*Balance.WIZARD_INT_DAMAGE_PER_POINT; statBonus=intDmgBonus; }
-
     const weaponType=this.getEquippedWeaponType();
     const skillLevel=weaponType?this.getWeaponSkillLevel(weaponType):0;
     const weaponSkillPct=skillLevel*Balance.WEAPON_SKILL_DAMAGE_PCT_PER_LEVEL;
@@ -4680,7 +4710,37 @@ function fireflyBurstLayer(){
   return h("div",{class:"firefly-burst-layer"},nodes);
 }
 
-const ENTANGLE_ROOTS_SVG=`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg"><path d="M6,30 Q40,10 70,32 Q100,54 134,28" stroke="#5f9a52" stroke-width="5" fill="none" stroke-linecap="round"/><path d="M4,80 Q36,102 70,80 Q104,58 136,84" stroke="#4a8a44" stroke-width="5" fill="none" stroke-linecap="round"/><path d="M20,4 Q40,50 20,100 Q6,124 24,136" stroke="#5f9a52" stroke-width="4" fill="none" stroke-linecap="round"/><path d="M118,4 Q100,50 120,100 Q134,124 116,136" stroke="#4a8a44" stroke-width="4" fill="none" stroke-linecap="round"/><circle cx="70" cy="32" r="3.5" fill="#8fce6a"/><circle cx="20" cy="100" r="3" fill="#8fce6a"/><circle cx="120" cy="100" r="3" fill="#8fce6a"/><circle cx="6" cy="30" r="3" fill="#8fce6a"/><circle cx="134" cy="28" r="3" fill="#8fce6a"/></svg>`;
+const ENTANGLE_ROOTS_SVG=`<svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg">
+  <ellipse cx="70" cy="86" rx="58" ry="46" fill="#3f7a34" opacity=".18"/>
+  <g fill="none" stroke-linecap="round">
+    <path d="M4,140 Q22,96 46,74 Q66,56 62,18" stroke="#3d6b34" stroke-width="8" opacity=".95"/>
+    <path d="M136,140 Q118,96 94,74 Q74,56 78,18" stroke="#3d6b34" stroke-width="8" opacity=".95"/>
+    <path d="M4,140 Q22,96 46,74 Q66,56 62,18" stroke="#5f9a52" stroke-width="4"/>
+    <path d="M136,140 Q118,96 94,74 Q74,56 78,18" stroke="#5f9a52" stroke-width="4"/>
+    <path d="M2,52 Q38,34 70,58 Q102,82 138,60" stroke="#4a8a44" stroke-width="6" opacity=".9"/>
+    <path d="M2,52 Q38,34 70,58 Q102,82 138,60" stroke="#79b566" stroke-width="2.4" opacity=".8"/>
+    <path d="M2,100 Q40,120 70,98 Q100,76 138,104" stroke="#3d6b34" stroke-width="6" opacity=".9"/>
+    <path d="M2,100 Q40,120 70,98 Q100,76 138,104" stroke="#5f9a52" stroke-width="2.4" opacity=".8"/>
+    <path d="M30,132 Q40,110 30,92 Q22,78 34,66" stroke="#4a8a44" stroke-width="3"/>
+    <path d="M110,132 Q100,110 110,92 Q118,78 106,66" stroke="#4a8a44" stroke-width="3"/>
+    <path d="M56,120 Q70,112 84,122" stroke="#5f9a52" stroke-width="3"/>
+    <path d="M50,26 Q70,36 90,24" stroke="#4a8a44" stroke-width="3"/>
+  </g>
+  <g fill="#6fae5c" opacity=".92">
+    <path d="M46,74 q-14,-8 -18,4 q12,8 18,-4z"/>
+    <path d="M94,74 q14,-8 18,4 q-12,8 -18,-4z"/>
+    <path d="M70,58 q-12,-10 -20,-2 q10,10 20,2z"/>
+    <path d="M70,98 q12,10 20,2 q-10,-10 -20,-2z"/>
+    <path d="M34,66 q-12,4 -12,14 q12,-2 12,-14z"/>
+    <path d="M106,66 q12,4 12,14 q-12,-2 -12,-14z"/>
+  </g>
+  <g fill="#a8e07a">
+    <circle cx="70" cy="58" r="3.4"/><circle cx="70" cy="98" r="3"/>
+    <circle cx="46" cy="74" r="2.8"/><circle cx="94" cy="74" r="2.8"/>
+    <circle cx="30" cy="92" r="2.4"/><circle cx="110" cy="92" r="2.4"/>
+    <circle cx="62" cy="18" r="2.6"/><circle cx="78" cy="18" r="2.6"/>
+  </g>
+</svg>`;
 
 function spawnEntangleRoots(durationMs){
   GF.entangleRoots.push({id:++_floatSeq,t:Date.now(),durationMs:Math.max(500,durationMs||4000)});
@@ -4960,21 +5020,25 @@ function installRailTooltipPositioning(){
   },true);
 }
 installRailTooltipPositioning();
+
+function hudHeader(){
+  return h("div",{id:"hud-header"},[
+    h("div",{class:"hud-header-left"},[
+      h("button",{class:"rail-menu-btn",onClick:()=>{ autosave(); GF.goto("mainMenuSlots"); }},["← Menu"]),
+
+      h("div",{style:{textAlign:"right",lineHeight:"1.25"}},[
+        h("div",{class:"rail-days-in-dev"},[daysInDevLabel()]),
+        h("div",{class:"rail-version-num"},[Balance.GAME_VERSION]),
+        h("div",{class:"rail-version-link",onClick:()=>{ GF._preChangelogScreen=GF.screen; GF.goto("changelog"); }},["Changelog"]),
+      ]),
+    ]),
+    h("div",{class:"hud-header-right"},[topBar()]),
+  ]);
+}
 function hudRail(){
   const c=PS.getClassData();
   const buffIcons=activePotionBuffIcons();
   const rail=h("div",{id:"hud-rail"});
-
-  rail.appendChild(h("div",{class:"row hud-header-band",style:{justifyContent:"space-between",alignItems:"center",
-    gap:"8px"}},[
-    h("button",{class:"rail-menu-btn",onClick:()=>{ autosave(); GF.goto("mainMenuSlots"); }},["← Menu"]),
-
-    h("div",{style:{textAlign:"right",lineHeight:"1.25"}},[
-      h("div",{class:"rail-days-in-dev"},[daysInDevLabel()]),
-      h("div",{class:"rail-version-num"},[Balance.GAME_VERSION]),
-      h("div",{class:"rail-version-link",onClick:()=>{ GF._preChangelogScreen=GF.screen; GF.goto("changelog"); }},["Changelog"]),
-    ]),
-  ]));
 
   const community=communityXpHeader();
   if(community) rail.appendChild(community);
@@ -5133,17 +5197,19 @@ function hudCombatSummary(){
     `Gear: +${Math.round(d.gearBonus)}`,
   ];
   if(d.weaponSkillBonus) parts.push(`Weapon proficiency: +${Math.round(d.weaponSkillBonus)} (+${Math.round(d.weaponSkillPct)}%)`);
+
   if(d.intDmgBonus) parts.push(`Intelligence: +${Math.round(d.intDmgBonus)}`);
   parts.push(`Total: ${total}`);
 
   const attackSpeed=PS.getAttackSpeed();
   const dps=Math.round(total*attackSpeed);
   parts.push(`Attack Speed: ${attackSpeed.toFixed(2)} per second`);
-  parts.push(`DPS: ${total} x ${attackSpeed.toFixed(2)} = ${dps}`);
+  parts.push(`Physical DPS: ${total} x ${attackSpeed.toFixed(2)} = ${dps}`);
 
   return h("div",{},[
     h("div",{class:"dps-block"},[
-      h("div",{class:"hud-rail-title",style:{textAlign:"center",marginBottom:"1px"}},["DPS"]),
+
+      h("div",{class:"hud-rail-title",style:{textAlign:"center",marginBottom:"1px"}},["Physical DPS"]),
       h("div",{class:"tooltip dps-headline","data-tip":parts.join("\n")},[`${dps}`]),
       h("div",{class:"dps-factors"},[
         h("div",{class:"dps-factor"},[
@@ -5262,7 +5328,27 @@ function refreshCraftProgressInPlace(){
   return true;
 }
 
+function renderDeferredBySelect(){
+  const el=document.activeElement;
+  return !!(el && el.tagName==="SELECT" && el.isConnected);
+}
+function installSelectRenderGuard(){
+
+  const flush=(force)=>{
+    if(!GF._renderDeferred) return;
+    GF._renderDeferred=false;
+    if(force || !renderDeferredBySelect()){
+      const el=document.activeElement;
+      if(force && el && el.tagName==="SELECT") el.blur();
+      render();
+    }
+  };
+  document.addEventListener("change",()=>flush(true),true);
+  document.addEventListener("blur",()=>flush(false),true);
+}
+installSelectRenderGuard();
 function render(){
+  if(renderDeferredBySelect()){ GF._renderDeferred=true; return; }
   const prevMain=document.getElementById("hud-main");
   const prevRail=document.getElementById("hud-rail");
   const keepMainScroll=prevMain?prevMain.scrollTop:0;
@@ -5276,11 +5362,14 @@ function render(){
   if(chromeless){
     app.style.gridTemplateColumns="1fr";
     app.style.gridTemplateRows="1fr";
+
+    main.classList.add("centered");
   } else {
     app.style.gridTemplateColumns="";
     app.style.gridTemplateRows="";
     app.appendChild(hudRail());
   }
+  if(!chromeless) app.insertBefore(hudHeader(),app.firstChild);
   app.appendChild(main);
   renderScreenInto(main,chromeless);
   if(!chromeless && PS.current_slot>=0) app.appendChild(hudFooter());
@@ -5332,12 +5421,7 @@ function renderScreenInto(app,chromeless){
     ]));
   }
 
-  if(!chromeless){
-    const bar=topBar();
-    bar.classList.add("hud-header-band");
-    app.appendChild(bar);
-    app.appendChild(knownIssuesBanner());
-  }
+  if(!chromeless) app.appendChild(knownIssuesBanner());
   const fn=SCREENS[GF.screen]||SCREENS.mainMenuSlots;
   const screenRoot=fn();
   hoistBackButtonIntoTitle(screenRoot);
@@ -7842,7 +7926,7 @@ function animateMazeMovers(prevPlayerIdx, prevRoamerPositions){
 function onStepMaze(maze,targetIdx){
 
   if(PS.current_stamina<=0){
-    mazeToast("You're exhausted and can't go any further.\nDrink a Stamina Potion, or retreat to town to rest.","bad");
+    mazeToast(MAZE_EXHAUSTED_TOAST,"bad");
     render();
     return;
   }
@@ -7868,7 +7952,7 @@ function onStepMaze(maze,targetIdx){
 
   revealAround(maze,targetIdx,mazeEyesightRadius(maze));
   if(PS.current_stamina<=0){
-    mazeToast("You're exhausted.\nDrink a Stamina Potion, or retreat to town to rest.","bad");
+    mazeToast(MAZE_EXHAUSTED_TOAST,"bad");
   }
 
   const roamerAlreadyHere=maze.roamers && maze.roamers.find(r=>!r.defeated && r.idx===maze.playerIdx);
@@ -7949,12 +8033,13 @@ function onStepMaze(maze,targetIdx){
     cell.cleared=true;
 
     const roll=Math.floor(Math.random()*5);
+
     let shrineOverlayText;
-    if(roll===0){ PS.addStaminaShrineBuff(Balance.STAMINA_MAX_BASE*Balance.SHRINE_STAMINA_BUFF_PCT); mazeLog("A quiet shrine restores your stamina and grants a lasting reserve!"); shrineOverlayText="✨ Quiet Shrine\nStamina restored, plus a lasting reserve!"; }
-    else if(roll===1){ PS.applyXpShrineBuff(); mazeLog("A quiet shrine blesses you, bonus experience for a while!"); shrineOverlayText=`✨ Quiet Shrine\nBonus Experience for the next ${Balance.SHRINE_XP_BUFF_ENCOUNTERS} battles!`; }
-    else if(roll===2){ PS.applyInvulnShrineBuff(); mazeLog(`A radiant shrine grants you the Touch of Unicorn, making you immune to damage/poison from combat or traps for ${Balance.SHRINE_INVULN_ROUNDS} rounds!`); shrineOverlayText=`🦄 Radiant Shrine\nTouch of Unicorn! Immune to damage & poison for ${Balance.SHRINE_INVULN_ROUNDS} rounds.`; }
-    else if(roll===3){ PS.applyQuadDamageShrineBuff(); mazeLog(`A furious shrine quadruples your damage output for ${Balance.SHRINE_QUAD_DAMAGE_ROUNDS} combat rounds!`); shrineOverlayText=`⚡ Furious Shrine\nQuad Damage for ${Balance.SHRINE_QUAD_DAMAGE_ROUNDS} combat rounds!`; }
-    else { PS.applyMagicFindShrineBuff(); mazeLog(`A glimmering shrine sharpens your eye for treasure, +${Balance.SHRINE_MAGIC_FIND_PCT}% Magic Find for ${Balance.SHRINE_MAGIC_FIND_ROUNDS} rounds!`); shrineOverlayText=`🔍 Glimmering Shrine\n+${Balance.SHRINE_MAGIC_FIND_PCT}% Magic Find for ${Balance.SHRINE_MAGIC_FIND_ROUNDS} rounds!`; }
+    if(roll===0){ PS.addStaminaShrineBuff(Balance.STAMINA_MAX_BASE*Balance.SHRINE_STAMINA_BUFF_PCT); shrineOverlayText="✨ Quiet Shrine\nStamina restored, plus a lasting reserve!"; }
+    else if(roll===1){ PS.applyXpShrineBuff(); shrineOverlayText=`✨ Quiet Shrine\nBonus Experience for the next ${Balance.SHRINE_XP_BUFF_ENCOUNTERS} battles!`; }
+    else if(roll===2){ PS.applyInvulnShrineBuff(); shrineOverlayText=`🦄 Radiant Shrine\nTouch of Unicorn! Immune to damage & poison for ${Balance.SHRINE_INVULN_ROUNDS} rounds.`; }
+    else if(roll===3){ PS.applyQuadDamageShrineBuff(); shrineOverlayText=`⚡ Furious Shrine\nQuad Damage for ${Balance.SHRINE_QUAD_DAMAGE_ROUNDS} combat rounds!`; }
+    else { PS.applyMagicFindShrineBuff(); shrineOverlayText=`🔍 Glimmering Shrine\n+${Balance.SHRINE_MAGIC_FIND_PCT}% Magic Find for ${Balance.SHRINE_MAGIC_FIND_ROUNDS} rounds!`; }
 
     autosave();
 
@@ -8346,6 +8431,7 @@ function combatLog(cb,msg){ cb.log.push(msg); if(cb.log.length>200) cb.log.shift
 
 function mazeLog(msg,kind,lifeMs){ mazeToast(msg,kind,lifeMs); }
 
+const MAZE_EXHAUSTED_TOAST="You're exhausted and can't go any further.\nDrink a Stamina Potion, or retreat to town to rest.";
 const MAZE_TOAST_LIFE_MS=3200;
 
 const MAZE_TOAST_FADE_IN_FRACTION=0.09;
@@ -8382,6 +8468,34 @@ function mazeRefreshToastLayer(layer){
   GF.mazeToasts=(GF.mazeToasts||[]).filter(t=>now-t.at<t.life);
   layer.innerHTML="";
   for(const t of GF.mazeToasts) layer.appendChild(mazeToastNode(t));
+}
+
+function combatNotice(text,kind,lifeMs){
+  if(!text) return;
+  const now=Date.now();
+  GF.combatNotices=(GF.combatNotices||[]).filter(t=>now-t.at<t.life);
+  const life=lifeMs||2600;
+  const existing=GF.combatNotices.find(t=>t.text===text&&t.kind===(kind||""));
+  if(existing){
+    existing.at=now-Math.round(existing.life*MAZE_TOAST_FADE_IN_FRACTION);
+    existing.life=Math.min(Math.max(existing.life,life),7000);
+  } else {
+    GF.combatNotices.push({id:++_mazeToastSeq, text, kind:kind||"", at:now, life});
+    if(GF.combatNotices.length>3) GF.combatNotices.shift();
+  }
+  const layer=document.getElementById("combat-notice-layer");
+  if(layer) combatRefreshNoticeLayer(layer);
+}
+function combatRefreshNoticeLayer(layer){
+  const now=Date.now();
+  GF.combatNotices=(GF.combatNotices||[]).filter(t=>now-t.at<t.life);
+  layer.innerHTML="";
+  for(const t of GF.combatNotices) layer.appendChild(mazeToastNode(t));
+}
+function combatNoticeLayer(){
+  const layer=h("div",{class:"maze-toast-layer combat-notice-layer",id:"combat-notice-layer"});
+  combatRefreshNoticeLayer(layer);
+  return layer;
 }
 function mazeToastLayer(){
   const layer=h("div",{class:"maze-toast-layer",id:"maze-toast-layer"});
@@ -8821,6 +8935,8 @@ function screenCombat(){
   const logList=h("div",{class:"combat-log-list"},cb.log.map(l=>h("div",{},[l])));
   const logDiv=h("div",{class:"muted panel combat-log-cell"},[logList]);
   requestAnimationFrame(()=>{ if(logList.isConnected) logList.scrollTop=logList.scrollHeight; });
+
+  mobPanel.appendChild(combatNoticeLayer());
   root.appendChild(h("div",{class:"row",style:{alignItems:"stretch",gap:"14px"}},[mobPanel,logDiv]));
 
   if(cb.defeated){
@@ -9020,7 +9136,7 @@ function screenCombat(){
         if(c.heal_amount!=null){
           combatLog(cb,`You cast Heal, restoring ${c.heal_amount} HP.`);
           spawnFloat("player",`+${c.heal_amount} HP`,"float-text-heal");
-        } else if(c.queued_hits!=null){
+        } else if(c.queued_hits!=null && c.rooted_until==null){
 
           combatLog(cb,`You cast ${spell.name} at the ${cb.name}.`);
 
@@ -9037,7 +9153,8 @@ function screenCombat(){
 
       if(result.consumed_attack_beat) cb._lastAttackFiredAt=Date.now();
     }catch(e){
-      setToast("Could not cast that spell: "+e.message);
+
+      combatNotice(e.message||"That spell cannot be cast right now.","bad");
     }
     GF.combatResolving=false;
     autosave();
@@ -9045,7 +9162,21 @@ function screenCombat(){
   }
   function castSlotted(slotIndex){
     const spellId=PS.getSpellSlots()[slotIndex];
-    if(!spellId){ setToast(`Spell Slot ${slotIndex+1} is empty.`); render(); return; }
+    if(!spellId){ combatNotice(`Spell slot ${slotIndex+1} is empty.`,"bad"); render(); return; }
+
+    const tier=PS.getSpellTier(spellId);
+    const def=tier?Balance.spellAtTier(spellId,tier):null;
+    if(def){
+      const readyAt=GF.spellCooldownUntil[spellId];
+      if(readyAt && Date.now()<readyAt){
+        combatNotice(`${Balance.SPELLS[spellId].name} is still on cooldown. ${((readyAt-Date.now())/1000).toFixed(1)}s to go.`,"bad");
+        render(); return;
+      }
+      if(PS.current_mana<def.mana_cost){
+        combatNotice(`Not enough mana for ${Balance.SPELLS[spellId].name}. It costs ${def.mana_cost}, you have ${Math.floor(PS.current_mana)}.`,"bad");
+        render(); return;
+      }
+    }
     return castSpellInCombat(spellId);
   }
 
@@ -10382,6 +10513,9 @@ function screenAlchemist(){
 
   root.appendChild(h("h3",{},["Recipes"]));
 
+  const recipeGrid=h("div",{class:"recipe-grid"});
+  root.appendChild(recipeGrid);
+
   for(const recipe of RECIPES){
     const result=DL.getItem(recipe.result_item);
     const brewingThis=GF.brewing && GF.brewing.recipeId===recipe.result_item;
@@ -10389,18 +10523,21 @@ function screenAlchemist(){
     const maxQty=maxAffordableRecipeQty(recipe);
     const qty=Math.min(GF.alchemistBrewQty&&GF.alchemistBrewQty[recipe.result_item]||1,maxQty);
     const can=PS.canAffordRecipe(recipe,qty);
+
     const rowKids=[
-      h("div",{class:"row gap",style:{alignItems:"center"}},[itemIcon(recipe.result_item), h("div",{},[
+      h("div",{class:"row gap",style:{alignItems:"flex-start",flex:"1",minWidth:"0"}},[itemIcon(recipe.result_item), h("div",{style:{flex:"1",minWidth:"0"}},[
 
         h("div",{class:"tooltip",style:{fontWeight:"bold"},"data-tip":DL.itemEffectDescription(recipe.result_item)},[result.name]),
         h("div",{class:"muted",style:{fontSize:".85em"}},[DL.itemCategoryLabel(recipe.result_item)]),
+        h("div",{class:"muted recipe-ingredients"},
+          [h("span",{class:"recipe-ing-label"},["Ingredients: "])].concat(
+            herbIds.flatMap((h2,i)=>[
+              i>0?", ":null,
+              h("span",{class:"tooltip","data-tip":DL.getHerb(h2).found_in||""},[`${DL.getHerb(h2).name} x${recipe.herbs[h2]}`]),
+            ]).filter(x=>x!=null).concat(recipe.gold_cost?[`, ${recipe.gold_cost}g`]:[])
+          )
+        ),
       ])]),
-      h("div",{class:"muted",style:{flex:"1"}},
-        herbIds.flatMap((h2,i)=>[
-          i>0?", ":null,
-          h("span",{class:"tooltip","data-tip":DL.getHerb(h2).found_in||""},[`${DL.getHerb(h2).name} x${recipe.herbs[h2]}`]),
-        ]).filter(x=>x!=null).concat(recipe.gold_cost?[`, ${recipe.gold_cost}g`]:[])
-      ),
     ];
     if(brewingThis){
       const elapsed=Date.now()-GF.brewing.startedAt;
@@ -10410,7 +10547,8 @@ function screenAlchemist(){
       rowKids.push(alchemistAmountPicker(recipe.result_item,maxQty));
       rowKids.push(h("button",{disabled:!can||!!GF.brewing,onClick:()=>startBrew(recipe,qty)},["Brew"]));
     }
-    root.appendChild(h("div",{class:"tile gear-row",style:{marginBottom:"6px"}},rowKids));
+
+    recipeGrid.appendChild(h("div",{class:"tile gear-row recipe-row"+(can?"":" recipe-row-locked")},rowKids));
   }
   return root;
 }
@@ -11072,7 +11210,14 @@ function screenMagician(){
   root.appendChild(h("button",{style:{marginBottom:"8px"},onClick:()=>GF.goto("town")},["← Back to Town"]));
   const t=toastBox(); if(t) root.appendChild(t);
 
-  root.appendChild(h("div",{class:"muted",style:{marginBottom:"10px",fontSize:".9em"}},[`Every class can learn and slot every spell, and upgrade each one through 5 tiers separately. You have ${PS.getEffectiveSpellSlotCount()} spell slots, shown below your mana bar and usable in combat with your Q/E hotkeys (configurable in Settings).`]));
+  const spellSlotCount=PS.getEffectiveSpellSlotCount();
+  const spellKeys=getKeyboardShortcuts();
+  const slotKeyLabels=SPELL_SLOT_SHORTCUT_KEYS.slice(0,spellSlotCount)
+    .map(k=>(spellKeys[k]||"").toUpperCase()).filter(Boolean);
+  const keyPhrase=slotKeyLabels.length
+    ? `usable in combat with your ${slotKeyLabels.join("/")} ${slotKeyLabels.length===1?"hotkey":"hotkeys"} (configurable in Settings)`
+    : "usable in combat by clicking them (assign hotkeys in Settings)";
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"10px",fontSize:".9em"}},[`Every class can learn and slot every spell, and upgrade each one through 5 tiers separately. You have ${spellSlotCount} spell slots, shown in the sidebar on the left and ${keyPhrase}.`]));
 
   const grid=h("div",{class:"spell-card-grid"});
   for(const spellId in Balance.SPELLS) grid.appendChild(magicianSpellCard(spellId));
@@ -12241,6 +12386,22 @@ function legacyGearSection(){
 }
 
 const CHANGELOG=[
+  { version:"v0.29", date:"2026-08-06 03:20", notes:[
+    "Kindle the Bonfire restores your mana. The mana restore was being queued and then never delivered, because the tick that hands it out was written but never started. Mana Potions drunk outside combat were affected by the same fault and now work too.",
+    "Mana potions drop from monsters. They were missing from every loot band, so a caster could only ever buy mana while a melee character was handed health for free.",
+    "Intelligence now makes your spells hit harder and nothing else. It no longer adds to weapon damage, so a point spent on it is a point spent entirely on casting. The damage panel is named Physical DPS to match, with Spell DPS beside it.",
+    "Entangle shows its roots again. It has been casting invisibly since it gained its crushing-vine damage, because the code that draws the vines was never reached. The roots are also drawn far heavier than before.",
+    "A spell you cannot cast now tells you why, inside the fight: how long is left on its cooldown, or what it costs against what you have.",
+    "Cleanse the Forest no longer hands you free parts after a Broken Bridge Trial. It counted every monster you had ever killed, which deliberately survives a trial, so a fallen character came back at level 1 with parts already complete. It now counts kills since the trial. Your lifetime total is untouched and the Leaderboard is unaffected.",
+    "Every quest is available from level 1.",
+    "Multi-step questlines carry their position in their name, as Cleanse the Forest, Part 3, instead of prefixing the objective with Step 3 of 5.",
+    "Fixed an open dropdown being closed a moment after opening. Background ticks were rebuilding the screen underneath it; they now wait until you have made your choice.",
+    "Fixed the stamina warning and the shrine blessings each appearing twice, in two slightly different wordings.",
+    "The top banner is a single bar across the whole width now, so its two halves can never fall out of line again, and it no longer scrolls away.",
+    "The character select screen centres itself instead of sitting in the top-left corner of an empty window.",
+    "The Magician's explanation names your actual spell hotkeys rather than assuming the defaults, and points at the sidebar where the slots really are.",
+    "Alchemist recipes list their ingredients under the potion, two recipes to a row, and a recipe you cannot afford dims as a whole row.",
+  ]},
   { version:"v0.28.4", date:"2026-08-06 01:40", notes:[
     "Your Magic Find figure now matches the one the game actually uses. The sidebar was leaving out the night delve bonus, so during a night delve it under-reported by 15% against the number your loot was really being rolled with.",
     "The kill streak shows what the streak itself is worth rather than your whole Magic Find total, which had been folding in gear and shrines and reading as though the streak granted all of it. The full breakdown, naming only the sources actually contributing, is on hover.",
@@ -13601,6 +13762,20 @@ setInterval(()=>{
   const stillHealing=PS.active_stamina_heals.length>0;
   staminaHealSaveCounter++;
   if((staminaHealSaveCounter%5===0) || (hadHeals && !stillHealing)) PS.saveGame();
+  if(changed){
+    if(!refreshStatHeaderInPlace()) render();
+  }
+},Balance.POTION_HEAL_TICK_MS);
+
+let manaHealSaveCounter=0;
+setInterval(()=>{
+  if(PS.current_slot<0) return;
+  if(!PS.active_mana_heals || !PS.active_mana_heals.length) return;
+  const hadHeals=PS.active_mana_heals.length>0;
+  const changed=PS.tickActiveManaHeals();
+  const stillHealing=PS.active_mana_heals.length>0;
+  manaHealSaveCounter++;
+  if((manaHealSaveCounter%5===0) || (hadHeals && !stillHealing)) PS.saveGame();
   if(changed){
     if(!refreshStatHeaderInPlace()) render();
   }

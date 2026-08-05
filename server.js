@@ -1058,7 +1058,10 @@ const QUEST_DEFS = {
   // applyTrialResolutionReset() above), so "must be level 8" is already a meaningfully
   // mid-late gate in every town's own arc (town 1 runs levels 1-10 before trial eligibility,
   // town 2 runs 1-20, town 3+ runs 1-30/40 -- see trialLevelRequirement()), not just town 1's.
-  LEVEL_REQ: { explore: 1, wardens: 1, gatherer: 1, wanderers: 6, streak: 3, cauldron: 2, elder: 8, palisade: 1, pacifist: 1, trader: 1, cleanse: 1 },
+  // v0.29 (credit: Gwen): every quest is available from level 1 for now. The gating machinery is
+  // left intact -- questInitialStatus() treats a requirement of 1 as "no gate" -- so restoring a
+  // gate later is a matter of changing a number back. Must stay in sync with index.html.
+  LEVEL_REQ: { explore: 1, wardens: 1, gatherer: 1, wanderers: 1, streak: 1, cauldron: 1, elder: 1, palisade: 1, pacifist: 1, trader: 1, cleanse: 1 },
   // Fixed, town-independent. See the de-scaling note above this object.
   TARGETS: {
     gatherer_herbs: 12,
@@ -1204,6 +1207,10 @@ function questBuildEntriesForTown(town) {
 // absent, so the board fell through to a hardcoded {status:"locked"} placeholder.
 // No town parameter any more -- no target here depends on the town (see the de-scaling note
 // above QUEST_DEFS).
+// v0.29: a freshly built Cleanse entry anchors its baseline to the character's current lifetime
+// kills, which is what makes a Broken Bridge Trial reset the quest without touching total_kills.
+// questBuildEntry() is called both when a board is first created and whenever
+// questRebuildBoardForTown() runs, which is exactly the two moments the count should restart.
 function questBuildEntry(qid) {
   let target = 1; // explore is a single boolean "fully explored this delve" report.
   if (qid === "gatherer") target = QUEST_DEFS.TARGETS.gatherer_herbs;
@@ -1220,7 +1227,7 @@ function questBuildEntry(qid) {
   } else if (qid === "trader") {
     entry = { step: 1, progress: 0, target: QUEST_DEFS.TRADER_STEPS[0].count, status: questInitialStatus(qid) };
   } else if (qid === "cleanse") {
-    entry = { step: 1, progress: 0, target: QUEST_DEFS.CLEANSE_STEPS[0].count, status: questInitialStatus(qid) };
+    entry = { step: 1, progress: 0, target: QUEST_DEFS.CLEANSE_STEPS[0].count, status: questInitialStatus(qid), _kill_base: null };
   } else {
     entry = { progress: 0, target, status: questInitialStatus(qid) };
   }
@@ -1411,13 +1418,32 @@ function questTrackEliteKill(data, monsterBand) {
 // from zero, so progress is always the true number no matter how many town/board resets have
 // happened since. That also makes it self-healing: a fresh board recomputes the same figure on
 // the very next kill instead of starting the player over on a 100,000-kill commitment.
+// v0.29 BUG FIX (credit: Gwen): this read data.total_kills directly, which is the LIFETIME
+// counter and deliberately survives a Broken Bridge Trial (the leaderboard needs it to). So a
+// character that fell at the bridge with a few thousand kills behind it came back at level 1 and
+// instantly had steps 1 and 2 of Cleanse the Forest complete -- questRebuildBoardForTown() did
+// reset the entry's progress to 0, and this function put it straight back on the next kill.
+//
+// The quest now counts kills made SINCE its own baseline rather than kills ever made. The
+// baseline is the character's total_kills at the moment the board was last rebuilt, so a trial
+// attempt (pass or fall) starts the count again from zero while total_kills itself is untouched
+// and the leaderboard is unaffected. Claiming a step also advances the baseline, so each step
+// counts its own kills rather than inheriting the previous step's.
+function questCleanseKillsSinceBaseline(data, entry) {
+  const base = entry._kill_base || 0;
+  return Math.max(0, (data.total_kills || 0) - base);
+}
 function questTrackTotalKills(data) {
   const entry = data.quests.entries.cleanse;
   if (!entry || entry.status !== "active") return;
   const step = QUEST_DEFS.CLEANSE_STEPS[(entry.step || 1) - 1];
   if (!step) return;
+  // A character created before this baseline existed has no _kill_base. Anchoring it to their
+  // CURRENT total (rather than to 0) is the honest migration: it neither wipes progress they can
+  // no longer prove nor hands them credit for kills made under the old rule.
+  if (typeof entry._kill_base !== "number") entry._kill_base = data.total_kills || 0;
   entry.target = step.count;
-  entry.progress = Math.min(step.count, data.total_kills || 0);
+  entry.progress = Math.min(step.count, questCleanseKillsSinceBaseline(data, entry));
   if (entry.progress >= step.count) entry.status = "ready";
 }
 
@@ -1892,7 +1918,16 @@ app.post("/api/quests/:questId/claim", requireAuth, (req, res) => {
       // Both count a LIFETIME total, so the next step's progress carries straight over rather
       // than restarting at 0 -- a player at 120 kills who claims step 1 (100) is genuinely
       // already 120/500 toward step 2, and showing 0/500 would be a lie.
-      entry.progress = Math.min(entry.target, questId === "trader" ? (data.auction_sales || 0) : (data.total_kills || 0));
+      // v0.29: Cleanse counts kills since its own baseline, so claiming a step moves that
+      // baseline to now -- each step asks for its own kills rather than inheriting the last
+      // step's. Trader still carries its lifetime sales forward, which is correct for it: an
+      // Auction House sale is a permanent fact about the character, not something a trial undoes.
+      if (questId === "cleanse") {
+        entry._kill_base = data.total_kills || 0;
+        entry.progress = 0;
+      } else {
+        entry.progress = Math.min(entry.target, data.auction_sales || 0);
+      }
       entry.status = entry.progress >= entry.target ? "ready" : "active";
       reward.done = false;
     } else {
@@ -2793,11 +2828,22 @@ const COMBAT_MONSTERS = [
 // generating them anywhere. Confirmed via audit that no other server loot source (chest,
 // stronghold chest, merchant stock) references dry_branch either.
 const COMBAT_LOOT_TABLES = {
-  common: [{ type: "nothing", weight: 155 }, { type: "gear", weight: 50 }, { type: "consumable", weight: 66, item_id: "minor_health_potion" }, { type: "herb", weight: 1, herb_id: "sunpetal" }],
-  uncommon: [{ type: "nothing", weight: 139 }, { type: "gear", weight: 66 }, { type: "consumable", weight: 50, item_id: "health_potion" }, { type: "herb", weight: 1, herb_id: "emberroot" }],
-  rare: [{ type: "nothing", weight: 112 }, { type: "gear", weight: 99 }, { type: "consumable", weight: 50, item_id: "medium_health_potion" }, { type: "herb", weight: 1, herb_id: "frostvine" }],
-  epic: [{ type: "nothing", weight: 83 }, { type: "gear", weight: 149 }, { type: "consumable", weight: 50, item_id: "greater_health_potion" }, { type: "herb", weight: 1, herb_id: "frostvine" }],
-  legendary: [{ type: "nothing", weight: 60 }, { type: "gear", weight: 180 }, { type: "consumable", weight: 50, item_id: "supreme_health_potion" }, { type: "herb", weight: 1, herb_id: "starveil" }],
+  // v0.29 (credit: Gwen): mana potions are in the loot tables now. They were absent from every
+  // band, so a caster could only ever buy mana while a melee character was handed health for
+  // free -- and mana is the most expensive potion line in the shop (14g to 1,134g), which made
+  // that gap sharper the further a caster progressed.
+  //
+  // The existing consumable weight is SPLIT between health and mana rather than mana being added
+  // on top, so the overall rate at which a kill yields a potion is unchanged and only WHICH
+  // potion it is has changed. That does halve health-potion drops; adding mana on top instead
+  // would have made potions meaningfully more common overall, which is a larger economy change
+  // than the request called for. Each band grants the same TIER it already did, so a Legendary
+  // kill yields a Supreme of whichever kind it rolls.
+  common: [{ type: "nothing", weight: 155 }, { type: "gear", weight: 50 }, { type: "consumable", weight: 33, item_id: "minor_health_potion" }, { type: "consumable", weight: 33, item_id: "minor_mana_potion" }, { type: "herb", weight: 1, herb_id: "sunpetal" }],
+  uncommon: [{ type: "nothing", weight: 139 }, { type: "gear", weight: 66 }, { type: "consumable", weight: 25, item_id: "health_potion" }, { type: "consumable", weight: 25, item_id: "mana_potion" }, { type: "herb", weight: 1, herb_id: "emberroot" }],
+  rare: [{ type: "nothing", weight: 112 }, { type: "gear", weight: 99 }, { type: "consumable", weight: 25, item_id: "medium_health_potion" }, { type: "consumable", weight: 25, item_id: "medium_mana_potion" }, { type: "herb", weight: 1, herb_id: "frostvine" }],
+  epic: [{ type: "nothing", weight: 83 }, { type: "gear", weight: 149 }, { type: "consumable", weight: 25, item_id: "greater_health_potion" }, { type: "consumable", weight: 25, item_id: "greater_mana_potion" }, { type: "herb", weight: 1, herb_id: "frostvine" }],
+  legendary: [{ type: "nothing", weight: 60 }, { type: "gear", weight: 180 }, { type: "consumable", weight: 25, item_id: "supreme_health_potion" }, { type: "consumable", weight: 25, item_id: "supreme_mana_potion" }, { type: "herb", weight: 1, herb_id: "starveil" }],
 };
 // v0.22.1 (Part A2d): "Each band drops mostly its own [gear] rarity, with a small weighted
 // tail into adjacent rarities" -- ~70% own rarity / ~15% each adjacent, clamped at the ends
@@ -3648,7 +3694,11 @@ function combatGetDamageRange(data) {
   // v0.22 (batch2 #3): Wizard chain's Intelligence damage term doubled from x1 to x2 per point
   // (CB.WIZARD_INT_DAMAGE_PER_POINT) -- must stay in sync with index.html's
   // PS.getDamageBreakdown()/getAttackDamage(), which apply the identical x2 multiplier.
-  else if (c.chain === "wizard") statBonus = combatGetTotalAttr(data, "int") * CB.WIZARD_INT_DAMAGE_PER_POINT;
+  // v0.29 (credit: Gwen): Intelligence no longer feeds WEAPON damage -- it feeds Spell Power (see
+  // combatGetSpellPowerPct), and driving both meant a point of Intelligence made a Wizard better
+  // at swinging a stick as well as at casting. The Wizard chain therefore has no attribute term
+  // in its physical damage at all now; its weapon hits are base plus gear only. Must stay in sync
+  // with PS.getDamageBreakdown() in index.html, which drops the same term.
   // v0.19.1 (#14): % damage bonus applied multiplicatively to the whole base+gear total,
   // mirroring PS.getDamageBreakdown() in index.html -- must stay in sync with that function.
   const weaponType = combatGetEquippedWeaponType(data);
