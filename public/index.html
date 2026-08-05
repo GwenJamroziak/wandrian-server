@@ -46,16 +46,31 @@ body{
 
 #hud-rail .player-stats-grid{display:block !important;}
 #hud-rail .player-stats-grid > *{width:100% !important;max-width:100% !important;min-width:0 !important;
-  margin-bottom:9px;}
+  margin-bottom:10px;}
+#hud-rail .player-stats-grid .stat-cat-body{display:grid;grid-template-columns:1fr 1fr;gap:2px 10px;}
+#hud-rail .player-stats-grid .stat-cat-body > *{min-width:0;}
 #hud-rail .player-stats-grid .row{flex-wrap:wrap;}
 #hud-rail *{min-width:0;overflow-wrap:anywhere;}
+
+.rail-menu-btn{padding:4px 12px;font-size:13px;line-height:1.2;}
+
+.rail-version-link{font-size:12.5px;color:rgba(180,210,150,.75);cursor:pointer;letter-spacing:.3px;
+  white-space:nowrap;}
+.rail-version-link:hover{color:#cbd9a0;text-decoration:underline;}
 .hud-idname{font-family:Cinzel,Georgia,serif;font-size:18px;line-height:1.2;}
 .hud-idsub{font-size:12px;color:var(--muted);margin-top:2px;}
 
 .hud-globe{position:relative;border-radius:50%;overflow:hidden;flex:0 0 auto;
   box-shadow:0 0 0 3px #241a10, 0 0 0 6px #5c462c, 0 8px 26px rgba(0,0,0,.75), inset 0 0 26px rgba(0,0,0,.75);
   background:radial-gradient(circle at 34% 28%, #2a2e24, #10120d 70%);cursor:help;}
-.hud-globe .gfill{position:absolute;left:0;right:0;bottom:0;transition:height .35s ease;}
+
+.hud-globe .gfill{position:absolute;left:0;right:0;bottom:0;transition:height .35s ease;z-index:2;}
+.hud-globe .gghost{position:absolute;left:0;right:0;bottom:0;transition:height .35s ease;z-index:1;}
+.hud-globe.hp .gghost{background:linear-gradient(180deg,rgba(227,91,91,.42),rgba(142,32,32,.42));}
+.hud-globe.mana .gghost{background:linear-gradient(180deg,rgba(91,162,234,.42),rgba(29,74,134,.42));}
+.hud-bar .hb-ghost{position:absolute;left:0;top:0;bottom:0;transition:width .35s ease;z-index:1;}
+.hud-bar .hb-fill{position:relative;z-index:2;}
+.hud-bar.stam .hb-ghost{background:linear-gradient(90deg,rgba(207,202,187,.40),rgba(234,230,217,.40));}
 .hud-globe .gfill::after{content:"";position:absolute;left:0;right:0;top:0;height:6px;background:rgba(255,255,255,.28);}
 .hud-globe .ggloss{position:absolute;inset:0;border-radius:50%;pointer-events:none;
   background:radial-gradient(circle at 33% 24%, rgba(255,255,255,.30), rgba(255,255,255,0) 46%),
@@ -579,18 +594,33 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 
 .kindle{position:relative;overflow:hidden;transition:border-color .3s;}
 .kindle .venture-title,.kindle .muted{position:relative;z-index:5;}
-.kindle.lit .venture-title{color:#fff4e2;text-shadow:0 1px 3px rgba(120,40,0,.8);transition:color .4s;}
-.kindle .blaze{position:absolute;top:0;left:0;height:100%;width:0%;z-index:2;opacity:1;transition:opacity .7s ease;
-  background:linear-gradient(90deg,#3a1c0e 0%,#6e2f12 45%,#a5501c 78%,#c9701f 100%);}
+
+.kindle.lit .venture-title{color:#e8d9c0;text-shadow:0 1px 3px rgba(60,24,6,.85);transition:color .4s;}
+
+.kindle .blaze{position:absolute;top:0;left:0;height:100%;width:0%;z-index:2;opacity:.55;transition:opacity .7s ease;
+  background:linear-gradient(90deg,rgba(26,14,8,.9) 0%,rgba(48,22,12,.85) 55%,rgba(74,32,14,.7) 100%);}
+
+.kindle .emberline{position:absolute;left:0;height:2px;width:0%;z-index:4;pointer-events:none;
+  background:linear-gradient(90deg,rgba(150,70,25,0) 0%,rgba(196,104,42,.75) 60%,rgba(232,150,72,.95) 100%);
+  box-shadow:0 0 7px rgba(196,104,42,.5);transition:opacity .7s ease;}
+.kindle .emberline.top{top:0;}
+.kindle .emberline.bottom{bottom:0;}
+.kindle.fading .emberline{opacity:0;}
+.kindle:not(.lit) .emberline{display:none;}
+
+@keyframes kindle-smoulder{
+  0%,100%{opacity:.30;transform:scale(1);}
+  50%{opacity:.62;transform:scale(1.06);}}
 .kindle.fading .blaze{opacity:0;}
 .kindle .edge{position:absolute;right:-14px;top:0;height:100%;width:34px;z-index:3;pointer-events:none;}
 .kindle:not(.lit) .edge,.kindle.fading .edge{display:none;}
-.kindle .flame{position:absolute;bottom:-2px;width:16px;height:30px;border-radius:50% 50% 48% 52%/62% 62% 40% 40%;
-  background:radial-gradient(50% 60% at 50% 72%, #fff3c4 0%, #ffd166 26%, #ff8b2a 55%, #f0530f 78%, rgba(200,40,0,0) 92%);
-  transform-origin:50% 100%;filter:blur(.4px) drop-shadow(0 0 8px rgba(255,130,40,.75));mix-blend-mode:screen;}
-.kindle .flame.f1{left:4px;height:34px;animation:kindle-lick 320ms ease-in-out infinite;}
-.kindle .flame.f2{left:11px;height:26px;width:13px;animation:kindle-lick 260ms ease-in-out infinite reverse;}
-.kindle .flame.f3{left:-2px;height:22px;width:12px;animation:kindle-lick 380ms ease-in-out infinite;}
+
+.kindle .flame{position:absolute;bottom:-6px;width:26px;height:22px;border-radius:50%;
+  background:radial-gradient(50% 60% at 50% 65%, rgba(214,138,66,.55) 0%, rgba(168,74,26,.45) 40%, rgba(96,32,10,.28) 70%, rgba(60,20,6,0) 88%);
+  transform-origin:50% 100%;filter:blur(2.5px);mix-blend-mode:screen;}
+.kindle .flame.f1{left:0px;height:26px;width:30px;animation:kindle-smoulder 2400ms ease-in-out infinite;}
+.kindle .flame.f2{left:9px;height:20px;width:22px;animation:kindle-smoulder 3100ms ease-in-out infinite reverse;}
+.kindle .flame.f3{left:-6px;height:18px;width:20px;animation:kindle-smoulder 2750ms ease-in-out infinite;}
 .kindle .flame.core{left:6px;bottom:0;height:44px;width:20px;filter:blur(1.5px);opacity:.9;background:radial-gradient(45% 55% at 50% 70%, #fff7d8, #ffb43c 45%, rgba(240,90,20,0) 78%);animation:kindle-coreflick 180ms steps(2) infinite;}
 @keyframes kindle-lick{0%{transform:translateY(0) scaleY(1) scaleX(1) skewX(0);opacity:.95;}25%{transform:translateY(-3px) scaleY(1.28) scaleX(.86) skewX(6deg);opacity:1;}50%{transform:translateY(-1px) scaleY(1.05) scaleX(1.08) skewX(-5deg);opacity:.9;}75%{transform:translateY(-4px) scaleY(1.34) scaleX(.8) skewX(3deg);opacity:1;}100%{transform:translateY(0) scaleY(1) scaleX(1) skewX(0);opacity:.95;}}
 @keyframes kindle-coreflick{0%{opacity:.7;transform:scaleY(1);}50%{opacity:1;transform:scaleY(1.12);}100%{opacity:.8;transform:scaleY(.96);}}
@@ -668,7 +698,8 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 <div id="modalRoot"></div>
 
 <div class="version-tag" id="versionTag" style="display:none"></div>
-<div class="changelog-link" id="changelogLink">Changelog</div>
+
+<div class="changelog-link" id="changelogLink" style="display:none">Changelog</div>
 <script>
 "use strict";
 
@@ -1580,6 +1611,7 @@ const Balance = {
 
   MONSTER_FIRST_STRIKE_CHANCE:0.5,
 
+  CHEST_GEAR_COUNT_WEIGHTS:[{count:1,weight:62},{count:2,weight:30},{count:3,weight:8}],
   CHEST_LOOT_MULTIPLIER:2.5, CHEST_SCROLL_CHANCE:0, CHEST_HITS_MIN:3, CHEST_HITS_MAX:5,
 
   STRONGHOLD_SPAWN_CHANCE:0.40,
@@ -1613,6 +1645,14 @@ const Balance = {
   STRONGHOLD_CHEST_GEAR_COUNT_MIN:2, STRONGHOLD_CHEST_GEAR_COUNT_MAX:5,
 
   STRONGHOLD_CHEST_GEAR_RARITY_WEIGHTS:[{name:"Uncommon",weight:15},{name:"Rare",weight:35},{name:"Epic",weight:45},{name:"Legendary",weight:5}],
+
+  rollChestGearCount(){
+    const table=this.CHEST_GEAR_COUNT_WEIGHTS;
+    let total=0; for(const r of table) total+=r.weight;
+    let roll=Math.floor(Math.random()*total), cum=0;
+    for(const r of table){ cum+=r.weight; if(roll<cum) return r.count; }
+    return table[0].count;
+  },
   rollStrongholdChestGearRarity(){
     const table=this.STRONGHOLD_CHEST_GEAR_RARITY_WEIGHTS;
     let total=0; for(const r of table) total+=r.weight;
@@ -1634,7 +1674,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.25.2-web",
+  GAME_VERSION:"v0.25.4-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
 
@@ -1856,6 +1896,8 @@ const Balance = {
   TRIAL_LEVEL_REQUIREMENT_PER_TIER:10,
 
   KILL_STREAK_MAGIC_FIND_PCT_PER_KILL:1,
+
+  MAGIC_FIND_CAP_PCT:500,
   MAX_CHARACTER_SLOTS:6,
   EYESIGHT_AFFIX_CHANCE:0.03, ELIXIR_EYESIGHT_STEPS:500, RARE_HERB_CHANCE:0.06,
 
@@ -3113,6 +3155,14 @@ const PS = {
 
   active_heals:[],
 
+  _projectedPool(current,max,queue){
+    const pending=(queue||[]).reduce((sum,heal)=>sum+heal.perTick*heal.ticksLeft,0);
+    return clampf(current+pending,0,max);
+  },
+  getProjectedHp(){ return this._projectedPool(this.current_hp,this.getMaxHp(),this.active_heals); },
+  getProjectedStamina(){ return this._projectedPool(this.current_stamina,this.getMaxStamina(),this.active_stamina_heals); },
+  getProjectedMana(){ return this._projectedPool(this.current_mana,this.getMaxMana(),this.active_mana_heals); },
+
   active_stamina_heals:[],
 
   active_mana_heals:[],
@@ -4210,7 +4260,13 @@ const GF = {
   entangleRoots:[],
 
   mazeLog:[],
+
   goto(screen, extra={}){
+    if(screen!==this.screen){
+      const mainEl=document.getElementById("hud-main"); if(mainEl) mainEl.scrollTop=0;
+
+      window.scrollTo(0,0);
+    }
     Object.assign(this, extra);
     this.screen=screen; render();
 
@@ -4555,11 +4611,13 @@ function chatPanel(){
   return h("div",{class:"chat-panel"},[chatBody(()=>{ GF.chatOpen=false; render(); })]);
 }
 
-function hudGlobe(kind,cur,max,size,tip){
+function hudGlobe(kind,cur,max,size,tip,projected){
   const p=clampf(max>0?cur/max*100:0,0,100);
+  const gp=clampf(max>0?(projected==null?cur:projected)/max*100:0,0,100);
   const poisoned=kind==="hp"&&PS.isPoisoned();
   const g=h("div",{class:"hud-globe "+kind+(poisoned?" poisoned":""),style:{width:size+"px",height:size+"px"},
     id:"hud-globe-"+kind,"data-tip":tip,},[
+    h("div",{class:"gghost",id:"hud-globe-ghost-"+kind,style:{height:gp+"%"}}),
     h("div",{class:"gfill",id:"hud-globe-fill-"+kind,style:{height:p+"%"}}),
     h("div",{class:"ggloss"}),
     h("div",{class:"glbl"},[
@@ -4569,6 +4627,12 @@ function hudGlobe(kind,cur,max,size,tip){
   ]);
   g.classList.add("tooltip");
   return g;
+}
+
+function hudPoolTip(label,cur,max,projected){
+  const base=`${label} ${Math.round(cur)} / ${Math.round(max)}`;
+  if(projected==null || Math.round(projected)===Math.round(cur)) return base;
+  return `${base}\nRecovering to ${Math.round(projected)}`;
 }
 function hudTicks(){
   const out=[]; for(let i=0;i<10;i++) out.push(h("i",{}));
@@ -4581,11 +4645,12 @@ function hudFooter(){
   const xpPct=clampf(PS.xp_to_next>0?PS.xp/PS.xp_to_next*100:0,0,100);
   return h("div",{id:"hud-footer"},[
     h("div",{style:{position:"relative"}},[
-      hudGlobe("hp",PS.current_hp,maxHp,104,`Life ${Math.round(PS.current_hp)} / ${Math.round(maxHp)}`),
+      hudGlobe("hp",PS.current_hp,maxHp,104,hudPoolTip("Life",PS.current_hp,maxHp,PS.getProjectedHp()),PS.getProjectedHp()),
       floatLayer("player"),
     ]),
     h("div",{class:"hud-bars"},[
-      h("div",{class:"hud-bar stam",style:{height:"15px"}},[
+      h("div",{class:"hud-bar stam tooltip",style:{height:"15px"},"data-tip":hudPoolTip("Stamina",PS.current_stamina,maxStam,PS.getProjectedStamina())},[
+        h("div",{class:"hb-ghost",id:"hud-stam-ghost",style:{width:clampf(maxStam>0?PS.getProjectedStamina()/maxStam*100:0,0,100)+"%"}}),
         h("div",{class:"hb-fill",id:"hud-stam-fill",style:{width:stamPct+"%"}}),
         h("div",{class:"hb-cap",id:"hud-stam-cap"},[`Stamina ${Math.round(PS.current_stamina)} / ${Math.round(maxStam)}`]),
       ]),
@@ -4598,7 +4663,7 @@ function hudFooter(){
         floatLayer("xpbar"),
       ]),
     ]),
-    h("div",{},[hudGlobe("mana",PS.current_mana,maxMana,104,`Mana ${Math.round(PS.current_mana)} / ${Math.round(maxMana)}`)]),
+    h("div",{},[hudGlobe("mana",PS.current_mana,maxMana,104,hudPoolTip("Mana",PS.current_mana,maxMana,PS.getProjectedMana()),PS.getProjectedMana())]),
   ]);
 }
 
@@ -4608,10 +4673,13 @@ function hudRail(){
   const rail=h("div",{id:"hud-rail"});
 
   rail.appendChild(h("div",{class:"row",style:{justifyContent:"space-between",alignItems:"center",
-    marginBottom:"2px",fontSize:"11.5px"}},[
-    h("span",{class:"linklike",onClick:()=>{ autosave(); GF.goto("mainMenuSlots"); }},["← Menu"]),
-    h("span",{class:"linklike muted",onClick:()=>{ GF._preChangelogScreen=GF.screen; GF.goto("changelog"); }},[`${Balance.GAME_VERSION} Changelog`]),
+    gap:"8px",marginBottom:"4px"}},[
+    h("button",{class:"rail-menu-btn",onClick:()=>{ autosave(); GF.goto("mainMenuSlots"); }},["← Menu"]),
+    h("span",{class:"rail-version-link",onClick:()=>{ GF._preChangelogScreen=GF.screen; GF.goto("changelog"); }},[`${Balance.GAME_VERSION} Changelog`]),
   ]));
+
+  const community=communityXpHeader();
+  if(community) rail.appendChild(community);
   if(PS.current_slot<0){
 
     return rail;
@@ -4677,8 +4745,14 @@ function hudCombatSummary(){
     h("div",{class:"hud-rail-title"},["Damage"]),
     h("div",{class:"tooltip",style:{fontSize:"19px",fontWeight:"bold",cursor:"help",display:"inline-block",
       borderBottom:"1px dotted var(--muted)"},"data-tip":parts.join("\n")},[`${total}`]),
-    PS.kill_streak>0?h("div",{class:"muted",style:{marginTop:"7px",fontSize:"12px"}},
-      [`Kill streak ${PS.kill_streak} (+${PS.kill_streak*Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL}% Magic Find)`]):null,
+
+    PS.kill_streak>0?(()=>{
+      const mf=Math.round(PS.getMagicFind());
+      const capped=mf>=Balance.MAGIC_FIND_CAP_PCT;
+      return h("div",{class:"tooltip muted",style:{marginTop:"7px",fontSize:"12px",cursor:"help"},
+        "data-tip":`Your kill streak grants +${Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL}% Magic Find per kill, on top of gear, shrines and night delves.\nTotal Magic Find is capped at ${Balance.MAGIC_FIND_CAP_PCT}%${capped?", and you are at the cap: further streak does not improve your loot.":"."}`},
+        [`Kill streak ${PS.kill_streak} (Magic Find ${mf}%${capped?", capped":""})`]);
+    })():null,
     h("div",{class:"tooltip muted",style:{marginTop:"3px",fontSize:"12px"},
       "data-tip":forestReputationTooltipText(PS.getCurrentForestReputation())},
       [`Forest Reputation ${PS.getCurrentForestReputation()}`]),
@@ -4687,7 +4761,10 @@ function hudCombatSummary(){
 
 function refreshStatHeaderInPlace(smooth){
   const footer=document.getElementById("hud-footer");
-  if(!footer || !footer.parentNode) return false;
+  if(!footer || !footer.parentNode){
+
+    return true;
+  }
   const maxHp=PS.getMaxHp(), maxMana=PS.getMaxMana(), maxStam=PS.getMaxStamina();
   const hpFillG=document.getElementById("hud-globe-fill-hp");
   const hpNumG=document.getElementById("hud-globe-num-hp");
@@ -4697,6 +4774,13 @@ function refreshStatHeaderInPlace(smooth){
   const stamCap=document.getElementById("hud-stam-cap");
   const xpFill=document.getElementById("hud-xp-fill");
   const xpCap=document.getElementById("hud-xp-cap");
+
+  const hpGhost=document.getElementById("hud-globe-ghost-hp");
+  const manaGhost=document.getElementById("hud-globe-ghost-mana");
+  const stamGhost=document.getElementById("hud-stam-ghost");
+  if(hpGhost) hpGhost.style.height=clampf(PS.getProjectedHp()/maxHp*100,0,100)+"%";
+  if(manaGhost) manaGhost.style.height=clampf(maxMana>0?PS.getProjectedMana()/maxMana*100:0,0,100)+"%";
+  if(stamGhost) stamGhost.style.width=clampf(PS.getProjectedStamina()/maxStam*100,0,100)+"%";
   if(hpFillG) hpFillG.style.height=clampf(PS.current_hp/maxHp*100,0,100)+"%";
   if(hpNumG) hpNumG.textContent=`${Math.round(PS.current_hp)}`;
   if(manaFillG) manaFillG.style.height=clampf(maxMana>0?PS.current_mana/maxMana*100:0,0,100)+"%";
@@ -4709,9 +4793,9 @@ function refreshStatHeaderInPlace(smooth){
   const hpGlobe=document.getElementById("hud-globe-hp");
   if(hpGlobe) hpGlobe.classList.toggle("poisoned",PS.isPoisoned());
   const hpTip=document.getElementById("hud-globe-hp");
-  if(hpTip) hpTip.setAttribute("data-tip",`Life ${Math.round(PS.current_hp)} / ${Math.round(maxHp)}`);
+  if(hpTip) hpTip.setAttribute("data-tip",hudPoolTip("Life",PS.current_hp,maxHp,PS.getProjectedHp()));
   const manaTip=document.getElementById("hud-globe-mana");
-  if(manaTip) manaTip.setAttribute("data-tip",`Mana ${Math.round(PS.current_mana)} / ${Math.round(maxMana)}`);
+  if(manaTip) manaTip.setAttribute("data-tip",hudPoolTip("Mana",PS.current_mana,maxMana,PS.getProjectedMana()));
   return true;
 }
 
@@ -4741,9 +4825,15 @@ function refreshBonfireBlazeInPlace(){
   const fading=!warming && !holding;
   const pct=warming?clampf(elapsed/WARM_MS*100,0,100):100;
   blaze.style.width=pct+"%";
+
+  const emberTop=document.getElementById("kindle-bonfire-emberline-top");
+  const emberBottom=document.getElementById("kindle-bonfire-emberline-bottom");
+  if(emberTop) emberTop.style.width=pct+"%";
+  if(emberBottom) emberBottom.style.width=pct+"%";
   btn.classList.toggle("lit",!fading);
   btn.classList.toggle("fading",fading);
-  label.textContent=warming?"Warming...":(holding?"Full HP & Stamina!":"Kindle the Bonfire");
+
+  label.textContent=warming?"Warming...":(holding?"You feel fully restored":"Kindle the Bonfire");
   return true;
 }
 
@@ -4771,6 +4861,12 @@ function refreshCraftProgressInPlace(){
 }
 
 function render(){
+  const prevMain=document.getElementById("hud-main");
+  const prevRail=document.getElementById("hud-rail");
+  const keepMainScroll=prevMain?prevMain.scrollTop:0;
+  const keepRailScroll=prevRail?prevRail.scrollTop:0;
+
+  const keepWindowScroll=window.scrollY||document.documentElement.scrollTop||0;
   app.innerHTML="";
 
   const chromeless=NO_TOPBAR_SCREENS.includes(GF.screen) || PS.current_slot<0;
@@ -4786,6 +4882,12 @@ function render(){
   app.appendChild(main);
   renderScreenInto(main,chromeless);
   if(!chromeless && PS.current_slot>=0) app.appendChild(hudFooter());
+
+  if(keepMainScroll) main.scrollTop=keepMainScroll;
+  const newRail=document.getElementById("hud-rail");
+  if(keepRailScroll && newRail) newRail.scrollTop=keepRailScroll;
+
+  if(keepWindowScroll) window.scrollTo(0,keepWindowScroll);
   maybeShowWhatsNewPopup();
 }
 function renderScreenInto(app,chromeless){
@@ -4796,7 +4898,7 @@ function renderScreenInto(app,chromeless){
     ]));
   }
 
-  if(!chromeless){ app.appendChild(topBar()); app.appendChild(knownIssuesBanner()); app.appendChild(communityXpHeader()); }
+  if(!chromeless){ app.appendChild(topBar()); app.appendChild(knownIssuesBanner()); }
   const fn=SCREENS[GF.screen]||SCREENS.mainMenuSlots;
   app.appendChild(fn());
   const cp=chatPanel(); if(cp) app.appendChild(cp);
@@ -5055,7 +5157,7 @@ function playerStatsCompactPanel(){
 
   const col=(title,cells,wide)=>h("div",{class:"player-stats-col",style:wide?{gridColumn:"span 2"}:{}},[
     h("div",{class:"player-stats-cat"},[title]),
-    ...cells,
+    h("div",{class:"stat-cat-body"},cells),
   ]);
 
   const dmgBreak=PS.getDamageBreakdown();
@@ -6114,6 +6216,8 @@ function kindleBonfirePanel(){
         render();
       }},[
 
+      h("span",{id:"kindle-bonfire-emberline-top",class:"emberline top",style:{width:pct+"%"}}),
+      h("span",{id:"kindle-bonfire-emberline-bottom",class:"emberline bottom",style:{width:pct+"%"}}),
       h("span",{id:"kindle-bonfire-blaze",class:"blaze",style:{width:pct+"%"}},[
         h("span",{class:"edge"},[
           h("span",{class:"flame core"}),h("span",{class:"flame f1"}),h("span",{class:"flame f2"}),h("span",{class:"flame f3"}),
@@ -8291,7 +8395,12 @@ function screenChest(){
         const mult=Balance.CHEST_LOOT_MULTIPLIER;
 
         const entries=[];
-        const g1=grantLoot("epic",mult); if(g1) entries.push(g1.entry);
+
+        const gearCount=Balance.rollChestGearCount();
+        for(let gi=0;gi<gearCount;gi++){
+          const g=grantLoot("epic",mult);
+          if(g) entries.push(g.entry);
+        }
         if(Math.random()<Balance.CHEST_SCROLL_CHANCE){
           const scroll=pick(["scroll_of_challenge_1","scroll_of_challenge_2","scroll_of_challenge_3"]);
           PS.addConsumable(scroll,1); entries.push({kind:"consumable", itemId:scroll, qty:1});
@@ -9718,13 +9827,13 @@ function screenVault(){
     GF._vaultReorderMode?h("div",{class:"muted"},[GF._vaultReorderSrc!=null?"Now click the slot you want to move it to (or click it again to cancel)." : "Click an item to pick it up, then click an empty or occupied slot to place it there."]):null,
   ]));
 
-  const grid=h("div",{style:{display:"grid",gridTemplateColumns:"repeat(20,1fr)",gap:"3px",marginBottom:"14px",maxWidth:"760px"}});
+  const grid=h("div",{style:{display:"grid",gridTemplateColumns:"repeat(20,1fr)",gap:"3px",marginBottom:"14px",maxWidth:"900px"}});
   for(let i=0;i<capacity;i++){
     const entry=Net.vaultCache.find(e=>e.slot===i);
     let label=null, icon=null, tip=null;
     if(entry){
 
-      if(entry.kind==="gear"){ label=IF.displayName(entry.inst)+` (${tierRomanNumeral(entry.inst.tier)})`; icon=gearIcon(entry.inst,24); tip=`${IF.tooltipText(entry.inst)}\n${IF.categoryLabel(entry.inst)}`+(PS.canEquipGear(entry.inst)?"":`\n${PS.gearInvalidReason(entry.inst)}`); }
+      if(entry.kind==="gear"){ label=IF.displayName(entry.inst)+` (${tierRomanNumeral(entry.inst.tier)})`; icon=gearIcon(entry.inst,30); tip=`${IF.tooltipText(entry.inst)}\n${IF.categoryLabel(entry.inst)}`+(PS.canEquipGear(entry.inst)?"":`\n${PS.gearInvalidReason(entry.inst)}`); }
       else if(entry.kind==="consumable"){ label=`${DL.getItem(entry.item_id).name} x${entry.qty}`; icon=itemIcon(entry.item_id,24); tip=`${label}\n${DL.itemCategoryLabel(entry.item_id)}\n${DL.itemEffectDescription(entry.item_id)}`; }
       else if(entry.kind==="herb"){ label=`${DL.getHerb(entry.herb_id).name} x${entry.qty}`; icon=herbIcon(entry.herb_id,24); tip=`${label}\n${DL.getHerb(entry.herb_id).found_in||""}`; }
     }
@@ -10164,6 +10273,13 @@ function screenMerchant(){
 
 const CHARGE_BEARING_CONSUMABLES={elixir_of_clarity:10};
 
+function auctionPurchaseBlockedReason(listing){
+  if(!listing || listing.type!=="gear") return null;
+  if(PS.hasInventorySpace()) return null;
+
+  try{ if(listing.item && PS.canAutoEquip(listing.item)) return null; }catch(e){ return null; }
+  return "Your backpack is full. Make room before buying this.";
+}
 function screenAuctionHouse(){
   const root=h("div",{});
 
@@ -10341,7 +10457,13 @@ function screenAuctionHouse(){
             Net.auctionCache=null;
             await Net.fetchAuction();
             render();
-          }},["Cancel"]):h("button",{disabled:PS.gold<listing.price,onClick:async ()=>{
+          }},["Cancel"]):h("button",{disabled:PS.gold<listing.price||auctionPurchaseBlockedReason(listing)!=null,
+            "data-tip":auctionPurchaseBlockedReason(listing)||undefined,
+            class:auctionPurchaseBlockedReason(listing)?"tooltip":undefined,
+            onClick:async ()=>{
+
+            const blocked=auctionPurchaseBlockedReason(listing);
+            if(blocked){ setToast(blocked); render(); return; }
             try{
               const buyResult=await Net.buyAuctionListing(listing.id,{character_name:PS.character_name, buyer_slot:PS.current_slot});
 
@@ -11005,7 +11127,7 @@ function devToolsSettingsSection(){
   wrap.appendChild(h("h3",{},["Dev Tools"]));
   if(GF.admin_unlocked){
     wrap.appendChild(h("div",{class:"muted",style:{marginBottom:"7px"}},["Unlocked for this session."]));
-    wrap.appendChild(h("button",{onClick:()=>{ GF._preAdminScreen=GF.screen; GF.goto("admin"); }},["Open Dev Tools"]));
+    wrap.appendChild(h("button",{onClick:()=>{ GF._preAdminScreen=GF.screen; GF.goto("adminPanel"); }},["Open Dev Tools"]));
     return wrap;
   }
   wrap.appendChild(h("div",{class:"muted",style:{marginBottom:"7px"}},[
@@ -11021,7 +11143,8 @@ function devToolsSettingsSection(){
         await Net.verifyAdminToken(token);
         GF.admin_token=token; GF.admin_unlocked=true;
         GF._preAdminScreen=GF.screen;
-        GF.goto("admin");
+
+        GF.goto("adminPanel");
       }catch(e){ setToast(e.message||"That token was not accepted."); render(); }
     }},["Unlock"]),
   ]));
@@ -11284,6 +11407,20 @@ function legacyGearSection(){
 }
 
 const CHANGELOG=[
+  { version:"v0.25.4", date:"2026-08-05 00:30", notes:[
+    "Fixed pages snapping back to the top while you were reading them. The Changelog and the guide pages have no health or experience readout to update, but the once-a-second refresh was rebuilding the entire page anyway rather than doing nothing. Long pages now hold their place, and your scroll position is kept even when a rebuild genuinely has to happen.",
+  ]},
+  { version:"v0.25.3", date:"2026-08-04 23:55", notes:[
+    "Fixed a serious Auction House bug: buying gear with a full backpack took your gold and destroyed the item. Purchases are now refused before any gold changes hands. (Contributed by Stration)",
+    "The kill streak readout now reports your real Magic Find instead of an uncapped number, and says when you have hit the 500% ceiling, so a long streak no longer promises loot quality it cannot deliver. (Contributed by Stration)",
+    "The Life and Mana globes and the Stamina bar show where they are heading again. Drink a potion and a softer band shows the value you will land on; take a hit mid-drink and you watch that projection drop.",
+    "The bonfire no longer flares bright orange. It smoulders instead, with the progress creeping along the card's borders.",
+    "Fixed the screen jumping back to the top roughly once a second, which made anything below the fold nearly impossible to click.",
+    "Entering the admin token in Settings now actually opens Dev Tools instead of dropping you on the character select screen.",
+    "Ordinary maze chests can now give up two or three pieces of gear, not just one.",
+    "Stash icons are larger, the Menu is a real button, the changelog link moved out of the screen corner and into the rail beside it, and the community experience banner moved into the rail as well.",
+    "Player stats in the rail now sit two to a row within each category instead of running off the edge.",
+  ]},
   { version:"v0.25.2", date:"2026-08-04 22:30", notes:[
     "The Four Wardens is now called The Warden Trials, since the old name only described its first step.",
     "The Simmering Cauldron once again asks for at least one Potion of Might, Swiftness or Intellect among the recipes you brew, in every town rather than only the later ones.",

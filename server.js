@@ -6804,6 +6804,40 @@ app.post("/api/auction/:id/buy", requireAuth, (req, res) => {
     if (!buyerCharRow) return res.status(400).json({ error: "Character not found." });
   }
 
+  // v0.25.3 CRITICAL BUG FIX (reported by Stration, via Gwen): buying a GEAR listing with a full
+  // backpack destroyed both sides of the trade for the buyer. The server took the gold and
+  // removed the listing, then handed the item back in the response for the client to store --
+  // and PS.addGearAutoEquip() silently dropped it when there was nowhere to put it. Gold gone,
+  // item gone, no error shown.
+  //
+  // To be clear about the blast radius, since it was asked: the SELLER was always paid. Gold has
+  // been account-bound since v0.17 and creditAccountGold() below runs unconditionally, so there
+  // was exactly one victim, not two.
+  //
+  // The check has to live here rather than only in the client, because this route is what
+  // actually spends the gold, and it must happen BEFORE the listing is deleted so a refused
+  // purchase leaves the listing intact and buyable by someone else. Capacity is computed from
+  // the buyer's own stored character row with the same helper the combat loot path uses, so the
+  // two can't disagree about what "full" means. An empty matching equipment slot counts as room,
+  // because the client auto-equips into one -- that is a real destination for the item, not a
+  // backpack slot, and refusing there would block a legitimate purchase.
+  if (listing.type === "gear") {
+    const buyerGearSlot = Number(buyer_slot);
+    if (!Number.isInteger(buyerGearSlot) || buyerGearSlot < 0 || buyerGearSlot >= MAX_CHARACTER_SLOTS) {
+      return res.status(400).json({ error: "Missing buyer character slot." });
+    }
+    const buyerData = loadCharacterRow(req.account.id, buyerGearSlot);
+    if (!buyerData) return res.status(400).json({ error: "Character not found." });
+    let inst = null;
+    try { inst = listing.item_json ? JSON.parse(listing.item_json) : null; } catch (e) { inst = null; }
+    const gearList = buyerData.gear_instances || [];
+    const hasBackpackRoom = gearList.length < combatGetInventoryCapacity(buyerData);
+    const autoEquipSlot = inst ? combatAutoEquipTargetSlot(buyerData, inst) : null;
+    if (!hasBackpackRoom && !autoEquipSlot) {
+      return res.status(400).json({ error: "Your backpack is full. Make room before buying this." });
+    }
+  }
+
   // Remove the listing first (best-effort race protection against double-buy).
   const del = db.prepare("DELETE FROM auction_listings WHERE id = ?").run(id);
   if (del.changes === 0) return res.status(409).json({ error: "Someone already bought that." });
