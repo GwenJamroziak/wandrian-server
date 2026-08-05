@@ -590,7 +590,9 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
   100%{opacity:0;transform:translateY(-8px) scale(.98);}}
 
 .maze-board-row{display:flex;align-items:stretch;gap:0;margin-top:14px;margin-bottom:14px;}
-.maze-board-row .maze-frame{flex:1 1 auto;max-width:none;min-width:0;
+
+.maze-board-row .maze-frame{flex:1 1 auto;min-width:0;
+  max-width:max(520px, calc((100vh - 340px) * 2));
   border-top-right-radius:0;border-bottom-right-radius:0;}
 .maze-toolrail{flex:0 0 82px;display:flex;flex-direction:column;gap:7px;padding:12px 7px;
   border-radius:0 14px 14px 0;
@@ -623,12 +625,13 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
   cursor:pointer;transition:.14s;}
 .mztool:hover:not(.disabled){border-color:#6fa050;transform:translateY(-2px);}
 .mztool.disabled{opacity:.38;cursor:default;filter:grayscale(1);}
-.mztool .mzt-key{font-size:9.5px;letter-spacing:1.4px;color:var(--muted);font-weight:bold;line-height:1;}
-.mztool .mzt-key b{color:var(--text);}
-.mztool .mzt-ico{font-size:21px;line-height:1;}
-.mztool .mzt-ico svg{width:24px;height:24px;}
-.maze-toolrail .mztool{width:100%;padding:5px 2px 4px;}
-.maze-toolrail .mztool .mzt-ico{font-size:19px;}
+
+.mztool .mzt-key{position:absolute;left:3px;bottom:2px;font-size:10px;font-weight:bold;
+  background:rgba(0,0,0,.62);border-radius:9px;padding:0 5px;color:var(--text);line-height:1.45;}
+.mztool .mzt-ico{font-size:27px;line-height:1;}
+.mztool .mzt-ico svg{width:30px;height:30px;}
+.maze-toolrail .mztool{width:100%;padding:7px 2px 6px;}
+.maze-toolrail .mztool .mzt-ico{font-size:25px;}
 .mztool .mzt-qty{position:absolute;right:3px;bottom:2px;font-size:10px;font-weight:bold;
   background:rgba(0,0,0,.62);border-radius:9px;padding:0 5px;color:var(--text);}
 
@@ -1731,7 +1734,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.25.9-web",
+  GAME_VERSION:"v0.25.10-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
 
@@ -7068,10 +7071,11 @@ function screenMaze(){
 }
 
 function mazeTool(keyLabel, icon, qty, disabled, tip, onClick){
+
   const node=h("div",{class:"mztool tooltip"+(disabled?" disabled":""),"data-tip":tip,
     onClick:disabled?null:onClick},[
-    h("div",{class:"mzt-key"},keyLabel?["--",h("b",{},[keyLabel.toUpperCase()]),"--"]:["\u00a0"]),
     h("div",{class:"mzt-ico"},[icon]),
+    keyLabel?h("div",{class:"mzt-key"},[keyLabel.toUpperCase()]):null,
     qty!=null?h("div",{class:"mzt-qty"},[`${qty}`]):null,
   ]);
   return node;
@@ -11535,6 +11539,10 @@ function legacyGearSection(){
 }
 
 const CHANGELOG=[
+  { version:"v0.25.10", date:"2026-08-05 03:35", notes:[
+    "The maze board now scales to the space it actually has, so the last row of tiles, the bottom of the wooden frame and the hint line below it all fit on screen without scrolling.",
+    "The potion shortcut keys moved into a small badge in the corner of each button, matching the quantity badge opposite it. The icons are larger now that the caption above them is gone.",
+  ]},
   { version:"v0.25.9", date:"2026-08-05 03:10", notes:[
     "Every page's Back button now sits on the same line as the page title, on the right, instead of taking a line of its own beneath it. That is a button's height of vertical space returned on every screen in the game.",
   ]},
