@@ -35,7 +35,7 @@ body{
 #app{display:grid;grid-template-columns:288px 1fr;grid-template-rows:1fr auto;
   height:100vh;height:100dvh;width:100%;max-width:none;margin:0;padding:0;transition:opacity .18s ease;}
 
-.hud-header-band{position:sticky;top:0;z-index:40;background:#0f1a12;height:58px;
+.hud-header-band{position:sticky;top:0;z-index:40;background:#0f1a12;height:70px;
   display:flex;align-items:center;
   border-bottom:1px solid #3f4a35;box-shadow:0 2px 8px rgba(0,0,0,.35);}
 #hud-rail .hud-header-band{margin:0 -12px 12px;padding:0 12px;}
@@ -72,7 +72,7 @@ body{
 
 .rail-menu-btn{padding:4px 12px;font-size:13px;line-height:1.2;}
 
-.rail-days-in-dev{font-size:10.5px;color:#7f8a72;letter-spacing:.3px;white-space:nowrap;}
+.rail-days-in-dev{font-size:10.5px;color:#7f8a72;letter-spacing:0;white-space:nowrap;}
 .rail-version-num{font-size:11px;color:var(--muted);letter-spacing:.3px;white-space:nowrap;}
 .rail-version-link{font-size:12.5px;color:rgba(180,210,150,.75);cursor:pointer;letter-spacing:.3px;
   white-space:nowrap;}
@@ -471,6 +471,11 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
   box-shadow:0 2px 8px rgba(0,0,0,.6);
 }
 
+#hud-rail .tooltip:hover::after,#hud-rail .tooltip.tooltip-open::after{
+  position:fixed;bottom:auto;left:var(--tip-x,300px);top:var(--tip-y,80px);
+  width:260px;z-index:200;
+}
+
 .gear-compare-wrap{position:relative;display:inline-block;}
 
 .gear-compare-wrap .item-hover-stack{
@@ -580,11 +585,17 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 .quest-card-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:14px 0;}
 @media(max-width:640px){.quest-card-grid{grid-template-columns:1fr;}}
 
-.skill-rank-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:14px 0;}
+.skill-rank-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:14px 0;}
+@media(max-width:1150px){.skill-rank-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
 @media(max-width:640px){.skill-rank-grid{grid-template-columns:1fr;}}
 
 .merchant-item-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:14px 0;}
-.merchant-item-grid.cols-2{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;}
+
+.merchant-item-grid.cols-2{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;}
+@media (max-width:1400px){ .merchant-item-grid.cols-2{grid-template-columns:repeat(3,minmax(0,1fr));} }
+@media (max-width:1050px){ .merchant-item-grid.cols-2{grid-template-columns:repeat(2,minmax(0,1fr));} }
+
+.gear-row-affixes{display:flex;flex-direction:column;gap:1px;margin-top:2px;}
 @media (max-width:1400px){ .merchant-item-grid{grid-template-columns:repeat(4,minmax(0,1fr));} }
 @media (max-width:1100px){ .merchant-item-grid{grid-template-columns:repeat(3,minmax(0,1fr));} }
 @media (max-width:900px){ .merchant-item-grid{grid-template-columns:repeat(2,minmax(0,1fr));} }
@@ -629,6 +640,8 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 
 .maze-overlay-text.shrine{font-size:1.15em;line-height:1.5;}
 
+.combat-log-cell{flex:1;min-width:0;min-height:0;position:relative;overflow:hidden;}
+.combat-log-list{position:absolute;inset:8px 10px;overflow-y:auto;}
 .maze-toast-layer{position:absolute;left:0;right:0;bottom:12px;display:flex;flex-direction:column-reverse;
   align-items:center;gap:6px;pointer-events:none;z-index:30;}
 .maze-toast{max-width:82%;text-align:center;padding:7px 14px;border-radius:9px;font-size:.92em;font-weight:bold;
@@ -1790,7 +1803,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.28.3-web",
+  GAME_VERSION:"v0.28.4-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
 
@@ -3594,7 +3607,16 @@ const PS = {
 
   getPoisonResistance(){return clampf(this.gearBonus("poison_resist"),0,100);},
 
-  getMagicFind(){return clampf(this.gearBonus("magic_find")+(this.magic_find_rounds_left>0?Balance.SHRINE_MAGIC_FIND_PCT:0)+(this.kill_streak||0)*Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL,0,500);},
+  isNightDelve(){ return !!(GF.overworld_snapshot&&GF.overworld_snapshot.isNight); },
+  getMagicFindBreakdown(){
+    const gear=this.gearBonus("magic_find");
+    const shrine=this.magic_find_rounds_left>0?Balance.SHRINE_MAGIC_FIND_PCT:0;
+    const night=this.isNightDelve()?Balance.NIGHT_MAGIC_FIND_BONUS_PCT:0;
+    const streak=(this.kill_streak||0)*Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL;
+    const raw=gear+shrine+night+streak;
+    return {gear,shrine,night,streak,raw,total:clampf(raw,0,500)};
+  },
+  getMagicFind(){return this.getMagicFindBreakdown().total;},
 
   applyMagicFindShrineBuff(){ this.magic_find_rounds_left=(this.magic_find_rounds_left||0)+Balance.SHRINE_MAGIC_FIND_ROUNDS; },
   hasMagicFindShrineBuff(){ return (this.magic_find_rounds_left||0)>0; },
@@ -4911,8 +4933,33 @@ function daysInDev(){
 }
 function daysInDevLabel(){
   const d=daysInDev();
-  return `${d} ${d===1?"day":"days"} in dev`;
+  return `${d} ${d===1?"day":"days"} in development`;
 }
+
+function positionRailTooltip(el){
+  const rail=document.getElementById("hud-rail");
+  if(!rail||!el) return;
+  const r=el.getBoundingClientRect();
+  const railRect=rail.getBoundingClientRect();
+  const TIP_W=260, TIP_EST_H=Math.min(320,40+((el.getAttribute("data-tip")||"").split("\n").length*18));
+  let x=railRect.right+10;
+
+  if(x+TIP_W>window.innerWidth-8) x=Math.max(8,window.innerWidth-TIP_W-8);
+  let y=r.top;
+  if(y+TIP_EST_H>window.innerHeight-8) y=Math.max(8,window.innerHeight-TIP_EST_H-8);
+  el.style.setProperty("--tip-x",x+"px");
+  el.style.setProperty("--tip-y",y+"px");
+}
+function installRailTooltipPositioning(){
+  document.addEventListener("mouseover",(e)=>{
+    const el=e.target&&e.target.closest?e.target.closest(".tooltip"):null;
+    if(!el) return;
+    const rail=document.getElementById("hud-rail");
+    if(!rail||!rail.contains(el)) return;
+    positionRailTooltip(el);
+  },true);
+}
+installRailTooltipPositioning();
 function hudRail(){
   const c=PS.getClassData();
   const buffIcons=activePotionBuffIcons();
@@ -4952,21 +4999,48 @@ function hudRail(){
       floatLayer("materials"),
     ]),
 
-    h("div",{class:"row tooltip",style:{justifyContent:"space-between",cursor:"help"},
-      "data-tip":forestReputationTooltipText(PS.getCurrentForestReputation())},[
-      h("span",{class:"muted",style:{fontSize:"12.5px"}},["Forest Reputation"]),
-      h("span",{style:{fontWeight:"bold"}},[`${PS.getCurrentForestReputation()}`]),
-    ]),
+    (()=>{
+      const rep=PS.getCurrentForestReputation();
+      let suffix=null;
+      if(rep>0){
+        suffix=h("span",{class:"muted",style:{fontWeight:"normal",fontSize:"11.5px",marginLeft:"5px"}},
+          [`+${rep*Balance.FOREST_REPUTATION_XP_PCT_PER_POINT}% exp`]);
+      } else if(rep<0){
+        suffix=h("span",{style:{fontWeight:"normal",fontSize:"11.5px",marginLeft:"5px",color:"#e0685f"}},
+          [`+${-rep} roamer${rep<-1?"s":""}`]);
+      }
+      return h("div",{class:"row tooltip",style:{justifyContent:"space-between",cursor:"help"},
+        "data-tip":forestReputationTooltipText(rep)},[
+        h("span",{class:"muted",style:{fontSize:"12.5px"}},["Forest Reputation"]),
+        h("span",{style:{fontWeight:"bold"}},[`${rep}`,suffix]),
+      ]);
+    })(),
 
     PS.kill_streak>0?(()=>{
-      const mf=Math.round(PS.getMagicFind());
-      const capped=mf>=Balance.MAGIC_FIND_CAP_PCT;
-      return h("div",{class:"row tooltip",style:{justifyContent:"space-between",cursor:"help"},
-        "data-tip":`Your kill streak grants +${Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL}% Magic Find per kill, on top of gear, shrines and night delves.\nTotal Magic Find is capped at ${Balance.MAGIC_FIND_CAP_PCT}%${capped?", and you are at the cap: further streak does not improve your loot.":"."}`},[
+      const perKill=Balance.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL;
+      const streakMf=Math.round((PS.kill_streak||0)*perKill);
+      const totalMf=Math.round(PS.getMagicFind());
+      const capped=totalMf>=Balance.MAGIC_FIND_CAP_PCT;
+
+      const mf=PS.getMagicFindBreakdown();
+      const sources=[];
+      if(mf.gear>0) sources.push(`Gear: +${Math.round(mf.gear)}%`);
+      if(mf.shrine>0) sources.push(`Magic Find shrine: +${Math.round(mf.shrine)}%`);
+      if(mf.night>0) sources.push(`Night delve: +${Math.round(mf.night)}%`);
+      const tip=[
+        `Your kill streak grants +${perKill}% Magic Find per kill.`,
+        `From this streak: +${streakMf}%`,
+        ...sources,
+        `Total Magic Find: ${totalMf}%`,
+        capped
+          ? `Total Magic Find is capped at ${Balance.MAGIC_FIND_CAP_PCT}%, and you are at the cap: further streak does not improve your loot.`
+          : `Total Magic Find is capped at ${Balance.MAGIC_FIND_CAP_PCT}%.`,
+      ].filter(Boolean).join("\n");
+      return h("div",{class:"row tooltip",style:{justifyContent:"space-between",cursor:"help"},"data-tip":tip},[
         h("span",{class:"muted",style:{fontSize:"12.5px"}},["Kill Streak"]),
         h("span",{style:{fontWeight:"bold"}},[`${PS.kill_streak}`,
           h("span",{class:"muted",style:{fontWeight:"normal",fontSize:"11.5px",marginLeft:"5px"}},
-            [`${mf}% MF${capped?" (cap)":""}`])]),
+            [`+${streakMf}% MF${capped?" (cap)":""}`])]),
       ]);
     })():null,
 
@@ -8744,8 +8818,9 @@ function screenCombat(){
     ]),
   ]);
 
-  const logDiv=h("div",{class:"muted panel",style:{flex:"1",minWidth:"0",minHeight:"0",overflowY:"auto"}},cb.log.map(l=>h("div",{},[l])));
-  requestAnimationFrame(()=>{ if(logDiv.isConnected) logDiv.scrollTop=logDiv.scrollHeight; });
+  const logList=h("div",{class:"combat-log-list"},cb.log.map(l=>h("div",{},[l])));
+  const logDiv=h("div",{class:"muted panel combat-log-cell"},[logList]);
+  requestAnimationFrame(()=>{ if(logList.isConnected) logList.scrollTop=logList.scrollHeight; });
   root.appendChild(h("div",{class:"row",style:{alignItems:"stretch",gap:"14px"}},[mobPanel,logDiv]));
 
   if(cb.defeated){
@@ -9517,7 +9592,8 @@ function gearRow(inst, actions){
       gearCompareWrap(h("div",{class:"rarity-"+inst.rarity,style:{fontWeight:"bold"}},[IF.displayName(inst)+` (${tierRomanNumeral(inst.tier)})`]), inst),
 
       h("div",{class:"muted",style:{fontSize:".85em"}},[IF.categoryLabel(inst)]),
-      h("div",{class:"muted"},[IF.affixSummary(inst)]),
+
+      h("div",{class:"muted gear-row-affixes"},(inst.affixes||[]).map(a=>IF.affixNode(a,inst))),
     ]),
     h("div",{class:"gear-row-actions"},actions),
   ]);
@@ -10723,11 +10799,14 @@ function merchantConsumablesTab(){
     const maxAffordable=unitPrice>0?Math.max(1,Math.floor(PS.gold/unitPrice)):99;
     const qty=Math.min(GF.merchantBuyQty&&GF.merchantBuyQty[itemId]||1,Math.max(1,maxAffordable));
     const totalPrice=unitPrice*qty;
-    root.appendChild(h("div",{class:"tile merchant-item-card"},[
+
+    root.appendChild(h("div",{class:"tile merchant-item-card icon-left"},[
       h("div",{class:"merchant-item-card-head"},[
         itemIcon(itemId,36),
+        h("div",{class:"mic-text"},[
         h("div",{style:{fontWeight:"bold"}},[item.name]),
         h("div",{class:"muted",style:{fontSize:".85em"}},[DL.itemShopSubtext(itemId)]),
+        ]),
       ]),
       h("div",{class:"merchant-item-card-actions"},[
         h("div",{class:"row",style:{justifyContent:"space-between",alignItems:"center",gap:"8px"}},[
@@ -10765,7 +10844,8 @@ function merchantGearTab(){
 
       gearCompareWrap(h("div",{class:"rarity-"+inst.rarity,style:{fontWeight:"bold"}},[IF.displayName(inst)+` (${tierRomanNumeral(inst.tier)})`]), inst),
         h("div",{class:"muted",style:{fontSize:".85em"}},[IF.categoryLabel(inst)]),
-        h("div",{class:"muted"},[IF.affixSummary(inst)]),
+
+        h("div",{class:"muted gear-row-affixes"},(inst.affixes||[]).map(a=>IF.affixNode(a,inst))),
         ]),
       ]),
       h("div",{class:"merchant-item-card-actions"},[
@@ -12161,6 +12241,16 @@ function legacyGearSection(){
 }
 
 const CHANGELOG=[
+  { version:"v0.28.4", date:"2026-08-06 01:40", notes:[
+    "Your Magic Find figure now matches the one the game actually uses. The sidebar was leaving out the night delve bonus, so during a night delve it under-reported by 15% against the number your loot was really being rolled with.",
+    "The kill streak shows what the streak itself is worth rather than your whole Magic Find total, which had been folding in gear and shrines and reading as though the streak granted all of it. The full breakdown, naming only the sources actually contributing, is on hover.",
+    "Forest Reputation shows what it is worth beside it too: +8% experience at 8. Negative standing shows the penalty instead, in warning colour, so it can never be mistaken for a reward.",
+    "Sidebar tooltips no longer get cut off at the edge of the panel.",
+    "The combat log no longer stretches the monster card on a long fight. It fills the height beside the monster and scrolls on its own.",
+    "The sidebar header fits its three lines and sits level with the main header again, and it says days in development rather than days in dev.",
+    "Equippable gear and Sell items list each stat on its own line, with its roll medal, and lay out four to a row. Merchant consumables put their icon beside the name like the gear cards do.",
+    "The Leaderboard's Skill Progression is three columns wide.",
+  ]},
   { version:"v0.28.3", date:"2026-08-06 00:45", notes:[
     "Maze messages no longer pile up. Walking into a wall while exhausted showed the same warning six times over; an identical message now simply stays up longer instead of appearing again.",
     "Messages also keep their own clock. They used to restart from the beginning on every single step, so they blinked back into view and never faded while you kept walking. They now fade out on time no matter what else is happening.",
