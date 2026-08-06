@@ -549,7 +549,13 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 
 .party-arena{display:grid;grid-template-columns:minmax(300px,0.9fr) 1.1fr;gap:18px;align-items:start;margin-top:10px;}
 .party-side{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
-.party-col{display:flex;flex-direction:column;gap:8px;}
+.party-col{display:flex;flex-direction:column;gap:8px;border:1px solid transparent;border-radius:9px;padding:6px;}
+
+.party-col.is-clickable{cursor:pointer;}
+.party-col.is-clickable:hover{border-color:#57633f;background:rgba(74,122,58,.07);}
+.party-col.is-clickable:hover .party-col-title{color:var(--text);}
+.party-col-hint{text-align:center;font-size:10.5px;color:var(--muted);font-style:italic;padding-top:2px;}
+.party-card.is-ineligible{opacity:.5;}
 .party-col-head{text-align:center;padding-bottom:5px;border-bottom:1px solid var(--border);margin-bottom:2px;}
 .party-col-title{font-family:Cinzel,Georgia,serif;font-size:11.5px;letter-spacing:1px;color:var(--muted);}
 .party-col-empty{border:1px dashed #4a5438;border-radius:8px;padding:12px 8px;text-align:center;
@@ -1900,7 +1906,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.30.4-web",
+  GAME_VERSION:"v0.30.5-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
 
@@ -3500,9 +3506,22 @@ const Net = {
             else render();
             return;
           }
+          if(msg.type==="party_descend"){
+
+            GF.maze_depth=msg.area_level;
+            GF.ventureDepth=msg.area_level;
+            GF.overworld_snapshot=null;
+            if(!Net.isPartyLeader()){
+              GF.mazeOverlay={text:`Advanced to area level ${msg.area_level}!`, andThen:()=>{
+                GF.goto("maze",{maze_depth:msg.area_level});
+              }};
+              render();
+            }
+            return;
+          }
           if(msg.type==="party_maze"){
 
-            partyAdoptMaze(msg.maze, msg.area_level, msg.is_night);
+            partyAdoptMaze(msg.maze, msg.area_level, msg.is_night, msg.handover);
             return;
           }
           if(msg.type==="party_step"){ partyApplyStep(msg); return; }
@@ -5276,13 +5295,18 @@ function hudPartyPanel(){
     ]),
   ]));
   rows.push(h("div",{class:"panel2",style:{marginTop:"7px",padding:"8px 10px"}},[
+
     h("div",{class:"mf-line"},[
       h("span",{class:"muted"},["Party stamina"]),
       h("span",{style:{fontWeight:"bold",color:gate.blocked?"var(--bad)":"var(--text)"}},[
-        gate.who?`${gate.who} ${gate.stamina}`:"\u2014"]),
+        gate.idle?"\u2014":`${gate.who} ${gate.stamina}`]),
     ]),
     h("div",{class:"muted",style:{fontSize:"10.5px"}},[
-      gate.blocked?"The party cannot move until they rest.":"Gated by whoever has the least left.",
+      gate.idle
+        ? "Nobody has set off yet."
+        : (gate.blocked
+            ? `${gate.who} is out of stamina. The party cannot move until they rest.`
+            : "Gated by whoever has the least left."),
     ]),
   ]));
   rows.push(h("button",{style:{width:"100%",marginTop:"8px"},onClick:async()=>{
@@ -5354,7 +5378,9 @@ function screenPartyLobby(){
     for(const p of parties){
       const slots=h("div",{class:"party-slots"});
       for(let i=0;i<p.max_size;i++) slots.appendChild(h("div",{class:"party-slot"+(i<p.size?" filled":"")}));
-      listWrap.appendChild(h("div",{class:"party-card"},[
+
+      const eligible=p.eligible!==false;
+      listWrap.appendChild(h("div",{class:"party-card"+(eligible?"":" is-ineligible")},[
         h("div",{class:"row",style:{justifyContent:"space-between",alignItems:"flex-start",gap:"9px"}},[
           h("div",{},[
             h("div",{style:{fontWeight:"bold"}},[p.leader_name, h("span",{class:"party-crown"},[" \u265B"])]),
@@ -5367,14 +5393,16 @@ function screenPartyLobby(){
         ]),
         h("div",{class:"row",style:{justifyContent:"space-between",alignItems:"center"}},[
           slots,
-          h("button",{onClick:async()=>{
-            const r=await Net.partyApi("/api/party/join",{slot:PS.current_slot, party_id:p.id});
-            if(r.ok===false){ setToast(r.error); return; }
-            Net.party=r.party;
+          eligible
+            ? h("button",{onClick:async()=>{
+                const r=await Net.partyApi("/api/party/join",{slot:PS.current_slot, party_id:p.id});
+                if(r.ok===false){ setToast(r.error); return; }
+                Net.party=r.party;
 
-            if(r.maze){ partyAdoptMaze(r.maze, r.area_level, r.is_night); }
-            else render();
-          }},["Join"]),
+                if(r.maze){ partyAdoptMaze(r.maze, r.area_level, r.is_night); }
+                else render();
+              }},["Join"])
+            : h("span",{class:"muted",style:{fontSize:"11.5px",fontStyle:"italic"}},[p.blocked_reason||"Unavailable"]),
         ]),
       ]));
     }
@@ -5434,6 +5462,38 @@ function partyLobbyMineNode(){
       mf.streak_pct>0?`, and ${mf.streak_pct}% is the party's ${mf.streak_kills}-kill streak.`:".",
       mf.at_cap?" You are at the 500% ceiling \u2014 more will not help.":"",
     ]),
+  ]));
+
+  wrap.appendChild(h("div",{class:"panel",style:{marginTop:"10px"}},[
+    h("div",{class:"mf-line"},[
+      h("span",{class:"muted"},["Accepting levels"]),
+      h("span",{style:{fontFamily:"Cinzel,Georgia,serif",color:"var(--gold)"}},[`${p.min_level} \u2013 ${p.max_level}`]),
+    ]),
+    ...(Net.isPartyLeader()?(()=>{
+      if(GF._partyEditSpread==null) GF._partyEditSpread=Math.max(1,PS.level-p.min_level);
+      const label=h("span",{style:{fontFamily:"Cinzel,Georgia,serif",color:"var(--gold)"}},[]);
+      const paint=()=>{ label.textContent=`${Math.max(1,PS.level-GF._partyEditSpread)} \u2013 ${PS.level+GF._partyEditSpread}`; };
+      paint();
+      const note=h("input",{type:"text",maxLength:90,value:p.note||"",placeholder:"What are you doing? (optional)",
+        style:{flex:"1",minWidth:"170px",background:"#0a0c07",border:"1px solid var(--border)",
+          borderRadius:"5px",color:"var(--text)",padding:"6px 9px",fontFamily:"Georgia,serif"}});
+      return [
+        h("div",{class:"row gap",style:{alignItems:"center",flexWrap:"wrap",marginTop:"8px"}},[
+          h("button",{onClick:()=>{ GF._partyEditSpread=Math.max(1,GF._partyEditSpread-1); paint(); }},["\u2212"]),
+          label,
+          h("button",{onClick:()=>{ GF._partyEditSpread=Math.min(99,GF._partyEditSpread+1); paint(); }},["+"]),
+          h("span",{class:"muted",style:{fontSize:"11.5px"}},["\u2014 widening this never removes anyone"]),
+        ]),
+        h("div",{class:"row gap",style:{alignItems:"center",flexWrap:"wrap",marginTop:"8px"}},[
+          note,
+          h("button",{onClick:async()=>{
+            const r=await Net.partyApi("/api/party/settings",{spread:GF._partyEditSpread, note:note.value});
+            if(r.ok===false){ setToast(r.error); return; }
+            Net.party=r.party; GF._partyEditSpread=null; setToast("Party updated."); render();
+          }},["Save"]),
+        ]),
+      ];
+    })():[]),
   ]));
   if(Net.isPartyLeader()){
     wrap.appendChild(h("div",{class:"muted",style:{fontSize:"12px",marginTop:"9px"}},[
@@ -5570,12 +5630,31 @@ function screenPartyCombat(){
     h("div",{class:"party-col-title"},[title]),
     h("div",{class:"muted",style:{fontSize:"10.5px",lineHeight:"1.3"}},[sub]),
   ]);
-  const backCol=h("div",{class:"party-col"},[colHead("BACK","safe while anyone holds the front")]);
-  for(const m of back) backCol.appendChild(partyFighterNode(m,enc));
-  if(!back.length) backCol.appendChild(h("div",{class:"party-col-empty"},["nobody"]));
-  const frontCol=h("div",{class:"party-col"},[colHead("FRONT","monsters strike here first")]);
-  for(const m of front) frontCol.appendChild(partyFighterNode(m,enc));
-  if(!front.length) frontCol.appendChild(h("div",{class:"party-col-empty"},["nobody holds the front"]));
+
+  const myRow=me && !me.in_town && !me.dead ? me.row_pos : null;
+  const buildCol=(rowKey,title,sub,people)=>{
+    const canMoveHere=myRow && myRow!==rowKey;
+    const col=h("div",{class:"party-col"+(canMoveHere?" is-clickable":""),
+      onClick:canMoveHere?async()=>{
+        const r=await Net.partyApi("/api/party/row",{row:rowKey});
+        if(r.ok===false){ combatNotice(r.error,"bad"); return; }
+        await Net.partyRefresh(); render();
+      }:null},[colHead(title,sub)]);
+    for(const m of people) col.appendChild(partyFighterNode(m,enc));
+    if(!people.length){
+      col.appendChild(h("div",{class:"party-col-empty"},[
+        rowKey==="front"
+          ? (canMoveHere?"nobody holds the front \u2014 click to step up":"nobody holds the front")
+          : (canMoveHere?"click to fall back":"nobody"),
+      ]));
+    } else if(canMoveHere){
+      col.appendChild(h("div",{class:"party-col-hint"},[
+        rowKey==="front"?"click to step up":"click to fall back"]));
+    }
+    return col;
+  };
+  const backCol=buildCol("back","BACK","safe while anyone holds the front",back);
+  const frontCol=buildCol("front","FRONT","monsters strike here first",front);
 
   root.appendChild(h("div",{class:"party-arena"},[
     h("div",{class:"party-side"},[backCol, frontCol]),
@@ -5638,14 +5717,6 @@ function screenPartyCombat(){
     }
   }
   const controls=h("div",{class:"row gap",style:{justifyContent:"center",marginTop:"14px",flexWrap:"wrap"}});
-
-  if(me && !me.in_town && !me.dead){
-    controls.appendChild(h("button",{onClick:async()=>{
-      const r=await Net.partyApi("/api/party/row",{row:me.row_pos==="front"?"back":"front"});
-      if(r.ok===false){ setToast(r.error); return; }
-      await Net.partyRefresh(); render();
-    }},[me.row_pos==="front"?"Fall back":"Step to the front"]));
-  }
 
   if(!cleared && me && !me.in_town && !me.dead){
     controls.appendChild(h("button",{onClick:async()=>{
@@ -5803,7 +5874,8 @@ function partySpellSlot(slotIndex, spellId, alive){
 function partyFighterNode(m, enc){
   const targetedBy=(enc.monsters||[]).filter(mon=>!mon.dead && mon.target_account_id===m.account_id).length;
   const node=partyMateNode(m,{showRow:true});
-  node.style.width="150px";
+
+  node.style.width="100%";
   if(targetedBy>0){
     node.style.borderColor="var(--hp)";
     node.style.boxShadow="0 0 10px rgba(217,74,74,.28)";
@@ -8644,6 +8716,14 @@ function screenMaze(){
 
   const depth=GF.maze_depth||PS.level;
   const maze=ensureMaze(depth);
+
+  if(Net.inParty()){
+    const me=Net.partyMe();
+    if(me && me.in_town && !GF._partyPresenceSent){
+      GF._partyPresenceSent=true;
+      Net.partyApi("/api/party/present",{}).then(()=>{ GF._partyPresenceSent=false; Net.partyRefresh().then(render); });
+    }
+  }
   if(!maze){
     const wait=h("div",{});
     wait.appendChild(h("h2",{},["Finding the party"]));
@@ -8947,8 +9027,11 @@ function animateMazeMovers(prevPlayerIdx, prevRoamerPositions){
 }
 
 function partyReportStep(maze, targetIdx, cost){
-  const reveal=[];
-  for(let i=0;i<(maze.cells||[]).length;i++) if(maze.cells[i] && maze.cells[i].discovered) reveal.push(i);
+
+  let reveal=(maze._justRevealed||[]).slice();
+  if(!reveal.length){
+    for(let i=0;i<(maze.cells||[]).length;i++) if(maze.cells[i] && maze.cells[i].discovered) reveal.push(i);
+  }
   Net.partyApi("/api/party/step",{
     cost, pos:targetIdx, reveal,
     roamers:(maze.roamers||[]).map(r=>({idx:r.idx})),
@@ -8987,7 +9070,7 @@ function onStepMaze(maze,targetIdx){
   const stepCost=Balance.staminaCostPerStep(PS.countValidEquippedItems());
   if(Net.inParty()){
 
-    partyReportStep(maze, targetIdx, stepCost);
+    GF._partyPendingStepCost=stepCost;
   } else {
     PS.spendStamina(stepCost);
   }
@@ -8995,6 +9078,11 @@ function onStepMaze(maze,targetIdx){
   tickEyesightPotion();
 
   revealAround(maze,targetIdx,mazeEyesightRadius(maze));
+
+  if(Net.inParty() && Net.isPartyLeader() && GF._partyPendingStepCost!=null){
+    partyReportStep(maze, targetIdx, GF._partyPendingStepCost);
+    GF._partyPendingStepCost=null;
+  }
   if(PS.current_stamina<=0){
     mazeToast(MAZE_EXHAUSTED_TOAST,"bad");
   }
@@ -13448,6 +13536,16 @@ function legacyGearSection(){
 }
 
 const CHANGELOG=[
+  { version:"v0.30.5", date:"2026-08-07 00:50", notes:[
+    "Fixed the party being told it was out of stamina when it was not. Standing in town was being reported as exhaustion, which also stopped the leader taking a step.",
+    "Followers see exactly what the leader sees. Their view of the fog was arriving one step behind.",
+    "Move between the front and back rank by clicking the rank itself. The button is gone, and party cards fill their column.",
+    "Littering unclaimed loot now costs the Forest Reputation it always said it did. The penalty was being applied where nothing reads it.",
+    "Potions fill gradually in party fights instead of jumping to full.",
+    "Followers see the same announcement as the leader when the party descends to a new area.",
+    "Parties you cannot join are shown greyed with the reason, instead of vanishing from the lobby. An empty list made the woods look deserted when they were not.",
+    "Leaders can widen the level range and rename the party after creating it.",
+  ]},
   { version:"v0.30.4", date:"2026-08-06 23:40", notes:[
     "Everyone in a party now explores the same maze. A follower's game was quietly building a world of its own, at its own area level and with its own wandering monsters, which is why the boards never matched and why a follower could be attacked by something nobody else could see.",
     "Followers no longer wander off on their own, and the forest is named after the one the party is actually in.",

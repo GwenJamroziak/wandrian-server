@@ -3816,6 +3816,17 @@ function combatGetXpFindPct(data) { return combatGearBonus(data, "xp_find"); }
 // silently drop an in-flight buff for any player who happens to have one active the moment
 // this update deploys (see this function's caller for the full stacking rationale).
 function combatGetShrineXpPct(data) { return (data.xp_buff_encounters_left > 0) ? ((data.xp_buff_multiplier || 1) - 1) * 100 : 0; }
+/* v0.30.5 BUG FIX (credit: Gwen, "I can't see where littering affects our forest reputation").
+   Reputation is a per-tier map, and the read and the write must key off the IDENTICAL tier or the
+   penalty lands somewhere nobody is looking. index.html says so in as many words beside its own
+   adjustForestReputation(): both halves of the pair have to agree. I keyed the littering penalty
+   off highest_tier_reached while the display reads the character's CLASS tier -- the same number
+   for most characters, and silently different for anyone who has pushed into deeper content.
+   One function now, so the two cannot drift again. */
+function combatForestRepTier(data) {
+  const cls = COMBAT_CLASSES[data.class_id] || {};
+  return cls.tier || 1;
+}
 function combatGetForestReputationXpPct(data) {
   const tier = data.highest_tier_reached || 1;
   const rep = (data.forest_reputation && data.forest_reputation[tier]) || 0;
@@ -7268,17 +7279,29 @@ function partyPublicState(partyId) {
   };
 }
 
+/* v0.30.5 BUG FIX (credit: Gwen, "it falsely states someone is out of stamina, but we are
+   absolutely not"). This returns blocked:true for TWO entirely different situations -- nobody is
+   in the maze yet, and somebody has genuinely run dry -- and every reader treated both as
+   exhaustion. A party standing in town was told to go and rest, and the step route refused their
+   moves with a message about stamina they had plenty of.
+   `reason` was always here; nothing read it. The gate now distinguishes the two properly, and
+   "nobody in the maze" is no longer reported as blocked at all, because it is the ordinary state
+   of a party that has not set off yet rather than a problem to solve. */
 function partyStaminaGate(members) {
   const walking = members.filter((m) => !m.in_town && !m.dead);
-  if (walking.length === 0) return { blocked: true, who: null, stamina: 0, reason: "nobody_in_maze" };
+  if (walking.length === 0) {
+    return { blocked: false, idle: true, who: null, stamina: 0, max_stamina: 0, reason: "nobody_in_maze" };
+  }
   let low = walking[0];
   for (const m of walking) if (m.stamina < low.stamina) low = m;
   return {
     blocked: low.stamina <= 0,
+    idle: false,
     who: low.character_name,
     account_id: low.account_id,
     stamina: low.stamina,
     max_stamina: low.max_stamina,
+    reason: low.stamina <= 0 ? "exhausted" : "ok",
   };
 }
 
@@ -7376,13 +7399,22 @@ app.get("/api/party/list", requireAuth, (req, res) => {
   const level = data ? data.level : 1;
   const rows = db.prepare("SELECT * FROM parties ORDER BY created_at DESC LIMIT 40").all();
   const out = [];
+  /* v0.30.5 (credit: Gwen): parties you cannot join are SHOWN, disabled, rather than hidden. An
+     empty lobby reads as "nobody is playing", which is the worst possible impression for a feature
+     whose entire point is company -- and seeing three parties you are out of range for tells you
+     the game is alive and gives you something to ask about in chat. The server reports why each
+     one is unavailable and lets the client present it; deciding what a player is allowed to know
+     about was never this endpoint's job. */
   for (const p of rows) {
     const members = partyMembers(p.id);
-    if (members.length >= PARTY_MAX) continue;
-    if (level < p.min_level || level > p.max_level) continue;
     const leader = members.find((m) => m.account_id === p.leader_account_id) || members[0];
     if (!leader) continue;
+    const full = members.length >= PARTY_MAX;
+    const outOfRange = level < p.min_level || level > p.max_level;
     out.push({
+      eligible: !full && !outOfRange,
+      // Named for the player, not for the code: this string is shown on the card.
+      blocked_reason: full ? "Full" : (outOfRange ? `Taking levels ${p.min_level}\u2013${p.max_level}` : null),
       id: p.id,
       leader_name: leader.character_name,
       leader_level: leader.level,
@@ -7395,6 +7427,8 @@ app.get("/api/party/list", requireAuth, (req, res) => {
       magic_find: partyMagicFindBreakdown(p.id).total,
     });
   }
+  // Joinable first, so the ones you can act on are never buried under the ones you cannot.
+  out.sort((a, b) => (a.eligible === b.eligible ? 0 : a.eligible ? -1 : 1));
   res.json({ ok: true, parties: out, your_level: level });
 });
 
@@ -8273,7 +8307,7 @@ app.post("/api/party/encounter/leave", requireAuth, (req, res) => {
       // tier the party is actually delving, not a global figure.
       // Reputation is tracked per area tier, keyed the same way combatGetForestReputationXpPct()
       // reads it: by the character's own highest tier reached.
-      const repTier = data.highest_tier_reached || 1;
+      const repTier = combatForestRepTier(data);
       data.forest_reputation = data.forest_reputation || {};
       data.forest_reputation[repTier] = (data.forest_reputation[repTier] || 0) - 1;
       saveCharacterRow(m.account_id, m.slot, data);
@@ -8304,6 +8338,22 @@ app.get("/api/party/maze", requireAuth, (req, res) => {
   let maze = null;
   if (party.maze_json) { try { maze = JSON.parse(party.maze_json); } catch (e) { maze = null; } }
   res.json({ ok: true, maze, area_level: party.area_level, is_night: !!party.is_night });
+});
+
+/* v0.30.5 (credit: Gwen): "I am in the maze" as its own statement. Called by the client whenever
+   it actually enters or resumes a maze, so the in_town flag can never outlive the trip to town
+   that set it. Idempotent and cheap; better to say it too often than to leave it stale. */
+app.post("/api/party/present", requireAuth, (req, res) => {
+  const party = partyForAccount(req.account.id);
+  if (!party) return res.json({ ok: true, party: null });
+  const me = partyMemberRow(party.id, req.account.id);
+  if (me && me.in_town) {
+    db.prepare("UPDATE party_members SET in_town = 0 WHERE party_id = ? AND account_id = ?")
+      .run(party.id, req.account.id);
+    partySystem(party.id, `${me.character_name} is back in the maze.`);
+    partyBroadcastState(party.id);
+  }
+  res.json({ ok: true, party: partyPublicState(party.id) });
 });
 
 app.post("/api/party/maze", requireAuth, (req, res) => {
@@ -8362,12 +8412,21 @@ app.post("/api/party/step", requireAuth, (req, res) => {
   if (party.leader_account_id !== req.account.id) return res.status(403).json({ error: "Only the leader moves the party." });
 
   const before = partyPublicState(party.id);
-  if (before.stamina_gate.blocked) {
+  // v0.30.5: refuse ONLY for genuine exhaustion, and name the person. The `|| "Someone"` fallback
+  // that used to be here was the tell -- it knew `who` could be null and papered over it instead
+  // of asking why, which is how a party standing in town got lectured about stamina.
+  if (before.stamina_gate.blocked && before.stamina_gate.reason === "exhausted") {
     return res.status(400).json({
-      error: `${before.stamina_gate.who || "Someone"} is out of stamina.`,
+      error: `${before.stamina_gate.who} is out of stamina.`,
       gate: before.stamina_gate,
     });
   }
+  // v0.30.5: taking a step means you are unambiguously in the maze. Clearing the flag here fixes
+  // the staleness at its source -- in_town was set on flee and on death but only ever cleared by
+  // an explicit rejoin, so a member who walked back in through the ordinary maze entry stayed
+  // flagged forever, which is what made the gate see an empty party in the first place.
+  db.prepare("UPDATE party_members SET in_town = 0 WHERE party_id = ? AND account_id = ?")
+    .run(party.id, req.account.id);
   // The client sends the step cost it already computed for solo movement (gear, class and
   // trample state all feed it), which keeps one formula rather than a second server copy that
   // would drift. Clamped so a bad value cannot be free or absurd.
@@ -8409,6 +8468,17 @@ const PARTY_VITALS_MIN_INTERVAL_MS = 1000;
    telling the OTHER clients that their vitals had changed, which is what the broadcast below
    does: it reads each member's row fresh, so a bonfire, a potion or ordinary regeneration all
    show up the moment they are saved, without this file duplicating any of them. */
+function partySettleMemberHeals(party) {
+  for (const m of partyMembers(party.id)) {
+    const data = loadCharacterRow(m.account_id, m.slot);
+    if (!data) continue;
+    const before = `${data.current_hp}:${data.current_mana}:${data.current_stamina}`;
+    combatSettleAllHeals(data);
+    if (`${data.current_hp}:${data.current_mana}:${data.current_stamina}` !== before) {
+      saveCharacterRow(m.account_id, m.slot, data);
+    }
+  }
+}
 function partyMaybeBroadcastVitals(party) {
   const state = partyPublicState(party.id);
   if (!state) return;
@@ -8427,6 +8497,12 @@ setInterval(() => {
   for (const party of parties) {
     try {
       partySettleLootWindows(party);
+      // v0.30.5 BUG FIX (credit: Gwen, "potions suddenly jump to the high value"). A potion queues
+      // its restore into srv_heal and something has to settle that queue on a clock, or the whole
+      // amount lands the moment some unrelated action happens to settle it. Solo gets its gradual
+      // fill because the solo pusher settles every 500ms; the party pusher never settled heals at
+      // all. Settling here, at 200ms, is what makes the bar actually fill.
+      partySettleMemberHeals(party);
       partyMaybeBroadcastVitals(party);
       const enc = partyEncounterFor(party.id);
       if (!enc) continue;
