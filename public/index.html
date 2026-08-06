@@ -1872,7 +1872,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.30.2-web",
+  GAME_VERSION:"v0.30.3-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
 
@@ -3447,6 +3447,21 @@ const Net = {
             this.lobbyChat.push(msg);
             if(this.lobbyChat.length>200) this.lobbyChat.shift();
             render(); return;
+          }
+          if(msg.type==="party_you_died"){
+
+            this.partyEncounter=null;
+            partyStopAutoAttack();
+            if(msg.hardcore){
+              setToast("You have fallen for the last time.");
+              this.party=null;
+              GF.goto("mainMenuSlots");
+            } else {
+              setToast("You have fallen. You wake in town.");
+              PS.current_hp=Math.max(1,Math.round(PS.getMaxHp()*0.25));
+              GF.goto("town");
+            }
+            return;
           }
           if(msg.type==="party_disbanded"){
             this.party=null; this.partyEncounter=null; this.partyChat=[];
@@ -5447,6 +5462,21 @@ function screenPartyCombat(){
   const alive=enc.monsters.filter(m=>!m.dead);
   const cleared=alive.length===0;
 
+  if(me && (me.dead || (me.hp<=0 && !me.in_town))){
+    root.appendChild(h("div",{class:"panel",style:{textAlign:"center",marginTop:"12px"}},[
+      h("div",{style:{fontWeight:"bold",marginBottom:"6px"}},["You have fallen."]),
+      h("div",{class:"muted",style:{fontSize:"12.5px",marginBottom:"10px"}},
+        ["Your party fights on. You can wake in town and rejoin them from there."]),
+      h("button",{onClick:()=>{
+        Net.partyApi("/api/party/town",{in_town:true});
+        Net.partyEncounter=null;
+        PS.current_hp=Math.max(1,Math.round(PS.getMaxHp()*0.25));
+        GF.goto("town");
+      }},["Wake in town"]),
+    ]));
+    return root;
+  }
+
   root.appendChild(h("h2",{},[cleared?"The path is clear":(enc.monsters.length===1?"A monster blocks the path":`${enc.monsters.length} monsters block the path`)]));
 
   const mobRow=h("div",{class:"row gap",style:{justifyContent:"center",flexWrap:"wrap",marginBottom:"10px",alignItems:"stretch"}});
@@ -5480,7 +5510,9 @@ function screenPartyCombat(){
     ]);
     mobRow.appendChild(tile);
   }
-  root.appendChild(mobRow);
+
+  const noticeHost=h("div",{style:{position:"relative"}},[mobRow, combatNoticeLayer()]);
+  root.appendChild(noticeHost);
   root.appendChild(h("div",{class:"muted",style:{textAlign:"center",fontSize:"12px",marginTop:"-4px"}},[
     cleared
       ? (Net.isPartyLeader()
@@ -13224,6 +13256,11 @@ function legacyGearSection(){
 }
 
 const CHANGELOG=[
+  { version:"v0.30.3", date:"2026-08-06 22:10", notes:[
+    "Fixed being unable to damage anything in a party fight. Every swing was failing against the database and the failure was invisible, so it looked as though clicking did nothing at all.",
+    "Errors during a party fight are now shown. They were being raised correctly and going nowhere.",
+    "Falling in a party fight returns you to town instead of stranding you on a combat screen you cannot act on. Your party fights on, and you can rejoin them from town.",
+  ]},
   { version:"v0.30.2", date:"2026-08-06 21:20", notes:[
     "Switching to another character now leaves the party. Your old character used to stay in it, holding a slot nobody was playing.",
     "The party roster keeps up with what your companions are actually doing. Someone healing at a bonfire in town no longer looks dead to everyone else.",

@@ -7135,6 +7135,25 @@ db.exec(`
   );
 `);
 
+/* v0.30.3 BUG FIX (credit: Gwen, "click or hold does not work, I cannot damage the mob at all").
+   CREATE TABLE IF NOT EXISTS does exactly nothing to a table that already exists -- it does NOT
+   add columns. The attack-cadence gate added in v0.30.1 put last_attack_at into the CREATE TABLE
+   above, which only takes effect on a database created AFTER that change. On any database made at
+   v0.30 the column was simply absent, so `UPDATE party_members SET last_attack_at = ?` -- which
+   runs on EVERY swing -- threw, and every attack failed before it could deal damage.
+
+   This is the same belt-and-suspenders pattern combat_sessions already uses a few hundred lines
+   above, and the pattern I should have used the first time. Every ALTER is wrapped individually
+   so an already-migrated database simply skips it. Any future party column goes here as well as
+   in the CREATE TABLE, never only in the CREATE TABLE. */
+for (const stmt of [
+  "ALTER TABLE party_members ADD COLUMN last_attack_at INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE party_members ADD COLUMN last_regen_at INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE party_members ADD COLUMN spell_cooldowns TEXT NOT NULL DEFAULT '{}'",
+]) {
+  try { db.exec(stmt); } catch (e) { /* column already exists, fine */ }
+}
+
 const PARTY_MAX = 4;
 // The party's own kill counter is worth a TENTH of what a solo kill streak is worth, and it is
 // counted ONCE for the party rather than once per member (Gwen's spec). A party of four does not
@@ -7909,7 +7928,12 @@ app.post("/api/party/encounter/attack", requireAuth, (req, res) => {
   if (me.in_town) return res.status(400).json({ error: "You are in town." });
   const data = loadCharacterRow(req.account.id, me.slot);
   if (!data) return res.status(400).json({ error: "No character." });
-  if ((data.current_hp || 0) <= 0) return res.status(400).json({ error: "You have fallen." });
+  if ((data.current_hp || 0) <= 0) {
+    // Belt and braces: the client is told to leave on death, but if it somehow asks anyway, say
+    // so plainly rather than letting it sit there swinging at nothing.
+    partyNotifyCasualty(party.id, req.account.id, !!me.hardcore);
+    return res.status(400).json({ error: "You have fallen." });
+  }
 
   // v0.30.1 BUG FIX (credit: Gwen, "I can spam the button faster than my 1sec attackspeed").
   // Solo combat gates the cadence CLIENT-side, which is fine when the client is only cheating
@@ -7988,8 +8012,20 @@ app.post("/api/party/encounter/attack", requireAuth, (req, res) => {
 /* Death. Softcore members respawn in town and can rejoin; hardcore members are gone for good and
    leave the party, which reopens it for matchmaking. Both reuse the solo death paths so the
    graveyard, the leaderboard and the character row are handled identically. */
+/* v0.30.3 (credit: Gwen, "when I eventually died I should be returned to town, I am now stuck in
+   the combat view with no way out"). A fallen member was marked in_town server-side and their
+   roster entry dimmed, but nothing ever told THEIR client to leave the fight -- so they sat on a
+   combat screen they could no longer act in. Each casualty is now sent a message addressed to
+   them personally, which their client answers by doing exactly what a solo death does. */
+function partyNotifyCasualty(partyId, accountId, hardcore) {
+  const body = JSON.stringify({ party_id: partyId, seq: ++partySeq, type: "party_you_died", hardcore: !!hardcore });
+  for (const client of chatClients) {
+    if (client.readyState === client.OPEN && client.accountId === accountId) client.send(body);
+  }
+}
 function partyHandleCasualties(party, casualties) {
   for (const c of casualties || []) {
+    partyNotifyCasualty(party.id, c.account_id, c.hardcore);
     if (c.hardcore) {
       partySystem(party.id, `${c.name} has fallen for the last time.`);
       const hcData = loadCharacterRow(c.account_id, c.slot);
