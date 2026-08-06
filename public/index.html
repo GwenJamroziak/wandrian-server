@@ -1872,7 +1872,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.30-web",
+  GAME_VERSION:"v0.30.2-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
 
@@ -3419,8 +3419,19 @@ const Net = {
           }
           if(msg.type==="party_state"){ this.party=msg.state||null; if(!this.party) this.partyEncounter=null; render(); return; }
           if(msg.type==="party_encounter"){
+            const hadFight=!!this.partyEncounter;
             this.partyEncounter=msg.encounter||null;
+
+            if(hadFight && !this.partyEncounter && GF.screen==="partyCombat"){ GF.goto("maze"); return; }
             if(msg.party) this.party=msg.party;
+
+            if(msg.rewards_changed && PS.current_slot>=0){
+              this.refreshCharacters().then(()=>{
+                const slot=(this.cache||[]).find(sl=>sl&&sl.slot===PS.current_slot);
+                if(slot&&slot.data) partyAdoptCharacter(slot.data);
+                render();
+              });
+            }
 
             if(this.partyEncounter && this.partyEncounter.status==="active" && GF.screen!=="partyCombat"){
               GF.goto("partyCombat");
@@ -4604,7 +4615,14 @@ const PS = {
     return true;
   },
 
+  _leavePartyOnCharacterSwitch(nextSlot){
+    if(!Net.inParty()) return;
+    if(this.current_slot===nextSlot) return;
+    Net.partyApi("/api/party/leave",{});
+    Net.party=null; Net.partyEncounter=null; Net.partyChat=[];
+  },
   loadGame(slot){
+    this._leavePartyOnCharacterSwitch(slot);
     const entry=(Net.cache||[]).find(e=>e.slot===slot);
     if(!entry || entry.empty) return false;
     return this._applyLoadedData(slot, entry.data);
@@ -5292,7 +5310,10 @@ function screenPartyLobby(){
           h("button",{onClick:async()=>{
             const r=await Net.partyApi("/api/party/join",{slot:PS.current_slot, party_id:p.id});
             if(r.ok===false){ setToast(r.error); return; }
-            Net.party=r.party; render();
+            Net.party=r.party;
+
+            if(r.maze){ partyAdoptMaze(r.maze, r.area_level, r.is_night); }
+            else render();
           }},["Join"]),
         ]),
       ]));
@@ -5428,13 +5449,27 @@ function screenPartyCombat(){
 
   root.appendChild(h("h2",{},[cleared?"The path is clear":(enc.monsters.length===1?"A monster blocks the path":`${enc.monsters.length} monsters block the path`)]));
 
-  const mobRow=h("div",{class:"row gap",style:{justifyContent:"center",flexWrap:"wrap",marginBottom:"10px"}});
+  const mobRow=h("div",{class:"row gap",style:{justifyContent:"center",flexWrap:"wrap",marginBottom:"10px",alignItems:"stretch"}});
   for(const mon of enc.monsters){
     const target=p.members.find(x=>x.account_id===mon.target_account_id);
-    mobRow.appendChild(h("div",{class:"panel"+(mon.dead?"":""),style:{width:"170px",textAlign:"center",
+    const portraitWrap=h("div",{style:{width:"96px",height:"96px",margin:"0 auto 6px"}});
+    portraitWrap.innerHTML=monsterPortrait(mon.monster_id);
+    const tile=h("div",{class:"panel",style:{width:"186px",textAlign:"center",
       opacity:mon.dead?".4":"1",cursor:mon.dead?"default":"pointer",
-      borderColor:GF._partyTarget===mon.idx?"var(--gold)":undefined},
-      onClick:()=>{ if(!mon.dead){ GF._partyTarget=mon.idx; render(); } }},[
+      borderColor:GF._partyTarget===mon.idx?"var(--gold)":undefined,
+      borderWidth:GF._partyTarget===mon.idx?"2px":undefined},
+
+      onMouseDown:()=>{
+        if(cleared){ partyContinueFromCorpses(); return; }
+        if(mon.dead) return;
+        GF._partyTarget=mon.idx; partyStartAutoAttack();
+      },
+      onTouchStart:()=>{
+        if(cleared){ partyContinueFromCorpses(); return; }
+        if(mon.dead) return;
+        GF._partyTarget=mon.idx; partyStartAutoAttack();
+      }},[
+      portraitWrap,
       h("div",{style:{fontWeight:"bold",fontSize:"13px"}},[mon.label]),
       h("div",{class:"muted",style:{fontSize:"11px"}},[`${mon.hp} / ${mon.max_hp}`]),
       h("div",{class:"party-minibar",style:{height:"7px",marginTop:"3px"}},[
@@ -5442,9 +5477,17 @@ function screenPartyCombat(){
       ]),
       h("div",{class:"muted",style:{fontSize:"11px",marginTop:"4px"}},[
         mon.dead?"defeated":(target?`\u25BC ${target.character_name}`:"choosing a target")]),
-    ]));
+    ]);
+    mobRow.appendChild(tile);
   }
   root.appendChild(mobRow);
+  root.appendChild(h("div",{class:"muted",style:{textAlign:"center",fontSize:"12px",marginTop:"-4px"}},[
+    cleared
+      ? (Net.isPartyLeader()
+          ? "Click to continue wandering \u2014 anything left in the pool is littered."
+          : "Waiting for the leader to move the party on. Claim what you want first.")
+      : "click or hold a monster to attack it",
+  ]));
 
   const front=p.members.filter(m=>m.row_pos==="front" && !m.in_town);
   const back=p.members.filter(m=>m.row_pos!=="front" && !m.in_town);
@@ -5465,26 +5508,64 @@ function screenPartyCombat(){
   for(const m of back) backRow.appendChild(partyFighterNode(m,enc));
   root.appendChild(backRow);
 
+  if(!cleared && me && !me.in_town && !me.dead){
+
+    const keys=getKeyboardShortcuts();
+    const totalOf=(kind)=>{
+      let total=0;
+      for(const itemId in PS.consumables){
+        const item=DL.getItem(itemId); if(!item) continue;
+        if(kind==="health"&&item.heal_amount) total+=PS.consumables[itemId];
+        else if(kind==="stamina"&&item.stamina_amount) total+=PS.consumables[itemId];
+        else if(kind==="mana"&&item.mana_amount) total+=PS.consumables[itemId];
+      }
+      return total;
+    };
+    const quaff=async(kind)=>{
+      const id=PS.bestAvailableConsumable(kind);
+      if(!PS.canUseConsumable(id)) return;
+      const r=await Net.partyApi("/api/party/encounter/use-item",{item_id:id});
+      if(r.ok===false){ combatNotice(r.error,"bad"); return; }
+      if(r.character) partyAdoptCharacter(r.character);
+    };
+    const potions=h("div",{class:"row combat-tools",style:{justifyContent:"center",marginTop:"12px",alignItems:"center"}},[
+      mazeTool(keys.healthPotion,"\u2764\ufe0f",totalOf("health"),!PS.canUseConsumable(PS.bestAvailableConsumable("health")),
+        "Drink a Health Potion.",()=>quaff("health")),
+      mazeTool(keys.manaPotion,"\ud83d\udd35",totalOf("mana"),!PS.canUseConsumable(PS.bestAvailableConsumable("mana")),
+        "Drink a Mana Potion.",()=>quaff("mana")),
+      mazeTool(keys.staminaPotion,"\u26a1",totalOf("stamina"),!PS.canUseConsumable(PS.bestAvailableConsumable("stamina")),
+        "Drink a Stamina Potion.",()=>quaff("stamina")),
+      mazeTool(keys.antidote,"\ud83e\uddea",PS.consumables.antidote||0,!PS.canUseConsumable("antidote"),
+        "Cure poison with an Antidote.",()=>quaff("antidote")),
+    ]);
+    root.appendChild(potions);
+
+    const slots=PS.getSpellSlots();
+    if(slots.some(x=>x)){
+      const spellRow=h("div",{class:"row gap",style:{justifyContent:"center",marginTop:"10px"}});
+      slots.forEach((spellId,i)=>{ if(spellId) spellRow.appendChild(partySpellSlot(i,spellId,alive)); });
+      root.appendChild(spellRow);
+    }
+  }
   const controls=h("div",{class:"row gap",style:{justifyContent:"center",marginTop:"14px",flexWrap:"wrap"}});
   if(!cleared && me && !me.in_town && !me.dead){
-    controls.appendChild(h("button",{onClick:async()=>{
-      const idx=(GF._partyTarget!=null && enc.monsters[GF._partyTarget] && !enc.monsters[GF._partyTarget].dead)
-        ? GF._partyTarget : (alive[0]?alive[0].idx:0);
-      const r=await Net.partyApi("/api/party/encounter/attack",{target_idx:idx});
-      if(r.ok===false){ setToast(r.error); return; }
-      Net.partyEncounter=r.encounter; render();
-    }},["Attack"]));
     controls.appendChild(h("button",{onClick:async()=>{
       const r=await Net.partyApi("/api/party/row",{row:me.row_pos==="front"?"back":"front"});
       if(r.ok===false){ setToast(r.error); return; }
       await Net.partyRefresh(); render();
     }},[me.row_pos==="front"?"Fall back":"Step to the front"]));
-  }
-  if(cleared){
     controls.appendChild(h("button",{onClick:async()=>{
-      await Net.partyApi("/api/party/encounter/leave",{});
-      Net.partyEncounter=null; GF.goto("maze");
-    }},["Move on"]));
+
+      await Net.partyApi("/api/party/town",{in_town:true});
+      Net.partyEncounter=null; GF.goto("town");
+    }},["Flee to town"]));
+  }
+  if(cleared && Net.isPartyLeader()){
+    controls.appendChild(h("button",{onClick:()=>partyContinueFromCorpses()},["Move on"]));
+    if(!(enc.loot||[]).length){
+      root.appendChild(h("div",{class:"muted",style:{textAlign:"center",marginTop:"10px",fontSize:"12.5px"}},
+        ["Nothing was dropped. The gold has already been split between you."]));
+    }
   }
   root.appendChild(controls);
 
@@ -5502,6 +5583,98 @@ function screenPartyCombat(){
   return root;
 }
 
+async function partyContinueFromCorpses(){
+  if(!Net.isPartyLeader()){
+    combatNotice("Only the leader decides when to move on.","bad");
+    return;
+  }
+  const r=await Net.partyApi("/api/party/encounter/leave",{});
+  if(r && r.ok===false){ combatNotice(r.error,"bad"); return; }
+  Net.partyEncounter=null;
+  GF.goto("maze");
+}
+function partyTryFireAttack(){
+  const enc=Net.partyEncounter;
+  if(!enc || enc.status!=="active") { partyStopAutoAttack(); return; }
+  const me=Net.partyMe();
+  if(!me || me.in_town || me.dead) { partyStopAutoAttack(); return; }
+  const intervalMs=1000/Math.max(0.01,PS.getAttackSpeed());
+  const now=Date.now();
+  if(GF._partyLastSwingAt && now-GF._partyLastSwingAt<intervalMs) return;
+  GF._partyLastSwingAt=now;
+  const alive=enc.monsters.filter(m=>!m.dead);
+  const idx=(GF._partyTarget!=null && enc.monsters[GF._partyTarget] && !enc.monsters[GF._partyTarget].dead)
+    ? GF._partyTarget : (alive[0]?alive[0].idx:-1);
+  if(idx<0){ partyStopAutoAttack(); return; }
+  Net.partyApi("/api/party/encounter/attack",{target_idx:idx}).then(r=>{
+    if(!r || r.ok===false){ if(r&&r.error) combatNotice(r.error,"bad"); return; }
+
+    if(r.too_soon) return;
+    Net.partyEncounter=r.encounter;
+    if(r.character) partyAdoptCharacter(r.character);
+    render();
+  });
+}
+function partyStopAutoAttack(){
+  if(GF._partyAutoTimer){ clearInterval(GF._partyAutoTimer); GF._partyAutoTimer=null; }
+}
+function partyStartAutoAttack(){
+  partyStopAutoAttack();
+  partyTryFireAttack();
+  GF._partyAutoTimer=setInterval(partyTryFireAttack,50);
+
+  document.addEventListener("mouseup",partyStopAutoAttack,{once:true});
+  document.addEventListener("touchend",partyStopAutoAttack,{once:true});
+}
+
+function partyAdoptCharacter(data){
+  if(!data || PS.current_slot<0) return;
+  try{
+    const beforeXp=PS.lifetime_xp||0, beforeLevel=PS.level;
+    const fields=["xp","xp_to_next","level","lifetime_xp","total_kills","kill_streak","max_kill_streak",
+      "current_hp","current_mana","current_stamina","consumables","gear_instances","herbs","materials",
+      "quests","forest_reputation","srv_heal","srv_stamina_heal","srv_mana_heal","unspent_stat_points",
+      "bonus_hp_from_attributes","bonus_stamina_from_attributes"];
+    for(const f of fields) if(data[f]!==undefined) PS[f]=data[f];
+    if(typeof data.gold==="number") Net.setAuthoritativeGold(data.gold);
+    if(data._save_seq) PS._saveSeqFloor=Math.max(PS._saveSeqFloor||0, data._save_seq);
+
+    const gained=Math.round((PS.lifetime_xp||0)-beforeXp);
+    if(gained>0) spawnFloat("player",`+${gained} XP`,"float-text-xp");
+    if(PS.level>beforeLevel) setToast(`Level ${PS.level}!`);
+  }catch(e){  }
+}
+
+function partySpellSlot(slotIndex, spellId, alive){
+  const tier=PS.getSpellTier(spellId);
+  const def=tier?Balance.spellAtTier(spellId,tier):null;
+  const size=52;
+  const wrap=h("div",{style:{position:"relative",width:size+"px",height:size+"px",cursor:"pointer"},
+    onClick:async()=>{
+      if(!def) return;
+      const readyAt=GF._partySpellCd&&GF._partySpellCd[spellId];
+      if(readyAt && Date.now()<readyAt){
+        combatNotice(`${Balance.SPELLS[spellId].name} is still on cooldown. ${((readyAt-Date.now())/1000).toFixed(1)}s to go.`,"bad");
+        return;
+      }
+      if(PS.current_mana<def.mana_cost){
+        combatNotice(`Not enough mana for ${Balance.SPELLS[spellId].name}. It costs ${def.mana_cost}, you have ${Math.floor(PS.current_mana)}.`,"bad");
+        return;
+      }
+      const idx=(GF._partyTarget!=null?GF._partyTarget:(alive[0]?alive[0].idx:0));
+      const r=await Net.partyApi("/api/party/encounter/cast",{spell_id:spellId, target_idx:idx});
+      if(r.ok===false){ combatNotice(r.error,"bad"); return; }
+      GF._partySpellCd=GF._partySpellCd||{};
+      GF._partySpellCd[spellId]=Date.now()+PS.getSpellCooldownMs(def.cooldown_ms||1000);
+      Net.partyEncounter=r.encounter;
+      if(r.character) partyAdoptCharacter(r.character);
+      render();
+    }},[]);
+  wrap.appendChild(iconBadge(spellIconSvg(spellId),size));
+  wrap.appendChild(h("div",{class:"muted",style:{position:"absolute",bottom:"-15px",left:"0",right:"0",
+    textAlign:"center",fontSize:"10.5px"}},[def?`${def.mana_cost} mana`:""]));
+  return wrap;
+}
 function partyFighterNode(m, enc){
   const targetedBy=(enc.monsters||[]).filter(mon=>!mon.dead && mon.target_account_id===m.account_id).length;
   const node=partyMateNode(m,{showRow:true});
@@ -7993,22 +8166,32 @@ function strongholdChestUnlocked(maze){
     : maze.stronghold.guardianDefeated.some(Boolean);
 }
 
+function partyStripPrivate(value){
+  if(Array.isArray(value)) return value.map(partyStripPrivate);
+  if(value && typeof value==="object"){
+    const out={};
+    for(const k in value){
+      if(k.charAt(0)==="_") continue;
+      const v=value[k];
+      if(typeof v==="function") continue;
+      out[k]=partyStripPrivate(v);
+    }
+    return out;
+  }
+  return value;
+}
 function partyRelayMaze(maze){
   if(!Net.inParty() || !Net.isPartyLeader() || !maze) return;
 
-  const payload={
-    depth:maze.depth, w:maze.w, h:maze.h, isNight:!!maze.isNight,
-    cells:(maze.cells||[]).map(c=>({x:c.x,y:c.y,type:c.type,baseTerrain:c.baseTerrain,
-      discovered:!!c.discovered,cleared:!!c.cleared,trample:c.trample||0,prop:c.prop||null})),
-    roamers:(maze.roamers||[]).map(r=>({idx:r.idx,behavior:r.behavior})),
-    startIdx:maze.startIdx, exitIdx:maze.exitIdx, playerIdx:maze.playerIdx,
-  };
+  const payload=partyStripPrivate(maze);
   Net.partyApi("/api/party/maze",{maze:payload, area_level:maze.depth, is_night:!!maze.isNight});
 }
 
 function partyAdoptMaze(maze, areaLevel, isNight){
   if(!maze) return;
   if(Net.isPartyLeader()) return;
+
+  if(!maze.cells || !maze.cells.length || !maze.size){ return; }
   GF.overworld_snapshot=Object.assign({},maze,{depth:areaLevel||maze.depth, isNight:!!isNight});
   GF.isNight=!!isNight;
   if(GF.screen!=="maze" && GF.screen!=="partyCombat") GF.goto("maze");
@@ -13041,6 +13224,18 @@ function legacyGearSection(){
 }
 
 const CHANGELOG=[
+  { version:"v0.30.2", date:"2026-08-06 21:20", notes:[
+    "Switching to another character now leaves the party. Your old character used to stay in it, holding a slot nobody was playing.",
+    "The party roster keeps up with what your companions are actually doing. Someone healing at a bonfire in town no longer looks dead to everyone else.",
+    "The experience a kill grants is stated in the combat log and floats over your character. It was always being awarded, but nothing said so.",
+    "A finished fight now waits on the fallen monsters while the loot is settled. The leader clicks a monster to move the party on, the same click that continues a fight on your own.",
+  ]},
+  { version:"v0.30.1", date:"2026-08-06 20:10", notes:[
+    "Fixed followers seeing an empty maze. The leader's layout was being relayed with the wrong fields, and a player who joined a party whose leader was already in a maze never received one at all.",
+    "Fixed party loot and gold appearing to vanish. Both were being awarded correctly the whole time, but the moment the last monster fell the fight became unreadable, so nobody could see the pool or their rewards.",
+    "Party fights now play like ordinary fights: the monster's portrait, the whole tile clickable, hold to keep swinging, your potions, and your slotted spells.",
+    "Fixed being able to attack faster than your attack speed by clicking quickly. Your cadence is enforced by the server now, so gear decides how fast you swing rather than how fast you can click.",
+  ]},
   { version:"v0.30", date:"2026-08-06 06:40", notes:[
     "Co-op multiplayer. Up to four of you can share one maze, one set of fights and one pool of loot. Find company through the new Party Lobby in town.",
     "The leader walks and everyone follows. Whatever they walk into, the whole party fights, and the number of monsters is rolled between one and the size of your party.",

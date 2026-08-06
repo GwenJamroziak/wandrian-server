@@ -7128,6 +7128,9 @@ db.exec(`
     join_order INTEGER NOT NULL,
     row_pos TEXT NOT NULL DEFAULT 'back',
     in_town INTEGER NOT NULL DEFAULT 0,
+    last_attack_at INTEGER NOT NULL DEFAULT 0,
+    last_regen_at INTEGER NOT NULL DEFAULT 0,
+    spell_cooldowns TEXT NOT NULL DEFAULT '{}',
     PRIMARY KEY (party_id, account_id)
   );
 `);
@@ -7411,7 +7414,17 @@ app.post("/api/party/join", requireAuth, (req, res) => {
   const mf = partyMagicFindBreakdown(partyId);
   partySystem(partyId, `${data.character_name} joined the party (${size}/${PARTY_MAX}). Party Magic Find is now ${mf.total}%.`);
   partyBroadcastState(partyId);
-  res.json({ ok: true, party: partyPublicState(partyId) });
+  // v0.30.1 BUG FIX (credit: Gwen, "player 2 sees no maze"): the maze was only ever relayed at
+  // the moment the LEADER generated one. A player joining a party whose leader was already in a
+  // maze therefore never received it and stared at an empty frame. The current layout now rides
+  // back on the join response, so a joiner is standing in the same maze as everyone else before
+  // their first render.
+  let joinMaze = null;
+  if (party.maze_json) { try { joinMaze = JSON.parse(party.maze_json); } catch (e) { joinMaze = null; } }
+  res.json({
+    ok: true, party: partyPublicState(partyId),
+    maze: joinMaze, area_level: party.area_level, is_night: !!party.is_night,
+  });
 });
 
 app.post("/api/party/leave", requireAuth, (req, res) => {
@@ -7469,7 +7482,11 @@ app.post("/api/party/town", requireAuth, (req, res) => {
     ? `${me.character_name} went back to town to rest. The party can keep moving.`
     : `${me.character_name} rejoined the party in the maze.`);
   partyBroadcastState(party.id);
-  res.json({ ok: true, in_town: inTown, maze: inTown ? null : party.maze_json });
+  // Rejoining from town drops you back onto the leader's position, so the maze has to come with
+  // it -- parsed, not the raw JSON string, which is what this used to hand back.
+  let backMaze = null;
+  if (!inTown && party.maze_json) { try { backMaze = JSON.parse(party.maze_json); } catch (e) { backMaze = null; } }
+  res.json({ ok: true, in_town: inTown, maze: backMaze, area_level: party.area_level, is_night: !!party.is_night });
 });
 
 
@@ -7670,9 +7687,16 @@ function partyPickMonsterId(areaLevel) {
   return pool[Math.floor(Math.random() * pool.length)].id;
 }
 
+/* v0.30.1 BUG FIX (credit: Gwen, "no loot, just 'fight ended'"): this read partyEncounterFor(),
+   which only returns encounters with status 'active'. The instant the last monster died the
+   status became 'cleared', so the very broadcast that should have shown the party its loot
+   returned null instead and every client rendered "the fight is over" over an empty screen. The
+   loot had been rolled and saved correctly the whole time -- it was simply unreachable.
+   Reads the latest encounter regardless of status now; `status` is on the payload for the client
+   to decide what to show. */
 function partyEncounterPublic(partyId) {
-  const enc = partyEncounterFor(partyId);
-  if (!enc) return null;
+  const enc = partyLastEncounter(partyId);
+  if (!enc || enc.status === "closed") return null;
   return {
     id: enc.id,
     area_level: enc.area_level,
@@ -7687,9 +7711,17 @@ function partyEncounterPublic(partyId) {
     status: enc.status,
   };
 }
-function partyBroadcastEncounter(partyId) {
+function partyBroadcastEncounter(partyId, opts) {
   const enc = partyEncounterPublic(partyId);
-  partyBroadcast(partyId, { type: "party_encounter", encounter: enc, party: partyPublicState(partyId) });
+  partyBroadcast(partyId, {
+    type: "party_encounter", encounter: enc, party: partyPublicState(partyId),
+    // v0.30.1 (credit: Gwen, "not even gold was seen"): a kill credits experience, gold, quest
+    // progress and kill streak to every member's row in the DATABASE. Each client is still
+    // holding its own older copy, and its next autosave would write that stale copy straight
+    // over the rewards. This flag tells every member to reload their character before that can
+    // happen -- it is a correctness signal, not a cosmetic refresh.
+    rewards_changed: !!(opts && opts.rewards),
+  });
 }
 
 
@@ -7816,7 +7848,13 @@ function partyResolveKill(party, enc, mon) {
   }
 
   lines.push(`The ${mon.label} lies defeated. ${gold} gold, ${share} each${remainder ? ` (the odd ${remainder} to the leader)` : ""}.`);
-  if (bonusPct > 0) lines.push(`Party of ${present.length}: +${bonusPct}% experience for everyone.`);
+  // v0.30.2 (credit: Gwen, "I don't get experience gained"): the experience WAS being awarded --
+  // it was simply never said out loud, so a player watching the log had no evidence of it. The
+  // figure every member actually receives now appears in the shared log beside the gold.
+  const xpShown = Math.round(mon.xp * (1 + bonusPct / 100));
+  lines.push(bonusPct > 0
+    ? `Everyone gains ${xpShown} experience (${Math.round(mon.xp)} plus ${bonusPct}% for a party of ${present.length}).`
+    : `Everyone gains ${xpShown} experience.`);
 
   // One loot roll per monster, into the shared pool, at the party's combined magic find.
   const drop = combatRollLoot(mon.loot_table, mf.total);
@@ -7850,13 +7888,13 @@ function partyLootEntryFrom(drop, areaLevel, monsterBand, mfPct) {
   return null;
 }
 
-function partyAfterResolve(party, enc, monsters, lines) {
+function partyAfterResolve(party, enc, monsters, lines, rewards) {
   partyAssignTargets(party.id, monsters);
   const allDead = monsters.every((m) => m.dead);
   const fields = { monsters: JSON.stringify(monsters), log: JSON.stringify(partyEncPush(enc, lines)) };
   if (allDead) fields.status = "cleared";
   partyEncounterSave(enc.id, fields);
-  partyBroadcastEncounter(party.id);
+  partyBroadcastEncounter(party.id, { rewards: !!rewards });
   return allDead;
 }
 
@@ -7873,8 +7911,22 @@ app.post("/api/party/encounter/attack", requireAuth, (req, res) => {
   if (!data) return res.status(400).json({ error: "No character." });
   if ((data.current_hp || 0) <= 0) return res.status(400).json({ error: "You have fallen." });
 
+  // v0.30.1 BUG FIX (credit: Gwen, "I can spam the button faster than my 1sec attackspeed").
+  // Solo combat gates the cadence CLIENT-side, which is fine when the client is only cheating
+  // itself. In a party a fast clicker would out-damage everyone else, so the gate lives here on
+  // the server where it cannot be clicked past. A too-soon swing is not an error -- the client
+  // polls at 50ms while a button is held, exactly as solo does -- it simply does nothing.
+  const nowMs = Date.now();
+  const cadenceMs = 1000 / Math.max(0.01, combatGetAttackSpeed(data));
+  if (me.last_attack_at && nowMs - me.last_attack_at < cadenceMs) {
+    return res.json({ ok: true, too_soon: true, encounter: partyEncounterPublic(party.id) });
+  }
+  db.prepare("UPDATE party_members SET last_attack_at = ? WHERE party_id = ? AND account_id = ?")
+    .run(nowMs, party.id, req.account.id);
+
   let monsters = partyEncMonsters(enc);
   const lines = [];
+  let anyKill = false;
 
   // Target: the one the player clicked if it is alive, otherwise the first living monster. A
   // party that focuses fire kills faster, and that is a real tactical choice worth allowing.
@@ -7913,19 +7965,24 @@ app.post("/api/party/encounter/attack", requireAuth, (req, res) => {
   saveCharacterRow(req.account.id, me.slot, data);
 
   if (mon.hp <= 0 && !mon.dead) {
-    mon.dead = true;
-    lines.push(...partyResolveKill(party, partyEncounterFor(party.id), mon));
+    mon.dead = true; anyKill = true;
+    lines.push(...partyResolveKill(party, partyLastEncounter(party.id), mon));
   }
 
-  const settled = partySettleMonsterHits(party, partyEncounterFor(party.id), monsters);
+  const settled = partySettleMonsterHits(party, partyLastEncounter(party.id), monsters);
   lines.push(...settled.lines);
   for (const m of monsters) {
-    if (m.hp <= 0 && !m.dead) { m.dead = true; lines.push(...partyResolveKill(party, partyEncounterFor(party.id), m)); }
+    if (m.hp <= 0 && !m.dead) { m.dead = true; anyKill = true; lines.push(...partyResolveKill(party, partyLastEncounter(party.id), m)); }
   }
   partyHandleCasualties(party, settled.casualties);
 
-  const cleared = partyAfterResolve(party, partyEncounterFor(party.id), monsters, lines);
-  res.json({ ok: true, encounter: partyEncounterPublic(party.id), cleared });
+  const cleared = partyAfterResolve(party, partyLastEncounter(party.id), monsters, lines, anyKill);
+  // The attacker's own character is handed straight back when a kill landed, so the client that
+  // swung adopts its rewards immediately rather than waiting for the broadcast round trip.
+  res.json({
+    ok: true, encounter: partyEncounterPublic(party.id), cleared, rewards_changed: anyKill,
+    character: anyKill ? loadCharacterRow(req.account.id, me.slot) : null,
+  });
 });
 
 /* Death. Softcore members respawn in town and can rejoin; hardcore members are gone for good and
@@ -7946,6 +8003,105 @@ function partyHandleCasualties(party, casualties) {
   }
   if ((casualties || []).length) partyBroadcastState(party.id);
 }
+
+/* v0.30.1 (credit: Gwen): potions and spells in party fights. Both delegate to the SOLO helpers
+   rather than reimplementing their effects, so a Greater Health Potion heals the same amount and
+   a spell costs the same mana in both systems. */
+app.post("/api/party/encounter/use-item", requireAuth, (req, res) => {
+  const party = partyForAccount(req.account.id);
+  if (!party) return res.status(400).json({ error: "You are not in a party." });
+  const me = partyMemberRow(party.id, req.account.id);
+  if (!me) return res.status(400).json({ error: "You are not in this party." });
+  const data = loadCharacterRow(req.account.id, me.slot);
+  if (!data) return res.status(400).json({ error: "No character." });
+  const itemId = String(req.body?.item_id || "");
+  const have = (data.consumables && data.consumables[itemId]) || 0;
+  if (have <= 0) return res.status(400).json({ error: "You have none of those." });
+  const item = COMBAT_CONSUMABLES[itemId];
+  if (!item) return res.status(400).json({ error: "Unknown item." });
+  data.consumables[itemId] = have - 1;
+  if (data.consumables[itemId] <= 0) delete data.consumables[itemId];
+  // The same queued-heal shape solo uses (combatQueueHeal), so a potion in a party fight restores
+  // over time exactly as it does in a solo one rather than snapping to full instantly.
+  combatSettleAllHeals(data);
+  const ticks = CB.POTION_HEAL_TICKS || 1;
+  if ((item.heal_amount || 0) > 0) {
+    data.srv_heal = combatQueueHeal(data.srv_heal, item.heal_amount, combatGetMaxHp(data) - (data.current_hp || 0), ticks);
+  }
+  if ((item.stamina_amount || 0) > 0) {
+    data.srv_stamina_heal = combatQueueHeal(data.srv_stamina_heal, item.stamina_amount, combatGetMaxStamina(data) - (data.current_stamina || 0), ticks);
+  }
+  if ((item.mana_amount || 0) > 0) {
+    data.srv_mana_heal = combatQueueHeal(data.srv_mana_heal, item.mana_amount, combatGetMaxMana(data) - (data.current_mana || 0), ticks);
+  }
+  if (itemId === "antidote") { data.player_poison_dots = []; }
+  saveCharacterRow(req.account.id, me.slot, data);
+  const enc = partyLastEncounter(party.id);
+  if (enc) {
+    partyEncounterSave(enc.id, { log: JSON.stringify(partyEncPush(enc, [`${me.character_name} uses a ${itemId.replace(/_/g, " ")}.`])) });
+  }
+  partyBroadcastEncounter(party.id, { rewards: true });
+  res.json({ ok: true, character: data });
+});
+
+app.post("/api/party/encounter/cast", requireAuth, (req, res) => {
+  const party = partyForAccount(req.account.id);
+  if (!party) return res.status(400).json({ error: "You are not in a party." });
+  const enc = partyEncounterFor(party.id);
+  if (!enc) return res.status(400).json({ error: "The party is not fighting." });
+  const me = partyMemberRow(party.id, req.account.id);
+  if (!me || me.in_town) return res.status(400).json({ error: "You are not in this fight." });
+  const data = loadCharacterRow(req.account.id, me.slot);
+  if (!data || (data.current_hp || 0) <= 0) return res.status(400).json({ error: "You have fallen." });
+
+  const spellId = String(req.body?.spell_id || "");
+  const tier = (data.owned_spell_tiers || {})[spellId] || 0;
+  if (!tier) return res.status(400).json({ error: "You do not know that spell." });
+  const spell = spellAtTier(spellId, tier);
+  if (!spell) return res.status(400).json({ error: "Unknown spell." });
+
+  // Cooldown and mana, checked exactly as solo checks them, with the reduced cooldown.
+  let cds = {};
+  try { cds = JSON.parse(me.spell_cooldowns || "{}"); } catch (e) { cds = {}; }
+  const now = Date.now();
+  if (cds[spellId] && now < cds[spellId]) {
+    return res.status(400).json({ error: "That spell is still on cooldown.", ready_at: cds[spellId] });
+  }
+  const currentMana = combatGetCurrentMana(data);
+  if (currentMana < spell.mana_cost) return res.status(400).json({ error: "Not enough mana." });
+  data.current_mana = currentMana - spell.mana_cost;
+  cds[spellId] = now + combatGetSpellCooldownMs(data, spell.cooldown_ms);
+  db.prepare("UPDATE party_members SET spell_cooldowns = ? WHERE party_id = ? AND account_id = ?")
+    .run(JSON.stringify(cds), party.id, req.account.id);
+
+  const mult = combatGetSpellEffectivenessMult(data) * (combatHasQuadDamage(data) ? 4 : 1);
+  const monsters = partyEncMonsters(enc);
+  const lines = [];
+  let anyKill = false;
+
+  if (spell.effect === "heal") {
+    const amount = Math.round(spell.heal_amount * combatGetSpellEffectivenessMult(data));
+    data.current_hp = Math.min(combatGetMaxHp(data), (data.current_hp || 0) + amount);
+    lines.push(`${me.character_name} casts ${(SPELLS[spellId] && SPELLS[spellId].name) || spellId}, recovering ${amount} health.`);
+  } else {
+    let idx = Number(req.body?.target_idx);
+    if (!monsters[idx] || monsters[idx].dead) idx = monsters.findIndex((m) => !m.dead);
+    if (idx >= 0) {
+      const mon = monsters[idx];
+      const min = spell.hit_min != null ? spell.hit_min : spell.dmg_min;
+      const max = spell.hit_max != null ? spell.hit_max : spell.dmg_max;
+      const hits = (SPELLS[spellId] && SPELLS[spellId].hit_count) || 1;
+      const dmg = Math.round(((min + max) / 2) * hits * mult);
+      mon.hp = Math.max(0, mon.hp - dmg);
+      lines.push(`${me.character_name} casts ${(SPELLS[spellId] && SPELLS[spellId].name) || spellId} at the ${mon.label} for ${dmg} damage.`);
+      if (mon.hp <= 0 && !mon.dead) { mon.dead = true; anyKill = true; lines.push(...partyResolveKill(party, partyLastEncounter(party.id), mon)); }
+    }
+  }
+  combatRegisterSpellcastHit(data);
+  saveCharacterRow(req.account.id, me.slot, data);
+  const cleared = partyAfterResolve(party, partyLastEncounter(party.id), monsters, lines, anyKill);
+  res.json({ ok: true, encounter: partyEncounterPublic(party.id), cleared, character: data });
+});
 
 /* ---------------- loot: claim, contest, roll ----------------
    A claim opens a three-second window rather than resolving instantly, so somebody who wanted the
@@ -8028,9 +8184,15 @@ function partyGrantLoot(party, entry) {
 /* Leaving the maze with items still in the pool. Gwen's rule: unclaimed loot is littered, and
    littering the forest costs every member a point of Forest Reputation. It gives ignoring the
    pool a real cost, which is a better answer than a timer nobody reads. */
+/* v0.30.2 (credit: Gwen): only the LEADER may move the party on from a finished fight, exactly
+   as only the leader walks. Everyone else stays on the corpses until they do, which is what gives
+   the party time to argue over the loot. */
 app.post("/api/party/encounter/leave", requireAuth, (req, res) => {
   const party = partyForAccount(req.account.id);
   if (!party) return res.status(400).json({ error: "You are not in a party." });
+  if (party.leader_account_id !== req.account.id) {
+    return res.status(403).json({ error: "Only the leader decides when to move on." });
+  }
   const enc = partyLastEncounter(party.id);
   if (!enc) return res.json({ ok: true });
   const loot = partyEncLoot(enc);
@@ -8121,22 +8283,53 @@ app.post("/api/party/step", requireAuth, (req, res) => {
    up to four monsters, half a second of accumulated events arrives as an unreadable clump. It is
    still a CATCH-UP pass, not a simulation -- it settles damage owed by elapsed time and does
    nothing at all when a party is idle or not fighting. */
+/* v0.30.2 BUG FIX (credit: Gwen, "he healed up in town and still shows 0hp"). Party state was
+   only ever broadcast when something HAPPENED -- a join, a step, a kill. A member sitting in town
+   regenerating changes their HP without any of those firing, so every other client kept showing
+   the corpse-shaped roster entry they last saw. The pusher now watches the party's vitals and
+   broadcasts when they actually change, throttled to once a second: enough to feel live, and
+   quiet enough that an idle party costs nothing beyond the comparison itself. */
+const partyVitalsSignature = new Map();
+const partyVitalsLastSent = new Map();
+const PARTY_VITALS_MIN_INTERVAL_MS = 1000;
+/* NOTE, deliberately NOT done here (v0.30.2): server-side regeneration for members resting in
+   town. The obvious-looking fix, and the wrong one -- a player in town is running their own
+   client, which already regenerates locally and saves the result. Ticking regen here as well
+   would heal them twice as fast as a solo player, silently. What was actually missing was nobody
+   telling the OTHER clients that their vitals had changed, which is what the broadcast below
+   does: it reads each member's row fresh, so a bonfire, a potion or ordinary regeneration all
+   show up the moment they are saved, without this file duplicating any of them. */
+function partyMaybeBroadcastVitals(party) {
+  const state = partyPublicState(party.id);
+  if (!state) return;
+  const sig = state.members.map((m) =>
+    `${m.account_id}:${m.hp}:${m.mana}:${m.stamina}:${m.in_town ? 1 : 0}:${m.row_pos}:${m.dead ? 1 : 0}`).join("|");
+  if (partyVitalsSignature.get(party.id) === sig) return;
+  const last = partyVitalsLastSent.get(party.id) || 0;
+  if (Date.now() - last < PARTY_VITALS_MIN_INTERVAL_MS) return;
+  partyVitalsSignature.set(party.id, sig);
+  partyVitalsLastSent.set(party.id, Date.now());
+  partyBroadcast(party.id, { type: "party_state", state });
+}
+
 setInterval(() => {
   const parties = db.prepare("SELECT * FROM parties").all();
   for (const party of parties) {
     try {
       partySettleLootWindows(party);
+      partyMaybeBroadcastVitals(party);
       const enc = partyEncounterFor(party.id);
       if (!enc) continue;
       let monsters = partyEncMonsters(enc);
       if (!monsters.length || monsters.every((m) => m.dead)) continue;
       const settled = partySettleMonsterHits(party, enc, monsters);
       const lines = settled.lines;
+      let anyKill = false;
       for (const m of monsters) {
-        if (m.hp <= 0 && !m.dead) { m.dead = true; lines.push(...partyResolveKill(party, partyEncounterFor(party.id), m)); }
+        if (m.hp <= 0 && !m.dead) { m.dead = true; anyKill = true; lines.push(...partyResolveKill(party, partyLastEncounter(party.id), m)); }
       }
       partyHandleCasualties(party, settled.casualties);
-      if (lines.length) partyAfterResolve(party, partyEncounterFor(party.id), monsters, lines);
+      if (lines.length) partyAfterResolve(party, partyLastEncounter(party.id), monsters, lines, anyKill);
     } catch (e) {
       // One broken party must never take the pusher down for every other party.
       console.error("party pusher:", party.id, e && e.message);
