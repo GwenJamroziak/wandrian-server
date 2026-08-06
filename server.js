@@ -7338,6 +7338,24 @@ function partyRemoveMember(partyId, accountId, reason) {
     const next = remaining[0]; // join_order ASC -- the longest-standing member takes over
     db.prepare("UPDATE parties SET leader_account_id = ? WHERE id = ?").run(next.account_id, partyId);
     leaderChanged = true;
+    // v0.30.4 (credit: Gwen): "when a leader leaves, the followers should remain in the leader's
+    // left-behind maze". The layout lives on the PARTY row rather than on the leader's client, so
+    // it survives them going -- but the promoted member has to be told to adopt it rather than
+    // generate a fresh one, or the party inherits a different world than the one it is standing
+    // in. Sent to the new leader specifically, right after the promotion is recorded.
+    if (party.maze_json) {
+      let handover = null;
+      try { handover = JSON.parse(party.maze_json); } catch (e) { handover = null; }
+      if (handover) {
+        const body = JSON.stringify({
+          party_id: partyId, seq: ++partySeq, type: "party_maze",
+          maze: handover, area_level: party.area_level, is_night: !!party.is_night, handover: true,
+        });
+        for (const client of chatClients) {
+          if (client.readyState === client.OPEN && client.accountId === next.account_id) client.send(body);
+        }
+      }
+    }
   }
   partyTouch(partyId, { status: remaining.length >= PARTY_MAX ? "full" : "open" });
   partySystem(partyId, `${member.character_name} ${reason || "left the party"} (${remaining.length}/${PARTY_MAX}).`);
@@ -7385,7 +7403,9 @@ app.post("/api/party/create", requireAuth, (req, res) => {
   const data = loadCharacterRow(req.account.id, slot);
   if (!data) return res.status(400).json({ error: "No character in that slot." });
   if (partyForAccount(req.account.id)) return res.status(400).json({ error: "You are already in a party." });
-  const spread = Math.max(1, Math.min(20, Number(req.body?.spread) || 3));
+  // v0.30.4 (credit: Gwen): no ceiling on the spread. A leader who wants to take anyone from
+  // level 1 to 100 may say so; 99 is the width of the whole level range, not a balance opinion.
+  const spread = Math.max(1, Math.min(99, Number(req.body?.spread) || 3));
   const note = String(req.body?.note || "").slice(0, 90);
   const id = partyNewId();
   const now = nowIso();
@@ -7468,7 +7488,7 @@ app.post("/api/party/settings", requireAuth, (req, res) => {
   const fields = {};
   if (req.body?.spread != null) {
     const leader = partyMemberRow(party.id, req.account.id);
-    const spread = Math.max(1, Math.min(20, Number(req.body.spread) || 3));
+    const spread = Math.max(1, Math.min(99, Number(req.body.spread) || 3));
     fields.min_level = Math.max(1, (leader ? leader.level : 1) - spread);
     fields.max_level = (leader ? leader.level : 1) + spread;
   }
@@ -8195,7 +8215,19 @@ function partySettleLootWindows(party) {
   }
   if (changed) {
     partyEncounterSave(enc.id, { loot: JSON.stringify(loot) });
-    partyBroadcastEncounter(party.id);
+    // v0.30.4 BUG FIX (credit: Gwen, "I let P1 win an item roll but it is nowhere to be found").
+    // partyGrantLoot() writes the item into the winner's row, but this broadcast went out WITHOUT
+    // the rewards flag -- so no client reloaded, the winner kept holding a gear_instances array
+    // from before the grant, and their next autosave wrote it straight back over the item. The
+    // item was not merely invisible, it was being destroyed a second later.
+    //
+    // Audited rather than spot-fixed this time. Every party path that writes to a character row:
+    //   partyResolveKill        -> flagged (rewards: anyKill)
+    //   partySettleLootWindows  -> flagged HERE, was missing
+    //   /encounter/use-item     -> flagged
+    //   /encounter/cast         -> returns the character directly
+    //   /encounter/leave        -> flagged below, was also missing (Forest Reputation)
+    partyBroadcastEncounter(party.id, { rewards: true });
   }
 }
 
@@ -8249,7 +8281,9 @@ app.post("/api/party/encounter/leave", requireAuth, (req, res) => {
     partySystem(party.id, `${abandoned.length} item${abandoned.length > 1 ? "s were" : " was"} left to rot. Forest Reputation -1 for everyone.`);
   }
   partyEncounterSave(enc.id, { status: "closed" });
-  partyBroadcastEncounter(party.id);
+  // Littering docks every member a point of Forest Reputation -- another character-row write, and
+  // it needs the same reload flag or the penalty is undone by the next autosave.
+  partyBroadcastEncounter(party.id, { rewards: abandoned.length > 0 });
   partyBroadcastState(party.id);
   res.json({ ok: true, littered: abandoned.length });
 });
@@ -8260,6 +8294,18 @@ app.post("/api/party/encounter/leave", requireAuth, (req, res) => {
    here; the server stores it verbatim and hands it to followers. The server does not read,
    validate or generate it. See the authority note at the top of the party core for why this is
    acceptable today and what makes it the next thing to fix. */
+/* v0.30.4 (credit: Gwen): the maze could only ever arrive by push, so a follower who joined late,
+   reconnected, or simply missed the broadcast had no way to recover -- and their client filled the
+   gap by generating its own, which is the root of most of what went wrong. A follower can now ask
+   for the party's current layout at any time. */
+app.get("/api/party/maze", requireAuth, (req, res) => {
+  const party = partyForAccount(req.account.id);
+  if (!party) return res.status(400).json({ error: "You are not in a party." });
+  let maze = null;
+  if (party.maze_json) { try { maze = JSON.parse(party.maze_json); } catch (e) { maze = null; } }
+  res.json({ ok: true, maze, area_level: party.area_level, is_night: !!party.is_night });
+});
+
 app.post("/api/party/maze", requireAuth, (req, res) => {
   const party = partyForAccount(req.account.id);
   if (!party) return res.status(400).json({ error: "You are not in a party." });
@@ -8276,6 +8322,34 @@ app.post("/api/party/maze", requireAuth, (req, res) => {
   });
   partyBroadcast(party.id, { type: "party_maze", maze, area_level: Number(req.body?.area_level) || party.area_level, is_night: !!req.body?.is_night });
   res.json({ ok: true });
+});
+
+/* v0.30.4 (credit: Gwen): descending to the next area is a PARTY event, not a private one. The
+   leader's client handled it entirely locally, so followers never saw the "Advanced to area
+   level N" moment and their own clients quietly regenerated a fresh maze underneath them --
+   which is why a follower ended up in the top-left corner of a board nobody else was standing on.
+   The new area level is recorded on the party and announced to everyone; the leader's client
+   follows up with the new layout through POST /api/party/maze as usual. */
+app.post("/api/party/descend", requireAuth, (req, res) => {
+  const party = partyForAccount(req.account.id);
+  if (!party) return res.status(400).json({ error: "You are not in a party." });
+  if (party.leader_account_id !== req.account.id) return res.status(403).json({ error: "Only the leader leads the way down." });
+  const nextLevel = Math.max(1, Number(req.body?.area_level) || party.area_level + 1);
+  partyTouch(party.id, { area_level: nextLevel, maze_json: null });
+  // Everyone's deepest-reached is raised, not only the leader's. Being carried somewhere ought to
+  // leave a mark on the person who was carried, or the boost evaporates the moment they leave.
+  for (const m of partyMembers(party.id)) {
+    const data = loadCharacterRow(m.account_id, m.slot);
+    if (!data) continue;
+    if ((data.max_maze_depth_reached || 1) < nextLevel) {
+      data.max_maze_depth_reached = nextLevel;
+      saveCharacterRow(m.account_id, m.slot, data);
+    }
+  }
+  partySystem(party.id, `The party descends to area level ${nextLevel}.`);
+  partyBroadcast(party.id, { type: "party_descend", area_level: nextLevel });
+  partyBroadcastState(party.id);
+  res.json({ ok: true, area_level: nextLevel });
 });
 
 /* Each step the leader takes. Costs stamina from EVERY member still in the maze, which is the

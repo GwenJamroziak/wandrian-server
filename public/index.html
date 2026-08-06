@@ -547,6 +547,34 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 .chan-tab .cdot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:5px;}
 .mf-line{display:flex;justify-content:space-between;font-size:12px;padding:2px 0;}
 
+.party-arena{display:grid;grid-template-columns:minmax(300px,0.9fr) 1.1fr;gap:18px;align-items:start;margin-top:10px;}
+.party-side{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.party-col{display:flex;flex-direction:column;gap:8px;}
+.party-col-head{text-align:center;padding-bottom:5px;border-bottom:1px solid var(--border);margin-bottom:2px;}
+.party-col-title{font-family:Cinzel,Georgia,serif;font-size:11.5px;letter-spacing:1px;color:var(--muted);}
+.party-col-empty{border:1px dashed #4a5438;border-radius:8px;padding:12px 8px;text-align:center;
+  font-size:11.5px;color:var(--muted);}
+.party-enemy{position:relative;}
+.party-mob-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;justify-items:center;}
+.party-mob{width:100%;max-width:200px;text-align:center;cursor:pointer;}
+.party-mob.is-target{border-color:var(--gold);border-width:2px;}
+.party-mob.is-dead{opacity:.4;cursor:default;}
+.party-mob-art{width:96px;height:96px;}
+
+.party-log{height:150px;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;
+  gap:1px;font-size:12.5px;}
+
+.loot-timer{height:4px;border-radius:3px;background:#0b0d08;overflow:hidden;border:1px solid #2a3020;margin-top:5px;}
+.loot-timer > i{display:block;height:100%;width:100%;background:var(--gold);
+  animation:lootDrain linear forwards;}
+@keyframes lootDrain{to{width:0%;}}
+.loot-roll-line{font-size:11.5px;line-height:1.45;}
+@media(max-width:900px){
+  .party-arena{grid-template-columns:1fr;}
+  .party-side{order:2;}
+  .party-enemy{order:1;}
+}
+
 .affix-line{display:flex;align-items:center;gap:6px;line-height:1.5;}
 .roll-medal{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;}
 .roll-medal svg{width:100%;height:100%;display:block;}
@@ -1872,7 +1900,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.30.3-web",
+  GAME_VERSION:"v0.30.4-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
 
@@ -3433,7 +3461,9 @@ const Net = {
               });
             }
 
-            if(this.partyEncounter && this.partyEncounter.status==="active" && GF.screen!=="partyCombat"){
+            const meNow=this.partyMe();
+            const canBePulledIn=meNow && !meNow.in_town && !meNow.dead;
+            if(this.partyEncounter && this.partyEncounter.status==="active" && canBePulledIn && GF.screen!=="partyCombat"){
               GF.goto("partyCombat");
             } else render();
             return;
@@ -5262,18 +5292,33 @@ function hudPartyPanel(){
   return h("div",{class:"panel",style:{marginTop:"10px"}},rows);
 }
 
+function partyOpenCountRefresh(){
+  if(!Net.online || PS.current_slot<0) return;
+  const now=Date.now();
+  if(GF._partyCountAt && now-GF._partyCountAt<20000) return;
+  GF._partyCountAt=now;
+  Net.partyApi("/api/party/list?slot="+PS.current_slot).then(r=>{
+    if(!r || r.ok===false) return;
+    const next=(r.parties||[]).length;
+    if(next!==GF._partyCount){ GF._partyCount=next; render(); }
+  });
+}
 function partyLobbyTownCard(){
   const inParty=Net.inParty();
   const p=Net.party;
+  if(!inParty) partyOpenCountRefresh();
   const card=h("div",{class:"panel venture-card venture-fill npc-service-card venture-clickable",
     onClick:()=>GF.goto("partyLobby")},[
+    npcPortrait("party",72),
     h("div",{},[
       h("div",{class:"venture-title"},["Party Lobby"]),
       inParty
         ? h("div",{class:"muted",style:{fontSize:".9em"}},[
             `${p.size} of you, finding at ${p.magic_find?p.magic_find.total:0}% Magic Find.`])
         : h("div",{class:"muted",style:{fontSize:".9em"}},[
-            "Share a maze with up to three others. Everyone finds loot at the party's combined rate."]),
+            GF._partyCount>0
+              ? `${GF._partyCount} part${GF._partyCount===1?"y is":"ies are"} looking for players.`
+              : "Share a maze with up to three others. Everyone finds loot at the party's combined rate."]),
     ]),
   ]);
   return card;
@@ -5462,6 +5507,15 @@ function screenPartyCombat(){
   const alive=enc.monsters.filter(m=>!m.dead);
   const cleared=alive.length===0;
 
+  if(me && me.in_town && !me.dead){
+    root.appendChild(h("div",{class:"panel",style:{textAlign:"center",marginTop:"12px"}},[
+      h("div",{style:{fontWeight:"bold",marginBottom:"6px"}},["You are resting in town."]),
+      h("div",{class:"muted",style:{fontSize:"12.5px",marginBottom:"10px"}},
+        ["Your party is still fighting. You can watch from here, or go back to town properly."]),
+      h("button",{onClick:()=>{ Net.partyEncounter=null; GF.goto("town"); }},["Back to town"]),
+    ]));
+    return root;
+  }
   if(me && (me.dead || (me.hp<=0 && !me.in_town))){
     root.appendChild(h("div",{class:"panel",style:{textAlign:"center",marginTop:"12px"}},[
       h("div",{style:{fontWeight:"bold",marginBottom:"6px"}},["You have fallen."]),
@@ -5479,16 +5533,15 @@ function screenPartyCombat(){
 
   root.appendChild(h("h2",{},[cleared?"The path is clear":(enc.monsters.length===1?"A monster blocks the path":`${enc.monsters.length} monsters block the path`)]));
 
-  const mobRow=h("div",{class:"row gap",style:{justifyContent:"center",flexWrap:"wrap",marginBottom:"10px",alignItems:"stretch"}});
+  const mobGrid=h("div",{class:"party-mob-grid"});
   for(const mon of enc.monsters){
     const target=p.members.find(x=>x.account_id===mon.target_account_id);
-    const portraitWrap=h("div",{style:{width:"96px",height:"96px",margin:"0 auto 6px"}});
+    const portraitWrap=h("div",{class:"party-mob-art"});
     portraitWrap.innerHTML=monsterPortrait(mon.monster_id);
-    const tile=h("div",{class:"panel",style:{width:"186px",textAlign:"center",
-      opacity:mon.dead?".4":"1",cursor:mon.dead?"default":"pointer",
-      borderColor:GF._partyTarget===mon.idx?"var(--gold)":undefined,
-      borderWidth:GF._partyTarget===mon.idx?"2px":undefined},
 
+    const artStack=h("div",{style:{position:"relative",width:"96px",height:"96px",margin:"0 auto 6px"}},
+      [portraitWrap, fireflyBurstLayer(), entangleRootsLayer()]);
+    const tile=h("div",{class:"panel party-mob"+(mon.dead?" is-dead":"")+(GF._partyTarget===mon.idx?" is-target":""),
       onMouseDown:()=>{
         if(cleared){ partyContinueFromCorpses(); return; }
         if(mon.dead) return;
@@ -5499,46 +5552,42 @@ function screenPartyCombat(){
         if(mon.dead) return;
         GF._partyTarget=mon.idx; partyStartAutoAttack();
       }},[
-      portraitWrap,
+      artStack,
       h("div",{style:{fontWeight:"bold",fontSize:"13px"}},[mon.label]),
       h("div",{class:"muted",style:{fontSize:"11px"}},[`${mon.hp} / ${mon.max_hp}`]),
       h("div",{class:"party-minibar",style:{height:"7px",marginTop:"3px"}},[
         h("i",{style:{width:(mon.max_hp?mon.hp/mon.max_hp*100:0)+"%",background:"linear-gradient(90deg,#a83535,var(--hp))"}}),
       ]),
       h("div",{class:"muted",style:{fontSize:"11px",marginTop:"4px"}},[
-        mon.dead?"defeated":(target?`\u25BC ${target.character_name}`:"choosing a target")]),
+        mon.dead?"defeated":(target?`\u25C0 ${target.character_name}`:"choosing a target")]),
     ]);
-    mobRow.appendChild(tile);
+    mobGrid.appendChild(tile);
   }
-
-  const noticeHost=h("div",{style:{position:"relative"}},[mobRow, combatNoticeLayer()]);
-  root.appendChild(noticeHost);
-  root.appendChild(h("div",{class:"muted",style:{textAlign:"center",fontSize:"12px",marginTop:"-4px"}},[
-    cleared
-      ? (Net.isPartyLeader()
-          ? "Click to continue wandering \u2014 anything left in the pool is littered."
-          : "Waiting for the leader to move the party on. Claim what you want first.")
-      : "click or hold a monster to attack it",
-  ]));
 
   const front=p.members.filter(m=>m.row_pos==="front" && !m.in_town);
   const back=p.members.filter(m=>m.row_pos!=="front" && !m.in_town);
-  const rankLabel=(text,sub)=>h("div",{style:{textAlign:"center",margin:"12px 0 6px"}},[
-    h("span",{style:{fontFamily:"Cinzel,Georgia,serif",fontSize:"11px",letterSpacing:"1px",color:"var(--muted)"}},[text]),
-    h("span",{class:"muted",style:{fontSize:"11.5px"}},[" \u00B7 "+sub]),
+  const colHead=(title,sub)=>h("div",{class:"party-col-head"},[
+    h("div",{class:"party-col-title"},[title]),
+    h("div",{class:"muted",style:{fontSize:"10.5px",lineHeight:"1.3"}},[sub]),
   ]);
-  root.appendChild(rankLabel("FRONT ROW","monsters strike here first"));
-  const frontRow=h("div",{class:"row gap",style:{justifyContent:"center",flexWrap:"wrap"}});
-  if(!front.length){
-    frontRow.appendChild(h("div",{class:"muted",style:{border:"1px dashed #4a5438",borderRadius:"8px",padding:"12px 16px",fontSize:"12.5px"}},
-      ["Nobody is holding the front \u2014 monsters pick a target at random"]));
-  }
-  for(const m of front) frontRow.appendChild(partyFighterNode(m,enc));
-  root.appendChild(frontRow);
-  root.appendChild(rankLabel("BACK ROW","safe while anyone holds the front"));
-  const backRow=h("div",{class:"row gap",style:{justifyContent:"center",flexWrap:"wrap"}});
-  for(const m of back) backRow.appendChild(partyFighterNode(m,enc));
-  root.appendChild(backRow);
+  const backCol=h("div",{class:"party-col"},[colHead("BACK","safe while anyone holds the front")]);
+  for(const m of back) backCol.appendChild(partyFighterNode(m,enc));
+  if(!back.length) backCol.appendChild(h("div",{class:"party-col-empty"},["nobody"]));
+  const frontCol=h("div",{class:"party-col"},[colHead("FRONT","monsters strike here first")]);
+  for(const m of front) frontCol.appendChild(partyFighterNode(m,enc));
+  if(!front.length) frontCol.appendChild(h("div",{class:"party-col-empty"},["nobody holds the front"]));
+
+  root.appendChild(h("div",{class:"party-arena"},[
+    h("div",{class:"party-side"},[backCol, frontCol]),
+    h("div",{class:"party-enemy"},[mobGrid, combatNoticeLayer()]),
+  ]));
+  root.appendChild(h("div",{class:"muted",style:{textAlign:"center",fontSize:"12px",marginTop:"6px"}},[
+    cleared
+      ? (Net.isPartyLeader()
+          ? "Click a fallen monster to continue wandering \u2014 anything left in the pool is littered."
+          : "Waiting for the leader to move the party on. Claim what you want first.")
+      : "click or hold a monster to attack it",
+  ]));
 
   if(!cleared && me && !me.in_town && !me.dead){
 
@@ -5560,6 +5609,15 @@ function screenPartyCombat(){
       if(r.ok===false){ combatNotice(r.error,"bad"); return; }
       if(r.character) partyAdoptCharacter(r.character);
     };
+
+    GF._combatUI={
+      useHealth:()=>quaff("health"),
+      useMana:()=>quaff("mana"),
+      useStamina:()=>quaff("stamina"),
+      useAntidote:()=>{ if(PS.canUseConsumable("antidote")) quaff("antidote"); },
+      castSpell1:()=>partyCastSlot(0),
+      castSpell2:()=>partyCastSlot(1),
+    };
     const potions=h("div",{class:"row combat-tools",style:{justifyContent:"center",marginTop:"12px",alignItems:"center"}},[
       mazeTool(keys.healthPotion,"\u2764\ufe0f",totalOf("health"),!PS.canUseConsumable(PS.bestAvailableConsumable("health")),
         "Drink a Health Potion.",()=>quaff("health")),
@@ -5580,12 +5638,16 @@ function screenPartyCombat(){
     }
   }
   const controls=h("div",{class:"row gap",style:{justifyContent:"center",marginTop:"14px",flexWrap:"wrap"}});
-  if(!cleared && me && !me.in_town && !me.dead){
+
+  if(me && !me.in_town && !me.dead){
     controls.appendChild(h("button",{onClick:async()=>{
       const r=await Net.partyApi("/api/party/row",{row:me.row_pos==="front"?"back":"front"});
       if(r.ok===false){ setToast(r.error); return; }
       await Net.partyRefresh(); render();
     }},[me.row_pos==="front"?"Fall back":"Step to the front"]));
+  }
+
+  if(!cleared && me && !me.in_town && !me.dead){
     controls.appendChild(h("button",{onClick:async()=>{
 
       await Net.partyApi("/api/party/town",{in_town:true});
@@ -5605,12 +5667,8 @@ function screenPartyCombat(){
 
   root.appendChild(h("div",{style:{marginTop:"14px"}},[
     h("div",{class:"hud-rail-title"},["COMBAT LOG"]),
-    (()=>{
-      const log=h("div",{class:"muted panel",style:{height:"170px",overflowY:"auto",fontSize:"12.5px",
-        display:"flex",flexDirection:"column",gap:"2px"}},(enc.log||[]).map(l=>h("div",{},[l])));
-      requestAnimationFrame(()=>{ if(log.isConnected) log.scrollTop=log.scrollHeight; });
-      return log;
-    })(),
+
+    h("div",{class:"muted panel party-log"},(enc.log||[]).slice(-40).map(l=>h("div",{},[l]))),
   ]));
   return root;
 }
@@ -5647,6 +5705,32 @@ function partyTryFireAttack(){
     render();
   });
 }
+
+async function partyCastSpell(spellId, alive){
+  const tier=PS.getSpellTier(spellId);
+  const def=tier?Balance.spellAtTier(spellId,tier):null;
+  if(!def){ combatNotice("You do not know that spell.","bad"); return; }
+  const readyAt=GF._partySpellCd&&GF._partySpellCd[spellId];
+  if(readyAt && Date.now()<readyAt){
+    combatNotice(`${Balance.SPELLS[spellId].name} is still on cooldown. ${((readyAt-Date.now())/1000).toFixed(1)}s to go.`,"bad");
+    return;
+  }
+  if(PS.current_mana<def.mana_cost){
+    combatNotice(`Not enough mana for ${Balance.SPELLS[spellId].name}. It costs ${def.mana_cost}, you have ${Math.floor(PS.current_mana)}.`,"bad");
+    return;
+  }
+  const list=alive&&alive.length?alive:((Net.partyEncounter&&Net.partyEncounter.monsters)||[]).filter(m=>!m.dead);
+  const idx=(GF._partyTarget!=null?GF._partyTarget:(list[0]?list[0].idx:0));
+  const r=await Net.partyApi("/api/party/encounter/cast",{spell_id:spellId, target_idx:idx});
+  if(r.ok===false){ combatNotice(r.error,"bad"); return; }
+  GF._partySpellCd=GF._partySpellCd||{};
+  GF._partySpellCd[spellId]=Date.now()+PS.getSpellCooldownMs(def.cooldown_ms||1000);
+  Net.partyEncounter=r.encounter;
+  if(r.character) partyAdoptCharacter(r.character);
+  render();
+
+  partySpellVisual(spellId, r);
+}
 function partyStopAutoAttack(){
   if(GF._partyAutoTimer){ clearInterval(GF._partyAutoTimer); GF._partyAutoTimer=null; }
 }
@@ -5672,11 +5756,26 @@ function partyAdoptCharacter(data){
     if(data._save_seq) PS._saveSeqFloor=Math.max(PS._saveSeqFloor||0, data._save_seq);
 
     const gained=Math.round((PS.lifetime_xp||0)-beforeXp);
-    if(gained>0) spawnFloat("player",`+${gained} XP`,"float-text-xp");
+
+    if(gained>0) spawnFloat("xpbar",`+${gained} XP`,"float-text-xp");
     if(PS.level>beforeLevel) setToast(`Level ${PS.level}!`);
   }catch(e){  }
 }
 
+function partySpellVisual(spellId, castResult){
+  if(spellId==="fireflies") spawnFireflyBurst();
+  if(castResult && castResult.rooted_until!=null) spawnEntangleRoots(castResult.rooted_until-Date.now());
+  else if(spellId==="entangle") spawnEntangleRoots(3000);
+}
+
+function partyCastSlot(slotIndex){
+  const slots=PS.getSpellSlots();
+  const spellId=slots[slotIndex];
+  if(!spellId){ combatNotice(`Spell slot ${slotIndex+1} is empty.`,"bad"); return; }
+  const enc=Net.partyEncounter;
+  const alive=enc?enc.monsters.filter(m=>!m.dead):[];
+  return partyCastSpell(spellId, alive);
+}
 function partySpellSlot(slotIndex, spellId, alive){
   const tier=PS.getSpellTier(spellId);
   const def=tier?Balance.spellAtTier(spellId,tier):null;
@@ -5694,13 +5793,7 @@ function partySpellSlot(slotIndex, spellId, alive){
         return;
       }
       const idx=(GF._partyTarget!=null?GF._partyTarget:(alive[0]?alive[0].idx:0));
-      const r=await Net.partyApi("/api/party/encounter/cast",{spell_id:spellId, target_idx:idx});
-      if(r.ok===false){ combatNotice(r.error,"bad"); return; }
-      GF._partySpellCd=GF._partySpellCd||{};
-      GF._partySpellCd[spellId]=Date.now()+PS.getSpellCooldownMs(def.cooldown_ms||1000);
-      Net.partyEncounter=r.encounter;
-      if(r.character) partyAdoptCharacter(r.character);
-      render();
+      await partyCastSpell(spellId, alive);
     }},[]);
   wrap.appendChild(iconBadge(spellIconSvg(spellId),size));
   wrap.appendChild(h("div",{class:"muted",style:{position:"absolute",bottom:"-15px",left:"0",right:"0",
@@ -5750,14 +5843,27 @@ function partyLootNode(enc){
 
     const kids=[partyLootNameNode(item)];
     if(claimed){
-      const rollText=(item.rolls||[]).map(r=>`${r.name} rolled ${r.roll}`).join(", ");
-      kids.push(h("div",{class:"muted",style:{fontSize:"11.5px"}},[
-        rollText?`${rollText} \u2014 ${winner.character_name} takes it`:`${winner.character_name} took it`]));
+
+      const rollBlock=h("div",{class:"muted"});
+      for(const r of (item.rolls||[])){
+        rollBlock.appendChild(h("div",{class:"loot-roll-line"},[`${r.name} rolled ${r.roll}`]));
+      }
+      rollBlock.appendChild(h("div",{class:"loot-roll-line",style:{color:"var(--good)",marginTop:"2px"}},
+        [`${winner.character_name} takes it`]));
+      kids.push(rollBlock);
     } else if((item.claims||[]).length){
       kids.push(h("div",{style:{fontSize:"11.5px",color:"var(--gold)"}},[
         item.claims.length>1
           ? `Contested by ${item.claims.map(c=>c.name).join(" and ")} \u2014 rolling`
           : `${item.claims[0].name} claimed it \u2014 three seconds to contest`]));
+
+      if(item.claim_opened_at){
+        const elapsed=Math.max(0,Date.now()-item.claim_opened_at);
+        const life=3000;
+        kids.push(h("div",{class:"loot-timer"},[
+          h("i",{style:{animationDuration:life+"ms", animationDelay:(-elapsed)+"ms"}}),
+        ]));
+      }
       if(!item.claims.some(c=>c.account_id===myId)){
         kids.push(h("button",{style:{width:"100%"},onClick:async()=>{
           const r=await Net.partyApi("/api/party/loot/claim",{loot_id:item.id});
@@ -7437,6 +7543,55 @@ function npcVignette(id){
 
 const NPC_PORTRAITS = {
 
+  party: (uid) => `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <radialGradient id="${uid}-glow" cx="50%" cy="62%" r="52%">
+        <stop offset="0%" stop-color="#ffb347" stop-opacity=".85"/>
+        <stop offset="55%" stop-color="#8a5a1e" stop-opacity=".28"/>
+        <stop offset="100%" stop-color="#12140f" stop-opacity="0"/>
+      </radialGradient>
+      <linearGradient id="${uid}-cloak" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#3f4a33"/><stop offset="100%" stop-color="#222a1b"/>
+      </linearGradient>
+    </defs>
+    <rect width="100" height="100" fill="#12140f"/>
+    <ellipse cx="50" cy="64" rx="46" ry="30" fill="url(#${uid}-glow)"/>
+    <!-- the ring of stones -->
+    <g fill="#4a4438" stroke="#2b271f" stroke-width="1.2">
+      <ellipse cx="34" cy="72" rx="6" ry="3.4"/><ellipse cx="50" cy="76" rx="6.5" ry="3.6"/>
+      <ellipse cx="66" cy="72" rx="6" ry="3.4"/>
+    </g>
+    <!-- logs and flame -->
+    <g>
+      <rect x="38" y="62" width="24" height="4.5" rx="2" fill="#3a2718" transform="rotate(-13 50 64)"/>
+      <rect x="38" y="64" width="24" height="4.5" rx="2" fill="#4a3220" transform="rotate(11 50 66)"/>
+      <path d="M50 40 C58 51 56 60 50 67 C44 60 42 51 50 40Z" fill="#ff8a2a"/>
+      <path d="M50 48 C54 55 53 61 50 66 C47 61 46 55 50 48Z" fill="#ffd24a"/>
+    </g>
+    <!-- three companions around it, backs to us -->
+    <g stroke="#1a1f14" stroke-width="1.4">
+      <g transform="translate(20,44)">
+        <path d="M0 34 C0 18 18 18 18 34Z" fill="url(#${uid}-cloak)"/>
+        <circle cx="9" cy="14" r="7.5" fill="#2f3826"/>
+        <path d="M2.5 13 C2.5 6 15.5 6 15.5 13 C15.5 17 2.5 17 2.5 13Z" fill="#232b1c"/>
+      </g>
+      <g transform="translate(62,40)">
+        <path d="M0 38 C0 20 20 20 20 38Z" fill="url(#${uid}-cloak)"/>
+        <circle cx="10" cy="15" r="8" fill="#2f3826"/>
+        <path d="M3 14 C3 6 17 6 17 14 C17 18.5 3 18.5 3 14Z" fill="#232b1c"/>
+      </g>
+      <g transform="translate(40,58)">
+        <path d="M0 30 C0 16 20 16 20 30Z" fill="#2b3323"/>
+        <circle cx="10" cy="12" r="7" fill="#39432c"/>
+      </g>
+    </g>
+    <!-- embers -->
+    <g fill="#ffcf7a">
+      <circle cx="42" cy="34" r="1.3" opacity=".85"/><circle cx="57" cy="28" r="1.1" opacity=".7"/>
+      <circle cx="49" cy="24" r="1" opacity=".55"/><circle cx="62" cy="38" r="1.2" opacity=".6"/>
+    </g>
+  </svg>`,
+
   merchant: (vid) => `<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg"><defs>${npcVignette(vid)}</defs>
     <circle cx="60" cy="60" r="60" fill="#14170f"/>
     <path d="M6 30h108l-8 12H14z" fill="#4a3826"/>
@@ -7867,8 +8022,6 @@ function screenTown(){
       ]),
 
       h("div",{class:"town-cell"},[
-
-        npcServiceCard("party","Party Lobby", Net.inParty()?`You are in a party of ${Net.party.size}.`:"Find company for the maze.",()=>{ GF.goto("partyLobby"); }),
         npcServiceCard("auction","Auction House","Trade with other travelers.",()=>{ Net.auctionCache=null; GF.goto("auctionHouse"); }),
       ]),
       h("div",{class:"town-cell"},[
@@ -8219,12 +8372,24 @@ function partyRelayMaze(maze){
   Net.partyApi("/api/party/maze",{maze:payload, area_level:maze.depth, is_night:!!maze.isNight});
 }
 
-function partyAdoptMaze(maze, areaLevel, isNight){
+function partyRequestMaze(){
+  const now=Date.now();
+  if(GF._partyMazeAskedAt && now-GF._partyMazeAskedAt<1500) return;
+  GF._partyMazeAskedAt=now;
+  Net.partyApi("/api/party/maze").then(r=>{
+    if(r && r.ok!==false && r.maze) partyAdoptMaze(r.maze, r.area_level, r.is_night);
+  });
+}
+function partyAdoptMaze(maze, areaLevel, isNight, handover){
   if(!maze) return;
-  if(Net.isPartyLeader()) return;
+
+  if(Net.isPartyLeader() && !handover) return;
 
   if(!maze.cells || !maze.cells.length || !maze.size){ return; }
   GF.overworld_snapshot=Object.assign({},maze,{depth:areaLevel||maze.depth, isNight:!!isNight});
+
+  GF.maze_depth=areaLevel||maze.depth;
+  GF.ventureDepth=GF.maze_depth;
   GF.isNight=!!isNight;
   if(GF.screen!=="maze" && GF.screen!=="partyCombat") GF.goto("maze");
   else render();
@@ -8244,6 +8409,10 @@ function partyApplyStep(msg){
 }
 function ensureMaze(depth){
 
+  if(Net.inParty() && !Net.isPartyLeader()){
+    if(!GF.overworld_snapshot || !GF.overworld_snapshot.cells) partyRequestMaze();
+    return GF.overworld_snapshot || null;
+  }
   if(!GF.overworld_snapshot || GF.overworld_snapshot.depth!==depth){
     GF.overworld_snapshot=generateMaze(depth, GF.isNight);
 
@@ -8472,8 +8641,16 @@ function mazeOverlayScreen(overlay){
 }
 
 function screenMaze(){
+
   const depth=GF.maze_depth||PS.level;
   const maze=ensureMaze(depth);
+  if(!maze){
+    const wait=h("div",{});
+    wait.appendChild(h("h2",{},["Finding the party"]));
+    wait.appendChild(h("div",{class:"lore"},[
+      "Waiting for your leader's map of these woods. It will arrive in a moment."]));
+    return wait;
+  }
 
   reportQuestExploreIfEligible(maze);
   const root=h("div",{});
@@ -8489,7 +8666,15 @@ function screenMaze(){
 
   const gridAspectRatio=`${maze.size} / ${maze.sizeH}`;
 
-  const forestName=Balance.TOWN_NAMES[Math.min(Balance.TOWN_NAMES.length-1, (PS.getClassData().tier||1)-1)];
+  const forestName=(()=>{
+    let tier=PS.getClassData().tier||1;
+    if(Net.inParty() && Net.party){
+      const leader=Net.party.members.find(m=>m.is_leader);
+      const leaderClass=leader && DL.getClass ? DL.getClass(leader.class_id) : null;
+      if(leaderClass && leaderClass.tier) tier=leaderClass.tier;
+    }
+    return Balance.TOWN_NAMES[Math.min(Balance.TOWN_NAMES.length-1, Math.max(0, tier-1))];
+  })();
   const plaqueText=`${forestName} · Area Level ${depth}${maze.isNight?" · Nightfall":""}`;
 
   let gridArea;
@@ -8773,6 +8958,11 @@ function partyReportStep(maze, targetIdx, cost){
 }
 function onStepMaze(maze,targetIdx){
 
+  if(Net.inParty() && !Net.isPartyLeader()){
+    mazeToast("Your leader chooses the way.","bad");
+    return;
+  }
+
   if(PS.current_stamina<=0){
     mazeToast(MAZE_EXHAUSTED_TOAST,"bad");
     render();
@@ -8796,7 +8986,7 @@ function onStepMaze(maze,targetIdx){
 
   const stepCost=Balance.staminaCostPerStep(PS.countValidEquippedItems());
   if(Net.inParty()){
-    if(!Net.isPartyLeader()) return;
+
     partyReportStep(maze, targetIdx, stepCost);
   } else {
     PS.spendStamina(stepCost);
@@ -8826,6 +9016,8 @@ function onStepMaze(maze,targetIdx){
 
     GF.ventureLockDepth=null;
     autosave();
+
+    if(Net.inParty() && Net.isPartyLeader()) Net.partyApi("/api/party/descend",{area_level:nextDepth});
     GF.mazeOverlay={text:`Advanced to area level ${nextDepth}!`, andThen:()=>{ GF.overworld_snapshot=null; GF.goto("maze",{maze_depth:nextDepth}); }};
     render();
     return;
@@ -13256,6 +13448,20 @@ function legacyGearSection(){
 }
 
 const CHANGELOG=[
+  { version:"v0.30.4", date:"2026-08-06 23:40", notes:[
+    "Everyone in a party now explores the same maze. A follower's game was quietly building a world of its own, at its own area level and with its own wandering monsters, which is why the boards never matched and why a follower could be attacked by something nobody else could see.",
+    "Followers no longer wander off on their own, and the forest is named after the one the party is actually in.",
+    "Descending to the next area is something the whole party does together, with everyone seeing it happen and everyone credited with reaching it.",
+    "When a leader leaves, the party stays in the maze they left behind.",
+    "Fixed loot won on a roll disappearing shortly after you won it.",
+    "Fixed fleeing a fight pulling you straight back in with no way to leave.",
+    "The fight is laid out as a battle line now: your party on the left in two columns, with the front rank standing between everyone else and the monsters on the right. The combat log no longer scrolls.",
+    "Potion and spell shortcuts work in party fights, spells show their effects again, and experience floats over the experience bar where you would look for it.",
+    "You can change rows between fights, while the party decides whether to move on.",
+    "Contested loot shows the three-second window counting down, and each roll on its own line.",
+    "The Party Lobby has its own place in town, with a count of how many parties are looking for players.",
+    "Party level ranges are no longer capped. A party can accept anyone from level 1 to 100 if the leader wants.",
+  ]},
   { version:"v0.30.3", date:"2026-08-06 22:10", notes:[
     "Fixed being unable to damage anything in a party fight. Every swing was failing against the database and the failure was invisible, so it looked as though clicking did nothing at all.",
     "Errors during a party fight are now shown. They were being raised correctly and going nowhere.",
@@ -14730,6 +14936,7 @@ setInterval(()=>{
 },Balance.POTION_HEAL_TICK_MS);
 
 function idleRoamerTick(){
+  if(Net.inParty() && !Net.isPartyLeader()) return;
   if(PS.current_slot<0) return;
   if(GF.screen!=="maze") return;
   if(GF.mazeOverlay) return;
