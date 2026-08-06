@@ -52,8 +52,9 @@ body{
 
 #hud-main{grid-column:2;grid-row:2;overflow-y:auto;overflow-x:hidden;padding:16px 22px 26px;}
 
-#hud-main.centered{display:flex;flex-direction:column;padding-top:26px;}
-#hud-main.centered > *{margin-block:auto;margin-inline:auto;width:100%;max-width:1180px;}
+#hud-main.centered{display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
+  padding-top:48px;}
+#hud-main.centered > *{width:100%;max-width:1180px;margin-inline:0;}
 #hud-footer{grid-column:1 / -1;grid-row:3;border-top:1px solid var(--border);
   background:linear-gradient(180deg,#161911,#0d0f0b);display:flex;align-items:center;gap:22px;padding:10px 26px;}
 #hud-footer .hud-bars{flex:1;display:flex;flex-direction:column;gap:7px;min-width:0;}
@@ -490,6 +491,8 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
   flex-direction:row;align-items:flex-end;gap:12px;
 }
 .gear-compare-wrap:hover .item-hover-stack,.gear-compare-wrap.compare-open .item-hover-stack{display:flex;}
+
+.gear-compare-wrap .item-hover-stack.stack-flip{flex-direction:row-reverse;left:auto;right:0;}
 .gear-compare-wrap .compare-box{
   display:block;position:static;background:#000;color:#fff;
   padding:7px 10px;border-radius:4px;font-size:.8em;width:max-content;min-width:210px;max-width:320px;
@@ -1834,7 +1837,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.29-web",
+  GAME_VERSION:"v0.29.1-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
 
@@ -2054,7 +2057,7 @@ const Balance = {
     return this.SPELL_POWER_PCT_PER_INT;
   },
 
-  SPELL_CDR_CAP_PCT:50,
+  SPELL_CDR_MAX_PCT:100,
   ARCANE_CLASS_IDS:["wizard","sorcerer","warlock","summoner","archmage"],
   INT_HYBRID_CLASS_IDS:["treesinger","shadowbloom"],
   manaPerIntelligence(classId){
@@ -3486,7 +3489,7 @@ const PS = {
     return {leveledUp:after>before, newLevel:after};
   },
 
-  getSpellCdrPct(){ return clampf(this.gearBonus("spell_cdr"),0,Balance.SPELL_CDR_CAP_PCT); },
+  getSpellCdrPct(){ return clampf(this.gearBonus("spell_cdr"),0,Balance.SPELL_CDR_MAX_PCT); },
   getSpellCooldownMs(baseMs){ return Math.round((baseMs||0)*(1-this.getSpellCdrPct()/100)); },
   getSpellPowerPct(){
     let pct=this.gearBonus("spell_power");
@@ -5155,7 +5158,8 @@ function hudSpellSummary(){
     if(min==null||max==null) continue;
 
     const hits=Balance.SPELLS[spellId].hit_count||1;
-    const avg=(min+max)/2*hits*PS.getSpellEffectivenessMult();
+
+    const avg=(min+max)/2*hits*PS.getSpellEffectivenessMult()*(PS.hasQuadDamage()?4:1);
     const cdMs=PS.getSpellCooldownMs(def.cooldown_ms||1000);
     const dps=cdMs>0?avg/(cdMs/1000):avg;
     if(!best||dps>best.dps) best={spellId,def,tier,avg,cdMs,dps,name:Balance.SPELLS[spellId].name};
@@ -5164,12 +5168,20 @@ function hudSpellSummary(){
   const cdr=Math.round(PS.getSpellCdrPct());
   const power=Math.round(PS.getSpellPowerPct());
   const casts=best.cdMs>0?(1000/best.cdMs):1;
+
+  const spellSkillLevel=PS.getSpellcastingSkillLevel();
+  const spellSkillPct=Math.round(spellSkillLevel*Balance.WEAPON_SKILL_DAMAGE_PCT_PER_LEVEL*100);
   const parts=[
     `${best.name} (Tier ${tierRomanNumeral(best.tier)})`,
-    `Hit: ${Math.round(best.avg)} average, after +${power}% Spell Power`,
-    `Cooldown: ${(best.cdMs/1000).toFixed(2)}s${cdr>0?` (reduced ${cdr}%)`:""}`,
+    `Hit: ${Math.round(best.avg)} average`,
+    `Spell Power: +${power}% (Intelligence and gear)`,
+    spellSkillPct>0?`Spellcasting proficiency: +${spellSkillPct}% (level ${spellSkillLevel})`:null,
+    PS.hasQuadDamage()?`Quad Damage: x4 while the shrine holds (${PS.quad_dmg_rounds_left} rounds left)`:null,
+    best.cdMs<=0
+      ? `Cooldown: none. Reduced ${cdr}%, so only mana limits how often you cast.`
+      : `Cooldown: ${(best.cdMs/1000).toFixed(2)}s${cdr>0?` (reduced ${cdr}%)`:""}`,
     `Spell DPS: ${Math.round(best.avg)} / ${(best.cdMs/1000).toFixed(2)}s = ${Math.round(best.dps)}`,
-  ];
+  ].filter(Boolean);
   return h("div",{class:"panel"},[
     h("div",{class:"dps-block"},[
       h("div",{class:"hud-rail-title",style:{textAlign:"center",marginBottom:"1px"}},["Spell DPS"]),
@@ -5177,7 +5189,7 @@ function hudSpellSummary(){
       h("div",{class:"dps-factors"},[
         h("div",{class:"dps-factor"},[
           h("div",{class:"hud-rail-title"},["Spell Hit"]),
-          h("div",{class:"tooltip dps-factor-num","data-tip":`${best.name}, Tier ${tierRomanNumeral(best.tier)}.\nAverage hit after +${power}% Spell Power.`},[`${Math.round(best.avg)}`]),
+          h("div",{class:"tooltip dps-factor-num","data-tip":`${best.name}, Tier ${tierRomanNumeral(best.tier)}.\nAverage hit after +${power}% Spell Power${spellSkillPct>0?` and +${spellSkillPct}% Spellcasting proficiency`:""}.`},[`${Math.round(best.avg)}`]),
         ]),
         h("div",{class:"dps-times"},["\u00f7"]),
         h("div",{class:"dps-factor"},[
@@ -5196,7 +5208,12 @@ function hudCombatSummary(){
     `Base: ${Math.round((d.baseMin+d.baseMax)/2)}`,
     `Gear: +${Math.round(d.gearBonus)}`,
   ];
-  if(d.weaponSkillBonus) parts.push(`Weapon proficiency: +${Math.round(d.weaponSkillBonus)} (+${Math.round(d.weaponSkillPct)}%)`);
+
+  if(d.weaponSkillBonus){
+    const profType=PS.getEquippedWeaponType();
+    const profLabel=profType?(IF.WEAPON_TYPE_LABELS[profType]||"Weapon"):"Weapon";
+    parts.push(`${profLabel} proficiency: +${(d.weaponSkillPct*100).toFixed(0)}% (+${Math.round(d.weaponSkillBonus)} damage)`);
+  }
 
   if(d.intDmgBonus) parts.push(`Intelligence: +${Math.round(d.intDmgBonus)}`);
   parts.push(`Total: ${total}`);
@@ -5332,6 +5349,28 @@ function renderDeferredBySelect(){
   const el=document.activeElement;
   return !!(el && el.tagName==="SELECT" && el.isConnected);
 }
+
+function positionItemHoverStack(wrap){
+  const stack=wrap.querySelector(".item-hover-stack");
+  if(!stack) return;
+  stack.classList.remove("stack-flip");
+  const rect=stack.getBoundingClientRect();
+  if(!rect.width) return;
+  const MARGIN=8;
+  const overflowsRight=rect.right>window.innerWidth-MARGIN;
+  if(!overflowsRight) return;
+
+  const triggerRight=wrap.getBoundingClientRect().right;
+  if(triggerRight-rect.width>=MARGIN) stack.classList.add("stack-flip");
+}
+function installItemHoverStackPositioning(){
+  document.addEventListener("mouseover",(e)=>{
+    const wrap=e.target&&e.target.closest?e.target.closest(".gear-compare-wrap"):null;
+    if(!wrap) return;
+    positionItemHoverStack(wrap);
+  },true);
+}
+installItemHoverStackPositioning();
 function installSelectRenderGuard(){
 
   const flush=(force)=>{
@@ -5704,6 +5743,10 @@ function playerStatsCompactPanel(){
       cell("Crit Multiplier",PS.getCritMultiplierMax(),"x",0,false),
 
       cell("Attack Speed",Balance.PLAYER_BASE_ATTACK_SPEED,"/sec",Math.round(PS.gearBonus("attack_speed")),true),
+
+      cell("Spell Power",Math.round(PS.getSpellPowerPct())-Math.round(PS.gearBonus("spell_power")),"%",Math.round(PS.gearBonus("spell_power")),true),
+
+      cell("Cooldown Reduction",Math.round(PS.getSpellCdrPct())-Math.round(PS.gearBonus("spell_cdr")),"%",Math.round(PS.gearBonus("spell_cdr")),true),
     ]),
     col("Defense",[
       cell("Armor",Math.round(PS.getArmor())-Math.round(PS.gearBonus("armor")),"",Math.round(PS.gearBonus("armor")),false),
@@ -9138,7 +9181,7 @@ function screenCombat(){
           spawnFloat("player",`+${c.heal_amount} HP`,"float-text-heal");
         } else if(c.queued_hits!=null && c.rooted_until==null){
 
-          combatLog(cb,`You cast ${spell.name} at the ${cb.name}.`);
+          combatLog(cb,`You cast ${spell.name} at the ${cb.name}.${c.quad_damage?" (Quad Damage!)":""}`);
 
           if(spellId==="fireflies") spawnFireflyBurst();
         } else if(c.rooted_until!=null){
@@ -9844,7 +9887,7 @@ function skillsBonusPanel(){
   const spellcastingRow=h("div",{class:"row",style:{justifyContent:"space-between",alignItems:"center",marginBottom:"6px",gap:"10px"}},[
     h("div",{style:{minWidth:"70px"}},["Spellcasting"]),
     h("div",{style:{flex:"1"}},[bar(spPct,"bar-xp",true)]),
-    h("div",{class:"muted",style:{minWidth:"160px",textAlign:"right"}},[`Lv ${sp.level} (${sp.hitsIntoLevel}/${sp.hitsForNextLevel})`, spellEffPct>0?h("span",{style:{color:"var(--gold)"}},[` +${spellEffPct}% spell effect`]):null]),
+    h("div",{class:"muted",style:{minWidth:"160px",textAlign:"right"}},[`Lv ${sp.level} (${sp.hitsIntoLevel}/${sp.hitsForNextLevel})`, spellEffPct>0?h("span",{style:{color:"var(--gold)"}},[` +${spellEffPct}% spell damage`]):null]),
   ]);
 
   return h("div",{class:"panel",style:{marginTop:"12px",marginBottom:"12px"}},[
@@ -12386,6 +12429,16 @@ function legacyGearSection(){
 }
 
 const CHANGELOG=[
+  { version:"v0.29.1", date:"2026-08-06 05:10", notes:[
+    "Quad Damage now quadruples your spells too, not just your weapon. A caster who found a Furious Shrine was getting a buff that did nothing for the way they actually fight. Healing is deliberately left out of it.",
+    "Spell Cooldown Reduction is uncapped. It can go as far down as your build takes you, and at the very bottom a spell has no cooldown at all and only mana limits how often you cast.",
+    "Fixed weapon proficiency always reading +0%. The bonus was being applied correctly the whole time, but the figure shown was a hundred times too small. It also names the weapon now, so you can see which proficiency is paying.",
+    "Your Spellcasting proficiency is named in the Spell DPS breakdown, so it is clear that casting makes you better at casting. It was already applying, just folded into another line.",
+    "Spell Power and Cooldown Reduction are listed with your other offensive stats.",
+    "The Itemization Guide explains the roll medals and the item quality percentage, with the real icons and what each one means for refining.",
+    "Hovering an item in a rightmost column no longer pushes the Currently Equipped card off the screen; the comparison opens to the left instead.",
+    "The character select screen sits at the top and centres itself properly.",
+  ]},
   { version:"v0.29", date:"2026-08-06 03:20", notes:[
     "Kindle the Bonfire restores your mana. The mana restore was being queued and then never delivered, because the tick that hands it out was written but never started. Mana Potions drunk outside combat were affected by the same fault and now work too.",
     "Mana potions drop from monsters. They were missing from every loot band, so a caster could only ever buy mana while a melee character was handed health for free.",
@@ -12427,7 +12480,7 @@ const CHANGELOG=[
   ]},
   { version:"v0.28", date:"2026-08-05 22:30", notes:[
     "Intelligence now makes your spells hit harder, not just fill your mana pool. Every point grants Spell Power, most of all on the Wizard path and more on the two hybrids that lean into Intelligence than on anyone else, so a caster grows through the character they build rather than only through which spell tiers they could afford.",
-    "Spell Cooldown Reduction works. It rolled on gear and did nothing at all; it now genuinely shortens the wait between casts, capped at 50%.",
+    "Spell Cooldown Reduction works. It rolled on gear and did nothing at all; it now genuinely shortens the wait between casts.",
     "A Spell DPS panel appears beside your weapon DPS whenever you have a damaging spell slotted, showing what a cast is worth and how often you can cast it.",
     "Fixed the sidebar banner being too short for its own contents once the stats pane was expanded, which pushed the Menu button against the top edge and knocked the two banner halves out of line.",
     "The \"Currently playing\" line no longer appears when you are the only one online. It was listing you to yourself.",
@@ -13227,6 +13280,42 @@ function screenItemization(){
     affixPanel.appendChild(gridRow([IF.affixLabel(stat),...maxCells],{cols,noBorder:i===Balance.AFFIX_POOL.length-1}));
   });
   root.appendChild(affixPanel);
+
+  root.appendChild(h("h3",{},["Roll Quality"]));
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"8px"}},[
+    "Every affix rolls on one of twenty evenly spaced steps between its minimum and the maximum above. The top five steps earn a medal, shown next to the stat wherever an item is displayed, so you can tell a lucky roll from an ordinary one without doing the arithmetic yourself.",
+  ]));
+  const medalPanel=h("div",{class:"panel",style:{marginBottom:"16px"}});
+  const medalCols="52px 1.1fr 1fr 3fr";
+  medalPanel.appendChild(gridRow(["","Medal","Roll","What it means"],{cols:medalCols,header:true}));
+  const medalMeaning={
+    diamond:"A perfect roll. This stat cannot be improved by refining.",
+    platinum:"Near-perfect. Refining is almost certainly a waste of materials.",
+    gold:"Strong. Refining has some upside, but not much of it.",
+    silver:"Good. Worth refining if the item is otherwise a keeper.",
+    bronze:"Above average, and a clear candidate for refining.",
+  };
+  IF.ROLL_MEDALS.forEach((medal,i)=>{
+    const swatch=h("div",{style:{display:"flex",alignItems:"center"}},[IF.medalNode(medal,20)]);
+    const range=medal.min===20?"20 of 20":`${medal.min} of 20`;
+    medalPanel.appendChild(gridRow([
+      swatch,
+      h("span",{style:{color:medal.color,fontWeight:"bold"}},[medal.name]),
+      `${range} (${Math.round(medal.min/20*100)}%)`,
+      medalMeaning[medal.key]||"",
+    ],{cols:medalCols}));
+  });
+  medalPanel.appendChild(gridRow([
+    h("div",{}),
+    h("span",{class:"muted"},["No medal"]),
+    "1 to 15 of 20",
+    "An ordinary roll. Most affixes on most items land here, which is why the absence of a medal is the quiet default rather than a mark against the item.",
+  ],{cols:medalCols,noBorder:true}));
+  root.appendChild(medalPanel);
+  root.appendChild(h("div",{class:"muted",style:{marginBottom:"16px"}},[
+    `An item's title also carries an overall quality percentage: every rolled affix's step added up against a perfect score. An item whose three affixes rolled 20, 18 and 11 out of 20 scores ${Math.round((20+18+11)/60*100)}%. Fixed affixes that never roll, such as those on a set piece, are left out of that sum entirely rather than counted as perfect. `,
+    `The percentage is hidden on ${IF.QUALITY_SUMMARY_MIN_RARITIES.map(r=>Balance.RARITY_DISPLAY_NAMES[r]||r).join(" and ")} items, where one or two affixes make a perfect score too easy to mean anything. Their individual stat medals still show.`,
+  ]));
 
   return root;
 }

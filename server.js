@@ -3027,7 +3027,11 @@ const CB = {
   // nothing -- the exact same dead-affix state Life on Hit was in. It is a caster's attack speed,
   // so it now actually shortens cooldowns. Hard-capped, because a cooldown approaching zero turns
   // every fight into a single spell spammed without limit and makes mana the only real cost.
-  SPELL_CDR_CAP_PCT: 50,
+  // v0.29.1 (credit: Gwen): the 50% cap is gone. The 100 that remains is an arithmetic floor, not
+  // a balance cap -- past 100% the reduction yields a negative cooldown, which every timer and the
+  // ready-at comparison below would read as nonsense. At 100% a spell has no cooldown and mana
+  // becomes the only limiter, which is the intended consequence. Mirrors Balance.SPELL_CDR_MAX_PCT.
+  SPELL_CDR_MAX_PCT: 100,
   ARCANE_CLASS_IDS: ["wizard", "sorcerer", "warlock", "summoner", "archmage"],
   INT_HYBRID_CLASS_IDS: ["treesinger", "shadowbloom"],
   // v0.22.7 (#18): player crit floor dropped from 1.75 to 1.5, mirroring index.html's
@@ -3678,7 +3682,7 @@ function combatGetSpellEffectivenessMult(data) {
 // function so the client can mirror the identical clamp -- if the two disagreed, the client would
 // offer a cast the server then refuses as still on cooldown.
 function combatGetSpellCdrPct(data) {
-  return cbClampf(combatGearBonus(data, "spell_cdr"), 0, CB.SPELL_CDR_CAP_PCT);
+  return cbClampf(combatGearBonus(data, "spell_cdr"), 0, CB.SPELL_CDR_MAX_PCT);
 }
 // A spell's effective cooldown for this character, in milliseconds.
 function combatGetSpellCooldownMs(data, baseCooldownMs) {
@@ -5434,15 +5438,30 @@ app.post("/api/combat/:sessionId/cast", requireAuth, (req, res) => {
   cooldowns[spellId] = now + combatGetSpellCooldownMs(data, spell.cooldown_ms);
   const skillResult = combatRegisterSpellcastHit(data);
 
+  // v0.29.1 (credit: Gwen): Quad Damage now multiplies SPELL damage too. It only ever scaled the
+  // weapon swing (see quadActiveThisRound in the attack route), so a caster who found a Furious
+  // Shrine got a buff that did nothing for the way they actually fight -- and the shrine's own
+  // description promises to quadruple "your damage output" without qualification.
+  //
+  // Applied to DAMAGE magnitudes only, deliberately not to Heal. Quadrupling a heal would turn a
+  // damage shrine into the strongest sustain in the game for the rounds it lasts, which is a
+  // different buff wearing the same name. Entangle's root duration and every cooldown are
+  // likewise untouched: they are utility, not magnitude, which is the same line
+  // combatGetSpellEffectivenessMult() already draws.
+  //
+  // spellMult is what every damage number below scales by; `mult` stays as the un-quadrupled
+  // value so Heal keeps reading it.
   const mult = combatGetSpellEffectivenessMult(data);
-  const castResult = { spell_id: spellId };
+  const quadActiveForSpell = combatHasQuadDamage(data);
+  const spellMult = quadActiveForSpell ? mult * 4 : mult;
+  const castResult = { spell_id: spellId, quad_damage: quadActiveForSpell };
   if (spell.effect === "heal") {
     const maxHp = combatGetMaxHp(data);
     const amount = Math.round(spell.heal_amount * mult);
     data.current_hp = Math.min(maxHp, (data.current_hp || 0) + Math.round(amount));
     castResult.heal_amount = amount;
   } else if (spell.effect === "fireflies" || spell.effect === "drain") {
-    const scaledMin = Math.round(spell.hit_min * mult), scaledMax = Math.round(spell.hit_max * mult);
+    const scaledMin = Math.round(spell.hit_min * spellMult), scaledMax = Math.round(spell.hit_max * spellMult);
     const intervalMs = Math.round(spell.duration_ms / spell.hit_count);
     const dot = { spell_id: spellId, hits_remaining: spell.hit_count, next_hit_at: now + intervalMs, interval_ms: intervalMs, dmg_min: scaledMin, dmg_max: scaledMax };
     // v0.23.1 (#2): Verdant Siphon's effect:"drain" is otherwise IDENTICAL to Fireflies' queued-
@@ -5463,7 +5482,7 @@ app.post("/api/combat/:sessionId/cast", requireAuth, (req, res) => {
     // damage magnitude (unlike the root duration/cooldown just above).
     const dotHitCount = spellDef.dot_hit_count || 6;
     const dotIntervalMs = Math.round((spellDef.dot_duration_ms || 2000) / dotHitCount);
-    const scaledDotMin = Math.round(spell.dot_min * mult), scaledDotMax = Math.round(spell.dot_max * mult);
+    const scaledDotMin = Math.round(spell.dot_min * spellMult), scaledDotMax = Math.round(spell.dot_max * spellMult);
     spellDots.push({ spell_id: spellId, hits_remaining: dotHitCount, next_hit_at: now + dotIntervalMs, interval_ms: dotIntervalMs, dmg_min: scaledDotMin, dmg_max: scaledDotMax });
     castResult.queued_hits = dotHitCount;
   }
