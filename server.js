@@ -3151,6 +3151,10 @@ const CB = {
   // Balance.WEAPON_SKILL_DAMAGE_PCT_PER_LEVEL in index.html (see combatGetDamageRange()).
   WEAPON_SKILL_HIT_STEP: 100, WEAPON_SKILL_DAMAGE_PCT_PER_LEVEL: 0.01,
   KILL_STREAK_MAGIC_FIND_PCT_PER_KILL: 1,
+  // v0.30 (Gwen): named rather than left as a bare 500 inside combatGetMagicFind(), because the
+  // party magic-find ceiling has to be the same number and a second literal would drift.
+  // Mirrors Balance.MAGIC_FIND_CAP_PCT in index.html.
+  MAGIC_FIND_CAP_PCT: 500,
   // v0.20 (#7): must stay in sync with Balance.SHRINE_MAGIC_FIND_PCT in index.html -- this
   // was missing entirely server-side until the same bug-hunt that fixed the round-tick sync
   // issue below turned it up: combatGetMagicFind() was still reading the OLD wall-clock
@@ -3794,7 +3798,7 @@ function combatGetMagicFind(data, session) {
   // LEGITIMACY comment above the combat_sessions table) -- the bonus itself is still applied here,
   // server-side, so it can't be forged past this point even though the flag's origin is trusted.
   const nightBonus = session && session.is_night ? CB.NIGHT_MAGIC_FIND_BONUS_PCT : 0;
-  return cbClampf(combatGearBonus(data, "magic_find") + shrineBonus + nightBonus + (data.kill_streak || 0) * CB.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL, 0, 500);
+  return cbClampf(combatGearBonus(data, "magic_find") + shrineBonus + nightBonus + (data.kill_streak || 0) * CB.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL, 0, CB.MAGIC_FIND_CAP_PCT);
 }
 function combatGetGoldFindMult(data, session) {
   const nightBonus = session && session.is_night ? CB.NIGHT_GOLD_FIND_BONUS_PCT : 0;
@@ -7072,6 +7076,1074 @@ app.post("/api/auction/:id/buy", requireAuth, (req, res) => {
 
 const server = http.createServer(app);
 
+
+/* ==================================================================================
+   CO-OP MULTIPLAYER -- PARTY CORE                                    (v0.30, Gwen)
+   ==================================================================================
+   Parties of up to 4 share one maze, one set of encounters and one loot pool.
+
+   ARCHITECTURE NOTE, and the single most important thing to understand here:
+   solo play is NOT touched by any of this. Solo combat keeps its own combat_sessions
+   table, its own routes and its own server pusher entry, exactly as before. Party
+   combat is a SECOND, parallel system (party_encounters below). That is a deliberate
+   choice -- converging them would mean rewriting the most battle-tested code in the
+   game on the same night a large feature ships. The cost is that combat rules now
+   exist in two places and can drift; that is a real debt and it is written down here
+   rather than discovered later.
+
+   MAZE AUTHORITY: the leader's client generates the maze exactly as it does in solo
+   play and relays the layout to the server, which stores it and forwards it to
+   followers. The server does NOT generate or validate the maze yet -- it is the same
+   client-trust model solo play already has (see the SCOPE NOTE ON MAZE LEGITIMACY
+   above), with the same known gap. The stakes are higher here, because a dishonest
+   leader would now be farming on behalf of three other accounts rather than only
+   themselves, so server-side maze generation is the natural next step. Deliberate,
+   discussed, and deferred.
+   ================================================================================== */
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS parties (
+    id TEXT PRIMARY KEY,
+    leader_account_id INTEGER NOT NULL,
+    min_level INTEGER NOT NULL DEFAULT 1,
+    max_level INTEGER NOT NULL DEFAULT 99,
+    status TEXT NOT NULL DEFAULT 'open',
+    maze_json TEXT,
+    area_level INTEGER NOT NULL DEFAULT 1,
+    is_night INTEGER NOT NULL DEFAULT 0,
+    kill_streak INTEGER NOT NULL DEFAULT 0,
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS party_members (
+    party_id TEXT NOT NULL,
+    account_id INTEGER NOT NULL,
+    slot INTEGER NOT NULL,
+    username TEXT NOT NULL,
+    character_name TEXT NOT NULL,
+    class_id TEXT NOT NULL DEFAULT '',
+    level INTEGER NOT NULL DEFAULT 1,
+    hardcore INTEGER NOT NULL DEFAULT 0,
+    join_order INTEGER NOT NULL,
+    row_pos TEXT NOT NULL DEFAULT 'back',
+    in_town INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (party_id, account_id)
+  );
+`);
+
+const PARTY_MAX = 4;
+// The party's own kill counter is worth a TENTH of what a solo kill streak is worth, and it is
+// counted ONCE for the party rather than once per member (Gwen's spec). A party of four does not
+// brew four streaks at the same time; it brews one, slowly. 5,000 kills reaches the cap on streak
+// alone, which is a long delve's worth of value rather than a free ride.
+const PARTY_MF_PER_KILL = 0.1;
+
+function partyNewId() { return "p" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+
+function partyRow(partyId) {
+  return db.prepare("SELECT * FROM parties WHERE id = ?").get(partyId) || null;
+}
+function partyMembers(partyId) {
+  return db.prepare("SELECT * FROM party_members WHERE party_id = ? ORDER BY join_order ASC").all(partyId);
+}
+function partyForAccount(accountId) {
+  const m = db.prepare("SELECT party_id FROM party_members WHERE account_id = ?").get(accountId);
+  return m ? partyRow(m.party_id) : null;
+}
+function partyMemberRow(partyId, accountId) {
+  return db.prepare("SELECT * FROM party_members WHERE party_id = ? AND account_id = ?").get(partyId, accountId) || null;
+}
+function partyTouch(partyId, fields) {
+  const f = Object.assign({}, fields || {});
+  const keys = Object.keys(f);
+  const setSql = (keys.length ? keys.map((k) => `${k} = ?`).join(", ") + ", " : "") + "updated_at = ?";
+  db.prepare(`UPDATE parties SET ${setSql} WHERE id = ?`).run(...keys.map((k) => f[k]), nowIso(), partyId);
+}
+
+/* ---------------- magic find ----------------
+   Gwen's rule: the party finds loot at the COMBINED rate of everyone in it, not at each member's
+   own rate. A player who brings nothing still benefits from what everyone else brought, and a
+   player with good gear makes the whole party richer -- which is the incentive to group up.
+   Sum every member's own total Magic Find (gear, shrines, night delve -- whatever they each
+   already have), then add the party streak once, then clamp to the same 500% ceiling solo play
+   uses. Deliberately generous; the ceiling is what stops it running away. */
+function partyMagicFindBreakdown(partyId) {
+  const members = partyMembers(partyId);
+  const party = partyRow(partyId);
+  const rows = [];
+  let membersTotal = 0;
+  for (const m of members) {
+    const data = loadCharacterRow(m.account_id, m.slot);
+    if (!data) continue;
+    // Reuse the SOLO magic-find function verbatim so a member's contribution is computed exactly
+    // the way their own character sheet computes it -- one source of truth for what a player's
+    // Magic Find is, whatever context asks.
+    const own = combatGetMagicFind(data, { is_night: party ? party.is_night : 0 });
+    membersTotal += own;
+    rows.push({ account_id: m.account_id, character_name: m.character_name, magic_find: Math.round(own) });
+  }
+  const streakKills = party ? party.kill_streak || 0 : 0;
+  const streakPct = streakKills * PARTY_MF_PER_KILL;
+  const raw = membersTotal + streakPct;
+  const total = cbClampf(raw, 0, CB.MAGIC_FIND_CAP_PCT);
+  return {
+    rows,
+    members_total: Math.round(membersTotal),
+    streak_kills: streakKills,
+    streak_pct: Math.round(streakPct),
+    raw: Math.round(raw),
+    total: Math.round(total),
+    cap: CB.MAGIC_FIND_CAP_PCT,
+    at_cap: raw >= CB.MAGIC_FIND_CAP_PCT,
+  };
+}
+
+/* ---------------- public shape ---------------- */
+function partyPublicState(partyId) {
+  const party = partyRow(partyId);
+  if (!party) return null;
+  const members = partyMembers(partyId).map((m) => {
+    const data = loadCharacterRow(m.account_id, m.slot);
+    return {
+      account_id: m.account_id,
+      username: m.username,
+      character_name: m.character_name,
+      class_id: m.class_id,
+      level: m.level,
+      hardcore: !!m.hardcore,
+      is_leader: m.account_id === party.leader_account_id,
+      row_pos: m.row_pos,
+      in_town: !!m.in_town,
+      join_order: m.join_order,
+      // Live vitals for the in-maze roster. Read fresh rather than cached, because a member's HP
+      // changes from their own combat actions on their own request thread.
+      hp: data ? Math.round(data.current_hp || 0) : 0,
+      max_hp: data ? Math.round(combatGetMaxHp(data)) : 0,
+      mana: data ? Math.round(data.current_mana || 0) : 0,
+      max_mana: data ? Math.round(combatGetMaxMana(data)) : 0,
+      stamina: data ? Math.round(data.current_stamina || 0) : 0,
+      max_stamina: data ? Math.round(combatGetMaxStamina(data)) : 0,
+      dead: data ? (data.current_hp || 0) <= 0 : false,
+    };
+  });
+  return {
+    id: party.id,
+    leader_account_id: party.leader_account_id,
+    min_level: party.min_level,
+    max_level: party.max_level,
+    status: party.status,
+    area_level: party.area_level,
+    is_night: !!party.is_night,
+    note: party.note,
+    size: members.length,
+    max_size: PARTY_MAX,
+    members,
+    magic_find: partyMagicFindBreakdown(partyId),
+    // The party can only move as far as its weakest walker. A member who has stepped out to town
+    // is excluded entirely -- that is the whole point of the town exception.
+    stamina_gate: partyStaminaGate(members),
+  };
+}
+
+function partyStaminaGate(members) {
+  const walking = members.filter((m) => !m.in_town && !m.dead);
+  if (walking.length === 0) return { blocked: true, who: null, stamina: 0, reason: "nobody_in_maze" };
+  let low = walking[0];
+  for (const m of walking) if (m.stamina < low.stamina) low = m;
+  return {
+    blocked: low.stamina <= 0,
+    who: low.character_name,
+    account_id: low.account_id,
+    stamina: low.stamina,
+    max_stamina: low.max_stamina,
+  };
+}
+
+/* ---------------- broadcast ----------------
+   Rides the SAME per-account WebSocket the chat and the solo combat pusher already use, so there
+   is one socket per player and no second connection to manage. Every party broadcast carries a
+   monotonically increasing sequence number: with four clients receiving independently, a client
+   that processes an older message after a newer one would render a stale roster or replay a dead
+   monster's damage. Clients drop anything they have already seen. */
+let partySeq = 0;
+function partyBroadcast(partyId, payload) {
+  const members = partyMembers(partyId);
+  const ids = new Set(members.map((m) => m.account_id));
+  const body = JSON.stringify(Object.assign({ party_id: partyId, seq: ++partySeq }, payload));
+  for (const client of chatClients) {
+    if (client.readyState === client.OPEN && ids.has(client.accountId)) client.send(body);
+  }
+}
+function partyBroadcastState(partyId) {
+  const state = partyPublicState(partyId);
+  if (state) partyBroadcast(partyId, { type: "party_state", state });
+}
+// A system line in party chat. Not persisted: a party is temporary, and a player who rejoins one
+// later should not be able to read a scrollback from a party they were not in at the time.
+function partySystem(partyId, message) {
+  partyBroadcast(partyId, { type: "party_chat", system: true, message, created_at: nowIso() });
+}
+
+/* ---------------- lifecycle ---------------- */
+function partyDisband(partyId, reason) {
+  partySystem(partyId, reason || "The party has disbanded.");
+  partyBroadcast(partyId, { type: "party_disbanded" });
+  db.prepare("DELETE FROM party_members WHERE party_id = ?").run(partyId);
+  db.prepare("DELETE FROM party_encounters WHERE party_id = ?").run(partyId);
+  db.prepare("DELETE FROM parties WHERE id = ?").run(partyId);
+}
+
+/* Removing a member is the one place several rules meet, so they all live here rather than being
+   repeated at each call site (leave, disconnect, hardcore death):
+     - the party reopens for matchmaking whenever it drops below the cap,
+     - leadership passes to the next member by JOIN ORDER (Gwen's rule) rather than being elected,
+     - a party with nobody left is deleted rather than lingering as an empty row. */
+function partyRemoveMember(partyId, accountId, reason) {
+  const party = partyRow(partyId);
+  if (!party) return;
+  const member = partyMemberRow(partyId, accountId);
+  if (!member) return;
+  db.prepare("DELETE FROM party_members WHERE party_id = ? AND account_id = ?").run(partyId, accountId);
+  const remaining = partyMembers(partyId);
+  if (remaining.length === 0) {
+    db.prepare("DELETE FROM party_encounters WHERE party_id = ?").run(partyId);
+    db.prepare("DELETE FROM parties WHERE id = ?").run(partyId);
+    return;
+  }
+  let leaderChanged = false;
+  if (party.leader_account_id === accountId) {
+    const next = remaining[0]; // join_order ASC -- the longest-standing member takes over
+    db.prepare("UPDATE parties SET leader_account_id = ? WHERE id = ?").run(next.account_id, partyId);
+    leaderChanged = true;
+  }
+  partyTouch(partyId, { status: remaining.length >= PARTY_MAX ? "full" : "open" });
+  partySystem(partyId, `${member.character_name} ${reason || "left the party"} (${remaining.length}/${PARTY_MAX}).`);
+  if (leaderChanged) {
+    const next = partyMembers(partyId)[0];
+    partySystem(partyId, `${next.character_name} is now leading.`);
+  }
+  partyBroadcastState(partyId);
+}
+
+/* ---------------- routes ---------------- */
+
+// The lobby list. Only parties that would actually accept THIS character are shown, because a
+// list full of parties you cannot join is a list you stop reading.
+app.get("/api/party/list", requireAuth, (req, res) => {
+  const slot = Number(req.query.slot);
+  const data = loadCharacterRow(req.account.id, slot);
+  const level = data ? data.level : 1;
+  const rows = db.prepare("SELECT * FROM parties ORDER BY created_at DESC LIMIT 40").all();
+  const out = [];
+  for (const p of rows) {
+    const members = partyMembers(p.id);
+    if (members.length >= PARTY_MAX) continue;
+    if (level < p.min_level || level > p.max_level) continue;
+    const leader = members.find((m) => m.account_id === p.leader_account_id) || members[0];
+    if (!leader) continue;
+    out.push({
+      id: p.id,
+      leader_name: leader.character_name,
+      leader_level: leader.level,
+      min_level: p.min_level,
+      max_level: p.max_level,
+      size: members.length,
+      max_size: PARTY_MAX,
+      area_level: p.area_level,
+      note: p.note,
+      magic_find: partyMagicFindBreakdown(p.id).total,
+    });
+  }
+  res.json({ ok: true, parties: out, your_level: level });
+});
+
+app.post("/api/party/create", requireAuth, (req, res) => {
+  const slot = Number(req.body?.slot);
+  const data = loadCharacterRow(req.account.id, slot);
+  if (!data) return res.status(400).json({ error: "No character in that slot." });
+  if (partyForAccount(req.account.id)) return res.status(400).json({ error: "You are already in a party." });
+  const spread = Math.max(1, Math.min(20, Number(req.body?.spread) || 3));
+  const note = String(req.body?.note || "").slice(0, 90);
+  const id = partyNewId();
+  const now = nowIso();
+  db.prepare(
+    `INSERT INTO parties (id, leader_account_id, min_level, max_level, status, area_level, is_night, kill_streak, note, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'open', 1, 0, 0, ?, ?, ?)`
+  ).run(id, req.account.id, Math.max(1, data.level - spread), data.level + spread, note, now, now);
+  partyAddMemberRow(id, req.account.id, slot, req.account.username, data, 0);
+  res.json({ ok: true, party: partyPublicState(id) });
+});
+
+function partyAddMemberRow(partyId, accountId, slot, username, data, joinOrder) {
+  db.prepare(
+    `INSERT INTO party_members (party_id, account_id, slot, username, character_name, class_id, level, hardcore, join_order, row_pos, in_town)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`
+  ).run(
+    partyId, accountId, slot, username, data.character_name || username, data.class_id || "",
+    data.level || 1, data.hardcore ? 1 : 0, joinOrder,
+    // A new member starts in the BACK row. Walking into a fight and discovering you are tanking
+    // is a worse surprise than walking in and discovering you are not.
+    "back"
+  );
+}
+
+app.post("/api/party/join", requireAuth, (req, res) => {
+  const slot = Number(req.body?.slot);
+  const partyId = String(req.body?.party_id || "");
+  const data = loadCharacterRow(req.account.id, slot);
+  if (!data) return res.status(400).json({ error: "No character in that slot." });
+  if (partyForAccount(req.account.id)) return res.status(400).json({ error: "You are already in a party." });
+  const party = partyRow(partyId);
+  if (!party) return res.status(404).json({ error: "That party no longer exists." });
+  const members = partyMembers(partyId);
+  // The cap is absolute. Checked here, on the server, at the moment of joining -- two players
+  // clicking Join on the last slot at the same instant are serialised by the single-threaded
+  // runtime, so the second one reads a full party and is refused.
+  if (members.length >= PARTY_MAX) return res.status(400).json({ error: "That party is full." });
+  if (data.level < party.min_level || data.level > party.max_level) {
+    return res.status(400).json({ error: `That party is taking levels ${party.min_level} to ${party.max_level}.` });
+  }
+  const joinOrder = members.reduce((a, m) => Math.max(a, m.join_order), 0) + 1;
+  partyAddMemberRow(partyId, req.account.id, slot, req.account.username, data, joinOrder);
+  const size = members.length + 1;
+  partyTouch(partyId, { status: size >= PARTY_MAX ? "full" : "open" });
+  const mf = partyMagicFindBreakdown(partyId);
+  partySystem(partyId, `${data.character_name} joined the party (${size}/${PARTY_MAX}). Party Magic Find is now ${mf.total}%.`);
+  partyBroadcastState(partyId);
+  res.json({ ok: true, party: partyPublicState(partyId) });
+});
+
+app.post("/api/party/leave", requireAuth, (req, res) => {
+  const party = partyForAccount(req.account.id);
+  if (!party) return res.json({ ok: true, left: false });
+  partyRemoveMember(party.id, req.account.id, "left the party");
+  res.json({ ok: true, left: true });
+});
+
+app.get("/api/party/state", requireAuth, (req, res) => {
+  const party = partyForAccount(req.account.id);
+  if (!party) return res.json({ ok: true, party: null });
+  res.json({ ok: true, party: partyPublicState(party.id) });
+});
+
+// Leader-only settings. Narrowing the range never removes anyone already in the party -- it only
+// changes who can find it from here on (Gwen's spec).
+app.post("/api/party/settings", requireAuth, (req, res) => {
+  const party = partyForAccount(req.account.id);
+  if (!party) return res.status(400).json({ error: "You are not in a party." });
+  if (party.leader_account_id !== req.account.id) return res.status(403).json({ error: "Only the leader can change this." });
+  const fields = {};
+  if (req.body?.spread != null) {
+    const leader = partyMemberRow(party.id, req.account.id);
+    const spread = Math.max(1, Math.min(20, Number(req.body.spread) || 3));
+    fields.min_level = Math.max(1, (leader ? leader.level : 1) - spread);
+    fields.max_level = (leader ? leader.level : 1) + spread;
+  }
+  if (req.body?.note != null) fields.note = String(req.body.note).slice(0, 90);
+  partyTouch(party.id, fields);
+  partyBroadcastState(party.id);
+  res.json({ ok: true, party: partyPublicState(party.id) });
+});
+
+// Front row or back row. Any member sets their own -- this is not a leader decision, because the
+// player taking the damage should be the one choosing to take it.
+app.post("/api/party/row", requireAuth, (req, res) => {
+  const party = partyForAccount(req.account.id);
+  if (!party) return res.status(400).json({ error: "You are not in a party." });
+  const row = req.body?.row === "front" ? "front" : "back";
+  db.prepare("UPDATE party_members SET row_pos = ? WHERE party_id = ? AND account_id = ?").run(row, party.id, req.account.id);
+  partyBroadcastState(party.id);
+  res.json({ ok: true, row });
+});
+
+// Stepping out to town to rest, and coming back. While in town a member is not counted against
+// the stamina gate, so the rest of the party keeps exploring without them.
+app.post("/api/party/town", requireAuth, (req, res) => {
+  const party = partyForAccount(req.account.id);
+  if (!party) return res.status(400).json({ error: "You are not in a party." });
+  const inTown = !!req.body?.in_town;
+  db.prepare("UPDATE party_members SET in_town = ? WHERE party_id = ? AND account_id = ?").run(inTown ? 1 : 0, party.id, req.account.id);
+  const me = partyMemberRow(party.id, req.account.id);
+  partySystem(party.id, inTown
+    ? `${me.character_name} went back to town to rest. The party can keep moving.`
+    : `${me.character_name} rejoined the party in the maze.`);
+  partyBroadcastState(party.id);
+  res.json({ ok: true, in_town: inTown, maze: inTown ? null : party.maze_json });
+});
+
+
+/* ==================================================================================
+   CO-OP MULTIPLAYER -- SHARED ENCOUNTERS                             (v0.30, Gwen)
+   ==================================================================================
+   A party encounter is ONE row holding N monsters and pointing at a party of M players.
+   This is the second combat system referred to at the top of the party core; solo
+   combat_sessions rows are untouched and continue to work exactly as before.
+
+   WHY THIS IS NOT A TICK ENGINE. The existing solo pusher does not simulate frames --
+   it computes damage OWED from elapsed wall-clock time and settles it (see
+   combatCatchUpMonsterHits). That model extends to four players and four monsters
+   without any new machinery: there is simply more owed damage to settle per pass. The
+   party pusher below runs more often than the solo one (200ms vs 500ms) purely so the
+   combat log arrives in readable dribs rather than half-second clumps.
+
+   WHY THERE IS NO LOCKING. node:sqlite's DatabaseSync is synchronous and there is not a
+   single `await` anywhere in the combat path, so Node's single thread runs each request
+   to completion before starting the next. Four players attacking the same encounter are
+   already serialised by the runtime. This is worth stating explicitly because it is the
+   usual hard part of multiplayer combat and here it is free -- but it also means nothing
+   in this file may become async without revisiting that guarantee.
+   ================================================================================== */
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS party_encounters (
+    id TEXT PRIMARY KEY,
+    party_id TEXT NOT NULL,
+    area_level INTEGER NOT NULL,
+    is_night INTEGER NOT NULL DEFAULT 0,
+    monsters TEXT NOT NULL,
+    loot TEXT NOT NULL DEFAULT '[]',
+    log TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+`);
+
+const PARTY_PUSH_INTERVAL_MS = 200;
+const PARTY_LOG_LIMIT = 200;
+// Contested loot: a claim opens a window rather than resolving instantly, so a second player has
+// a real chance to contest something they wanted. Three seconds is long enough to react to and
+// short enough not to stall the party.
+const PARTY_LOOT_CLAIM_WINDOW_MS = 3000;
+// Experience bonus for grouping, on top of every player receiving the FULL kill reward.
+const PARTY_XP_BONUS_PCT = { 1: 0, 2: 5, 3: 10, 4: 15 };
+
+function partyEncounterFor(partyId) {
+  return db.prepare("SELECT * FROM party_encounters WHERE party_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1").get(partyId) || null;
+}
+function partyEncounterSave(id, fields) {
+  const keys = Object.keys(fields);
+  if (!keys.length) return;
+  db.prepare(`UPDATE party_encounters SET ${keys.map((k) => `${k} = ?`).join(", ")}, updated_at = ? WHERE id = ?`)
+    .run(...keys.map((k) => fields[k]), nowIso(), id);
+}
+function partyEncMonsters(enc) { try { return JSON.parse(enc.monsters); } catch (e) { return []; } }
+function partyEncLoot(enc) { try { return JSON.parse(enc.loot); } catch (e) { return []; } }
+function partyEncLog(enc) { try { return JSON.parse(enc.log); } catch (e) { return []; } }
+
+function partyEncPush(enc, lines) {
+  const log = partyEncLog(enc).concat(lines);
+  while (log.length > PARTY_LOG_LIMIT) log.shift();
+  return log;
+}
+
+/* ---------------- building the fight ----------------
+   Monster count is rolled between 1 and the party's size, so a party of four can still walk into
+   a single monster and a party of two never faces more than two. Deliberately unweighted: the
+   swinginess is the point, and the maths works out in solo play's favour anyway -- solo is one
+   monster for one player, while a party of four averages 2.5 monsters shared between four, which
+   is FEWER loot rolls per player per encounter, not more. */
+function partyRollMonsterCount(partySize) {
+  return cbRandIntRange(1, Math.max(1, Math.min(PARTY_MAX, partySize)));
+}
+
+function partyBuildMonster(idx, monsterId, areaLevel, isGuardian, isRoamer, leaderData) {
+  const monster = COMBAT_MONSTERS.find((m) => m.id === monsterId);
+  if (!monster) return null;
+  const hpMult = isGuardian ? CB.STRONGHOLD_GUARDIAN_HP_MULT : isRoamer ? CB.ROAMING_MOB_HP_MULT : 1;
+  const dmgMult = isGuardian ? CB.STRONGHOLD_GUARDIAN_DAMAGE_MULT : isRoamer ? CB.ROAMING_MOB_DAMAGE_MULT : 1;
+  const xpMult = isGuardian ? CB.STRONGHOLD_GUARDIAN_XP_MULT : isRoamer ? CB.ROAMING_MOB_XP_MULT : 1;
+  const maxHp = Math.max(1, Math.round(combatMonsterHp(monster.base_hp, areaLevel) * hpMult));
+  const dmgFlat = combatMonsterDamage(monster.base_damage, areaLevel) * dmgMult;
+  // Gold is taken straight off the monster definition, unscaled by area level -- exactly what
+  // solo /api/combat/start does. Any scaling belongs in one place for both systems, not invented
+  // here for the party path only.
+  return {
+    idx,
+    monster_id: monster.id,
+    // Every monster in a shared fight is named individually, because "the Ashwalker hits you" is
+    // ambiguous when there are three Ashwalkers and only one of them is on you.
+    name: (isGuardian ? `Guardian ${monster.name}` : isRoamer ? `Roaming ${monster.name}` : monster.name),
+    label: null,
+    hp: maxHp,
+    max_hp: maxHp,
+    dmg_min: dmgFlat * (1 - CB.MONSTER_DAMAGE_JITTER),
+    dmg_max: dmgFlat * (1 + CB.MONSTER_DAMAGE_JITTER),
+    xp: combatMonsterXpReward(monster.base_xp, areaLevel) * xpMult,
+    gold_min: monster.gold_min,
+    gold_max: monster.gold_max,
+    loot_table: monster.loot_table,
+    is_guardian: !!isGuardian,
+    is_roamer: !!isRoamer,
+    attack_speed: CB.MONSTER_BASE_ATTACK_SPEED,
+    last_hit_at: Date.now(),
+    target_account_id: null,
+    dead: false,
+  };
+}
+
+/* Aggro. The whole of it, deliberately: monsters strike the front row, and if the front row is
+   empty they pick at random among whoever is left. No threat table, no healer penalty, no even
+   split -- a party that leaves the front empty is not punished with extra damage, it just loses
+   the ability to choose who takes it. Recomputed on every settle rather than stored, because
+   members change rows mid-fight and a stored target would go stale. */
+function partyAssignTargets(partyId, monsters) {
+  const state = partyPublicState(partyId);
+  if (!state) return monsters;
+  const alive = state.members.filter((m) => !m.in_town && !m.dead);
+  if (alive.length === 0) return monsters;
+  const front = alive.filter((m) => m.row_pos === "front");
+  const pool = front.length ? front : alive;
+  for (const mon of monsters) {
+    if (mon.dead) { mon.target_account_id = null; continue; }
+    // Keep an existing target if it is still a legal one, so a monster does not re-roll its
+    // victim every 200ms and produce a log that reads like static.
+    const stillValid = mon.target_account_id != null && pool.some((m) => m.account_id === mon.target_account_id);
+    if (!stillValid) mon.target_account_id = pool[Math.floor(Math.random() * pool.length)].account_id;
+  }
+  return monsters;
+}
+
+/* ---------------- start ----------------
+   Leader-only. The leader is the one walking the maze, so the leader is the one who reports
+   having walked into something. Same client-asserted monster/area/flags as solo play, validated
+   the same way -- see the scope note at the top of the party core. */
+app.post("/api/party/encounter/start", requireAuth, (req, res) => {
+  const party = partyForAccount(req.account.id);
+  if (!party) return res.status(400).json({ error: "You are not in a party." });
+  if (party.leader_account_id !== req.account.id) return res.status(403).json({ error: "Only the leader starts fights." });
+  if (partyEncounterFor(party.id)) return res.status(400).json({ error: "The party is already fighting." });
+
+  const me = partyMemberRow(party.id, req.account.id);
+  const leaderData = loadCharacterRow(req.account.id, me.slot);
+  if (!leaderData) return res.status(400).json({ error: "No character." });
+
+  const areaLevel = Math.max(1, Math.min(Number(req.body?.area_level) || 1, leaderData.max_maze_depth_reached || 1));
+  const isGuardian = !!req.body?.is_guardian;
+  const isRoamer = !!req.body?.is_roamer;
+  const isNight = !!req.body?.is_night;
+
+  const members = partyMembers(party.id);
+  // Members resting in town do not swell the encounter. Rolling monster count against the party's
+  // paper size while only two people are actually present would be a quiet difficulty spike.
+  const present = members.filter((m) => !m.in_town);
+  const count = isGuardian ? 1 : partyRollMonsterCount(present.length || 1);
+
+  const monsters = [];
+  for (let i = 0; i < count; i++) {
+    const pick = req.body?.monster_id && i === 0 ? req.body.monster_id : partyPickMonsterId(areaLevel);
+    const mon = partyBuildMonster(i, pick, areaLevel, isGuardian, isRoamer, leaderData);
+    if (mon) monsters.push(mon);
+  }
+  if (!monsters.length) return res.status(400).json({ error: "No monster." });
+  // Disambiguate duplicates: two Ashwalkers become "Ashwalker I" and "Ashwalker II" so the log and
+  // the targeting arrows can name one without naming both.
+  const byName = {};
+  for (const m of monsters) byName[m.name] = (byName[m.name] || 0) + 1;
+  const seen = {};
+  for (const m of monsters) {
+    if (byName[m.name] > 1) { seen[m.name] = (seen[m.name] || 0) + 1; m.label = `${m.name} ${romanNumeralSmall(seen[m.name])}`; }
+    else m.label = m.name;
+  }
+  partyAssignTargets(party.id, monsters);
+
+  const id = "e" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const now = nowIso();
+  db.prepare(
+    `INSERT INTO party_encounters (id, party_id, area_level, is_night, monsters, loot, log, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, '[]', ?, 'active', ?, ?)`
+  ).run(id, party.id, areaLevel, isNight ? 1 : 0, JSON.stringify(monsters),
+        JSON.stringify([`The party is set upon by ${monsters.length === 1 ? monsters[0].label : monsters.length + " monsters"}!`]), now, now);
+  partyTouch(party.id, { area_level: areaLevel, is_night: isNight ? 1 : 0 });
+  partyBroadcastEncounter(party.id);
+  res.json({ ok: true, encounter: partyEncounterPublic(party.id) });
+});
+
+function romanNumeralSmall(n) { return ["", "I", "II", "III", "IV", "V", "VI"][n] || String(n); }
+
+// Mirrors the area gating solo play already applies at /api/combat/start: only monsters whose
+// tier is genuinely available at this area level can appear.
+function partyPickMonsterId(areaLevel) {
+  const eligible = COMBAT_MONSTERS.filter((m) => combatMonsterAllowedForAreaLevel(m, areaLevel));
+  const pool = eligible.length ? eligible : COMBAT_MONSTERS;
+  return pool[Math.floor(Math.random() * pool.length)].id;
+}
+
+function partyEncounterPublic(partyId) {
+  const enc = partyEncounterFor(partyId);
+  if (!enc) return null;
+  return {
+    id: enc.id,
+    area_level: enc.area_level,
+    is_night: !!enc.is_night,
+    monsters: partyEncMonsters(enc).map((m) => ({
+      idx: m.idx, label: m.label, hp: Math.round(m.hp), max_hp: m.max_hp,
+      dead: m.dead, target_account_id: m.target_account_id,
+      is_guardian: m.is_guardian, is_roamer: m.is_roamer, monster_id: m.monster_id,
+    })),
+    loot: partyEncLoot(enc),
+    log: partyEncLog(enc),
+    status: enc.status,
+  };
+}
+function partyBroadcastEncounter(partyId) {
+  const enc = partyEncounterPublic(partyId);
+  partyBroadcast(partyId, { type: "party_encounter", encounter: enc, party: partyPublicState(partyId) });
+}
+
+
+/* ---------------- resolving a party fight ----------------
+   Three entry points, all landing in the same helpers so the rules exist once:
+     - a player attacks              -> POST /api/party/encounter/attack
+     - the server's own clock ticks  -> the party pusher at the bottom of this file
+     - a player casts a spell        -> POST /api/party/encounter/cast (thin wrapper)
+   Monster damage is settled from ELAPSED TIME rather than per-request, exactly as solo play
+   does, so a player who stops clicking still takes hits and a player who clicks fast gains
+   nothing. */
+
+function partySettleMonsterHits(party, enc, monsters) {
+  const now = Date.now();
+  const lines = [];
+  const state = partyPublicState(party.id);
+  if (!state) return { lines, monsters, casualties: [] };
+  const casualties = [];
+
+  for (const mon of monsters) {
+    if (mon.dead) continue;
+    const intervalMs = 1000 / (mon.attack_speed || CB.MONSTER_BASE_ATTACK_SPEED);
+    let owed = Math.floor((now - (mon.last_hit_at || now)) / intervalMs);
+    if (owed <= 0) continue;
+    // Cap the catch-up so a party whose socket dropped for a minute does not eat sixty swings in
+    // one pass. Solo play makes the same allowance for the same reason.
+    owed = Math.min(owed, 12);
+    mon.last_hit_at = (mon.last_hit_at || now) + owed * intervalMs;
+
+    for (let i = 0; i < owed; i++) {
+      const targetId = mon.target_account_id;
+      if (targetId == null) break;
+      const member = partyMemberRow(party.id, targetId);
+      if (!member) { mon.target_account_id = null; break; }
+      const data = loadCharacterRow(member.account_id, member.slot);
+      if (!data || (data.current_hp || 0) <= 0) { mon.target_account_id = null; break; }
+
+      // Invulnerability, block and thorns all reuse the SOLO helpers rather than being
+      // reimplemented, so a Touch of Unicorn shrine works identically in a party fight.
+      if (combatIsInvulnerable(data)) {
+        lines.push(`${member.character_name} shrugs off the ${mon.label} -- Touch of Unicorn holds.`);
+        continue;
+      }
+      let dmg = cbRandRange(mon.dmg_min, mon.dmg_max);
+      const blocked = Math.random() < combatGetBlockChance(data);
+      if (blocked) {
+        lines.push(`${member.character_name} blocks the ${mon.label}.`);
+        continue;
+      }
+      // v0.20.4 mechanic: flat armour SUBTRACTION, not a percentage multiplier. Copied from the
+      // solo monster-hit path rather than approximated, because armour behaving differently in a
+      // party fight than in a solo one is exactly the drift this second system risks.
+      dmg = Math.round(Math.max(0, dmg - combatGetArmor(data)));
+      data.current_hp = Math.max(0, (data.current_hp || 0) - dmg);
+      lines.push(`The ${mon.label} hits ${member.character_name} for ${dmg} damage.`);
+
+      // Thorns. Rounded at the point of application, the same discipline solo play now enforces
+      // in all three of its own thorns sites -- an unrounded reflect is what produced
+      // "11.399999999999999 damage" in the log for four separate reports.
+      const thorns = Math.round(combatGearBonus(data, "thorns"));
+      if (thorns > 0 && !mon.dead) {
+        const reflect = Math.round(Math.min(mon.hp, thorns));
+        mon.hp = Math.max(0, mon.hp - reflect);
+        lines.push(`${member.character_name}'s Thorns reflect ${reflect} damage back at the ${mon.label}.`);
+        if (mon.hp <= 0) { mon.dead = true; lines.push(`The ${mon.label} lies defeated.`); }
+      }
+
+      if ((data.current_hp || 0) <= 0) {
+        lines.push(`${member.character_name} has fallen.`);
+        casualties.push({ account_id: member.account_id, slot: member.slot, name: member.character_name, hardcore: !!member.hardcore });
+        mon.target_account_id = null;
+        saveCharacterRow(member.account_id, member.slot, data);
+        break;
+      }
+      saveCharacterRow(member.account_id, member.slot, data);
+      if (mon.dead) break;
+    }
+  }
+  return { lines, monsters, casualties };
+}
+
+/* A monster dying is where all the reward rules meet, so they live in one function.
+   Gwen's spec, deliberately generous to encourage grouping:
+     - EVERY member receives the FULL experience for the kill, not a share of it,
+     - plus a party bonus of 5/10/15% for a party of 2/3/4,
+     - every member gets personal quest credit for the kill,
+     - gold splits evenly, remainder to the leader,
+     - loot rolls at the COMBINED party magic find and lands in the shared pool. */
+function partyResolveKill(party, enc, mon) {
+  const lines = [];
+  const members = partyMembers(party.id);
+  const present = members.filter((m) => !m.in_town);
+  const bonusPct = PARTY_XP_BONUS_PCT[Math.min(PARTY_MAX, present.length)] || 0;
+
+  // Party kill streak: ONE counter for the party, worth a tenth of a solo streak per kill.
+  db.prepare("UPDATE parties SET kill_streak = kill_streak + 1 WHERE id = ?").run(party.id);
+  const mf = partyMagicFindBreakdown(party.id);
+
+  const gold = cbRandIntRange(mon.gold_min, mon.gold_max);
+  const share = Math.floor(gold / Math.max(1, present.length));
+  const remainder = gold - share * Math.max(1, present.length);
+
+  for (const m of members) {
+    const data = loadCharacterRow(m.account_id, m.slot);
+    if (!data) continue;
+    // A member resting in town does not share this kill -- they were not there for it.
+    if (m.in_town) continue;
+    const xpBase = mon.xp * combatLevelDiffXpMult(data.level, enc.area_level);
+    const xpTotal = xpBase * (1 + bonusPct / 100);
+    combatAddXp(data, xpTotal);
+    let goldFor = Math.round(share * combatGetGoldFindMult(data, { is_night: enc.is_night }));
+    if (m.account_id === party.leader_account_id) goldFor += remainder;
+    // Gold is account-bound, not character-bound -- credited through the same helper every other
+    // gold award uses so the account row stays the single source of truth.
+    creditAccountGold(m.account_id, goldFor);
+    // Personal quest and kill-streak credit for a shared kill, per Gwen: one kill shared by four
+    // players advances four personal Cleanse counters.
+    data.total_kills = (data.total_kills || 0) + 1;
+    data.kill_streak = (data.kill_streak || 0) + 1;
+    if (data.kill_streak > (data.max_kill_streak || 0)) data.max_kill_streak = data.kill_streak;
+    questEnsureState(data);
+    questTrackTotalKills(data);
+    saveCharacterRow(m.account_id, m.slot, data);
+  }
+
+  lines.push(`The ${mon.label} lies defeated. ${gold} gold, ${share} each${remainder ? ` (the odd ${remainder} to the leader)` : ""}.`);
+  if (bonusPct > 0) lines.push(`Party of ${present.length}: +${bonusPct}% experience for everyone.`);
+
+  // One loot roll per monster, into the shared pool, at the party's combined magic find.
+  const drop = combatRollLoot(mon.loot_table, mf.total);
+  if (drop && drop.type !== "nothing") {
+    const entry = partyLootEntryFrom(drop, enc.area_level, mon.monster_id, mf.total);
+    if (entry) {
+      const loot = partyEncLoot(enc);
+      entry.id = "l" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      entry.claims = [];
+      entry.resolved_to = null;
+      entry.rolls = null;
+      entry.claim_opened_at = null;
+      loot.push(entry);
+      partyEncounterSave(enc.id, { loot: JSON.stringify(loot) });
+      lines.push(`${entry.display} drops into the party's pool.`);
+    }
+  }
+  return lines;
+}
+
+function partyLootEntryFrom(drop, areaLevel, monsterBand, mfPct) {
+  if (drop.type === "gear") {
+    // Same generator solo loot uses, so a party drop is indistinguishable from a solo drop of the
+    // same tier -- including its affix rolls and roll medals.
+    const inst = combatGenerateGearItem(combatRollItemTier(areaLevel), mfPct, monsterBand);
+    if (!inst) return null;
+    return { kind: "gear", instance: inst, display: `${inst.rarity} item (Tier ${inst.tier})` };
+  }
+  if (drop.type === "consumable") return { kind: "consumable", item_id: drop.item_id, qty: 1, display: drop.item_id };
+  if (drop.type === "herb") return { kind: "herb", herb_id: drop.herb_id, qty: 1, display: drop.herb_id };
+  return null;
+}
+
+function partyAfterResolve(party, enc, monsters, lines) {
+  partyAssignTargets(party.id, monsters);
+  const allDead = monsters.every((m) => m.dead);
+  const fields = { monsters: JSON.stringify(monsters), log: JSON.stringify(partyEncPush(enc, lines)) };
+  if (allDead) fields.status = "cleared";
+  partyEncounterSave(enc.id, fields);
+  partyBroadcastEncounter(party.id);
+  return allDead;
+}
+
+/* ---------------- a player swings ---------------- */
+app.post("/api/party/encounter/attack", requireAuth, (req, res) => {
+  const party = partyForAccount(req.account.id);
+  if (!party) return res.status(400).json({ error: "You are not in a party." });
+  const enc = partyEncounterFor(party.id);
+  if (!enc) return res.status(400).json({ error: "The party is not fighting." });
+  const me = partyMemberRow(party.id, req.account.id);
+  if (!me) return res.status(400).json({ error: "You are not in this party." });
+  if (me.in_town) return res.status(400).json({ error: "You are in town." });
+  const data = loadCharacterRow(req.account.id, me.slot);
+  if (!data) return res.status(400).json({ error: "No character." });
+  if ((data.current_hp || 0) <= 0) return res.status(400).json({ error: "You have fallen." });
+
+  let monsters = partyEncMonsters(enc);
+  const lines = [];
+
+  // Target: the one the player clicked if it is alive, otherwise the first living monster. A
+  // party that focuses fire kills faster, and that is a real tactical choice worth allowing.
+  let idx = Number(req.body?.target_idx);
+  if (!monsters[idx] || monsters[idx].dead) idx = monsters.findIndex((m) => !m.dead);
+  if (idx < 0) return res.json({ ok: true, encounter: partyEncounterPublic(party.id), cleared: true });
+  const mon = monsters[idx];
+
+  // Solo deliberately does NOT roll a third random inside the damage range -- it collapses the
+  // range to its average and lets crit and quad supply the variance. Matched here exactly; a
+  // party swing must not be a different distribution from a solo swing.
+  const [dLo, dHi] = combatGetDamageRange(data);
+  let dmg = (dLo + dHi) / 2;
+  const crit = Math.random() < combatGetCritChance(data);
+  let critMult = 1;
+  if (crit) { critMult = combatRollCritMultiplier(combatGetCritMultiplierMax(data)); dmg *= critMult; }
+  if (combatHasQuadDamage(data)) dmg *= 4;
+  dmg = Math.round(dmg);
+  mon.hp = Math.max(0, mon.hp - dmg);
+  lines.push(`${me.character_name} hits the ${mon.label} for ${dmg} damage.${crit ? ` (Critical! x${critMult.toFixed(2)})` : ""}`);
+
+  const lifeOnHit = Math.round(combatGearBonus(data, "life_on_hit"));
+  if (lifeOnHit > 0) {
+    const before = data.current_hp || 0;
+    data.current_hp = Math.min(combatGetMaxHp(data), before + lifeOnHit);
+    if (data.current_hp > before) lines.push(`${me.character_name} draws ${Math.round(data.current_hp - before)} life from the blow.`);
+  }
+  // Weapon proficiency only advances when the equipped weapon is one this character may actually
+  // use -- the same gate the solo attack route applies, so an invalid weapon cannot farm skill.
+  {
+    const wType = combatGetEquippedWeaponType(data);
+    if (wType && data.equipped && data.equipped.weapon && combatCanEquipGear(data, data.equipped.weapon)) {
+      combatRegisterWeaponHit(data, wType);
+    }
+  }
+  saveCharacterRow(req.account.id, me.slot, data);
+
+  if (mon.hp <= 0 && !mon.dead) {
+    mon.dead = true;
+    lines.push(...partyResolveKill(party, partyEncounterFor(party.id), mon));
+  }
+
+  const settled = partySettleMonsterHits(party, partyEncounterFor(party.id), monsters);
+  lines.push(...settled.lines);
+  for (const m of monsters) {
+    if (m.hp <= 0 && !m.dead) { m.dead = true; lines.push(...partyResolveKill(party, partyEncounterFor(party.id), m)); }
+  }
+  partyHandleCasualties(party, settled.casualties);
+
+  const cleared = partyAfterResolve(party, partyEncounterFor(party.id), monsters, lines);
+  res.json({ ok: true, encounter: partyEncounterPublic(party.id), cleared });
+});
+
+/* Death. Softcore members respawn in town and can rejoin; hardcore members are gone for good and
+   leave the party, which reopens it for matchmaking. Both reuse the solo death paths so the
+   graveyard, the leaderboard and the character row are handled identically. */
+function partyHandleCasualties(party, casualties) {
+  for (const c of casualties || []) {
+    if (c.hardcore) {
+      partySystem(party.id, `${c.name} has fallen for the last time.`);
+      const hcData = loadCharacterRow(c.account_id, c.slot);
+      const hcAcct = db.prepare("SELECT username FROM accounts WHERE id = ?").get(c.account_id);
+      combatHandleHardcoreDeath(c.account_id, hcAcct ? hcAcct.username : "", c.slot, hcData, null);
+      partyRemoveMember(party.id, c.account_id, "was lost to the forest");
+    } else {
+      partySystem(party.id, `${c.name} has fallen and will wake in town.`);
+      db.prepare("UPDATE party_members SET in_town = 1 WHERE party_id = ? AND account_id = ?").run(party.id, c.account_id);
+    }
+  }
+  if ((casualties || []).length) partyBroadcastState(party.id);
+}
+
+/* ---------------- loot: claim, contest, roll ----------------
+   A claim opens a three-second window rather than resolving instantly, so somebody who wanted the
+   same item has a real chance to say so. One claim in the window and it is theirs quietly; two or
+   more and everyone contesting rolls 1-100, highest takes it, and the result goes to party chat
+   so nobody has to take a stranger's word for how it went. */
+app.post("/api/party/loot/claim", requireAuth, (req, res) => {
+  const party = partyForAccount(req.account.id);
+  if (!party) return res.status(400).json({ error: "You are not in a party." });
+  const enc = partyEncounterFor(party.id) || partyLastEncounter(party.id);
+  if (!enc) return res.status(400).json({ error: "There is nothing to claim." });
+  const loot = partyEncLoot(enc);
+  const entry = loot.find((l) => l.id === req.body?.loot_id);
+  if (!entry) return res.status(404).json({ error: "That item is gone." });
+  if (entry.resolved_to) return res.status(400).json({ error: "Already claimed." });
+  const me = partyMemberRow(party.id, req.account.id);
+  if (!me) return res.status(400).json({ error: "You are not in this party." });
+  if (entry.claims.some((c) => c.account_id === req.account.id)) return res.json({ ok: true, already: true });
+
+  entry.claims.push({ account_id: req.account.id, name: me.character_name });
+  if (!entry.claim_opened_at) entry.claim_opened_at = Date.now();
+  partyEncounterSave(enc.id, { loot: JSON.stringify(loot) });
+  partySystem(party.id, `${me.character_name} claimed ${entry.display}.`);
+  partyBroadcastEncounter(party.id);
+  res.json({ ok: true });
+});
+
+function partyLastEncounter(partyId) {
+  return db.prepare("SELECT * FROM party_encounters WHERE party_id = ? ORDER BY created_at DESC LIMIT 1").get(partyId) || null;
+}
+
+/* Called from the party pusher, not from a request: the window has to close on the server's own
+   clock or a party where nobody sends another request would leave the item pending forever. */
+function partySettleLootWindows(party) {
+  const enc = partyLastEncounter(party.id);
+  if (!enc) return;
+  const loot = partyEncLoot(enc);
+  let changed = false;
+  const now = Date.now();
+  for (const entry of loot) {
+    if (entry.resolved_to || !entry.claim_opened_at) continue;
+    if (now - entry.claim_opened_at < PARTY_LOOT_CLAIM_WINDOW_MS) continue;
+    if (entry.claims.length === 1) {
+      entry.resolved_to = entry.claims[0].account_id;
+      partySystem(party.id, `${entry.claims[0].name} takes ${entry.display}.`);
+    } else {
+      const rolls = entry.claims.map((c) => ({ account_id: c.account_id, name: c.name, roll: 1 + Math.floor(Math.random() * 100) }));
+      rolls.sort((a, b) => b.roll - a.roll);
+      entry.rolls = rolls;
+      entry.resolved_to = rolls[0].account_id;
+      partySystem(party.id, rolls.map((r) => `${r.name} rolled ${r.roll}`).join(". ") + `. ${rolls[0].name} takes ${entry.display}.`);
+    }
+    partyGrantLoot(party, entry);
+    changed = true;
+  }
+  if (changed) {
+    partyEncounterSave(enc.id, { loot: JSON.stringify(loot) });
+    partyBroadcastEncounter(party.id);
+  }
+}
+
+function partyGrantLoot(party, entry) {
+  const m = partyMemberRow(party.id, entry.resolved_to);
+  if (!m) return;
+  const data = loadCharacterRow(m.account_id, m.slot);
+  if (!data) return;
+  if (entry.kind === "gear") {
+    data.gear_instances = data.gear_instances || [];
+    data.gear_instances.push(entry.instance);
+  } else if (entry.kind === "consumable") {
+    data.consumables = data.consumables || {};
+    data.consumables[entry.item_id] = (data.consumables[entry.item_id] || 0) + (entry.qty || 1);
+  } else if (entry.kind === "herb") {
+    data.herbs = data.herbs || {};
+    data.herbs[entry.herb_id] = (data.herbs[entry.herb_id] || 0) + (entry.qty || 1);
+  }
+  saveCharacterRow(m.account_id, m.slot, data);
+}
+
+/* Leaving the maze with items still in the pool. Gwen's rule: unclaimed loot is littered, and
+   littering the forest costs every member a point of Forest Reputation. It gives ignoring the
+   pool a real cost, which is a better answer than a timer nobody reads. */
+app.post("/api/party/encounter/leave", requireAuth, (req, res) => {
+  const party = partyForAccount(req.account.id);
+  if (!party) return res.status(400).json({ error: "You are not in a party." });
+  const enc = partyLastEncounter(party.id);
+  if (!enc) return res.json({ ok: true });
+  const loot = partyEncLoot(enc);
+  const abandoned = loot.filter((l) => !l.resolved_to);
+  if (abandoned.length) {
+    for (const m of partyMembers(party.id)) {
+      const data = loadCharacterRow(m.account_id, m.slot);
+      if (!data) continue;
+      // forest_reputation is a per-area-tier map on the character; littering costs a point in the
+      // tier the party is actually delving, not a global figure.
+      // Reputation is tracked per area tier, keyed the same way combatGetForestReputationXpPct()
+      // reads it: by the character's own highest tier reached.
+      const repTier = data.highest_tier_reached || 1;
+      data.forest_reputation = data.forest_reputation || {};
+      data.forest_reputation[repTier] = (data.forest_reputation[repTier] || 0) - 1;
+      saveCharacterRow(m.account_id, m.slot, data);
+    }
+    partySystem(party.id, `${abandoned.length} item${abandoned.length > 1 ? "s were" : " was"} left to rot. Forest Reputation -1 for everyone.`);
+  }
+  partyEncounterSave(enc.id, { status: "closed" });
+  partyBroadcastEncounter(party.id);
+  partyBroadcastState(party.id);
+  res.json({ ok: true, littered: abandoned.length });
+});
+
+
+/* ---------------- maze relay ----------------
+   The leader's client generates the maze exactly as it does in solo play and posts the layout
+   here; the server stores it verbatim and hands it to followers. The server does not read,
+   validate or generate it. See the authority note at the top of the party core for why this is
+   acceptable today and what makes it the next thing to fix. */
+app.post("/api/party/maze", requireAuth, (req, res) => {
+  const party = partyForAccount(req.account.id);
+  if (!party) return res.status(400).json({ error: "You are not in a party." });
+  if (party.leader_account_id !== req.account.id) return res.status(403).json({ error: "Only the leader shapes the maze." });
+  const maze = req.body?.maze;
+  if (maze == null) return res.status(400).json({ error: "No maze." });
+  const json = JSON.stringify(maze);
+  // A 20x10 maze relays at roughly 5 KB; anything an order of magnitude past that is not a maze.
+  if (json.length > 200000) return res.status(400).json({ error: "Maze too large." });
+  partyTouch(party.id, {
+    maze_json: json,
+    area_level: Math.max(1, Number(req.body?.area_level) || party.area_level),
+    is_night: req.body?.is_night ? 1 : 0,
+  });
+  partyBroadcast(party.id, { type: "party_maze", maze, area_level: Number(req.body?.area_level) || party.area_level, is_night: !!req.body?.is_night });
+  res.json({ ok: true });
+});
+
+/* Each step the leader takes. Costs stamina from EVERY member still in the maze, which is the
+   real price of grouping -- a party covers less ground than a solo player before turning back.
+   The gate is checked before the step is accepted, so the party genuinely cannot advance past
+   its most tired member. */
+app.post("/api/party/step", requireAuth, (req, res) => {
+  const party = partyForAccount(req.account.id);
+  if (!party) return res.status(400).json({ error: "You are not in a party." });
+  if (party.leader_account_id !== req.account.id) return res.status(403).json({ error: "Only the leader moves the party." });
+
+  const before = partyPublicState(party.id);
+  if (before.stamina_gate.blocked) {
+    return res.status(400).json({
+      error: `${before.stamina_gate.who || "Someone"} is out of stamina.`,
+      gate: before.stamina_gate,
+    });
+  }
+  // The client sends the step cost it already computed for solo movement (gear, class and
+  // trample state all feed it), which keeps one formula rather than a second server copy that
+  // would drift. Clamped so a bad value cannot be free or absurd.
+  const cost = cbClampf(Number(req.body?.cost) || 1, 0, 25);
+  for (const m of partyMembers(party.id)) {
+    if (m.in_town) continue;
+    const data = loadCharacterRow(m.account_id, m.slot);
+    if (!data) continue;
+    data.current_stamina = Math.max(0, (data.current_stamina || 0) - cost);
+    saveCharacterRow(m.account_id, m.slot, data);
+  }
+  partyBroadcast(party.id, { type: "party_step", pos: req.body?.pos, reveal: req.body?.reveal || [], roamers: req.body?.roamers || [] });
+  const after = partyPublicState(party.id);
+  if (after.stamina_gate.blocked) {
+    partySystem(party.id, `${after.stamina_gate.who} is out of stamina. The party cannot move further.`);
+  }
+  partyBroadcastState(party.id);
+  res.json({ ok: true, gate: after.stamina_gate });
+});
+
+/* ---------------- party pusher ----------------
+   Runs faster than the solo pusher (200ms vs 500ms) for one reason only: with four players and
+   up to four monsters, half a second of accumulated events arrives as an unreadable clump. It is
+   still a CATCH-UP pass, not a simulation -- it settles damage owed by elapsed time and does
+   nothing at all when a party is idle or not fighting. */
+setInterval(() => {
+  const parties = db.prepare("SELECT * FROM parties").all();
+  for (const party of parties) {
+    try {
+      partySettleLootWindows(party);
+      const enc = partyEncounterFor(party.id);
+      if (!enc) continue;
+      let monsters = partyEncMonsters(enc);
+      if (!monsters.length || monsters.every((m) => m.dead)) continue;
+      const settled = partySettleMonsterHits(party, enc, monsters);
+      const lines = settled.lines;
+      for (const m of monsters) {
+        if (m.hp <= 0 && !m.dead) { m.dead = true; lines.push(...partyResolveKill(party, partyEncounterFor(party.id), m)); }
+      }
+      partyHandleCasualties(party, settled.casualties);
+      if (lines.length) partyAfterResolve(party, partyEncounterFor(party.id), monsters, lines);
+    } catch (e) {
+      // One broken party must never take the pusher down for every other party.
+      console.error("party pusher:", party.id, e && e.message);
+    }
+  }
+}, PARTY_PUSH_INTERVAL_MS);
+
 /* ---------------- chat over WebSocket ---------------- */
 
 const wss = new WebSocketServer({ server, path: "/ws/chat" });
@@ -7116,6 +8188,34 @@ wss.on("connection", (ws, req) => {
     } catch (e) {
       return;
     }
+    // v0.30 (Gwen): three chat scopes on one socket. Global is unchanged and still persisted;
+    // party and lobby are live-only and never written to chat_messages, because a party is
+    // temporary and a player who rejoins one later should not be able to read a scrollback from
+    // a party they were not in at the time.
+    if (parsed.type === "party_chat" && typeof parsed.message === "string") {
+      const party = partyForAccount(ws.accountId);
+      if (!party) return;
+      const msg = parsed.message.slice(0, 300).trim();
+      if (!msg) return;
+      const me = partyMemberRow(party.id, ws.accountId);
+      partyBroadcast(party.id, {
+        type: "party_chat", system: false,
+        username: me ? me.character_name : ws.username, message: msg, created_at: nowIso(),
+      });
+      return;
+    }
+    if (parsed.type === "lobby_chat" && typeof parsed.message === "string") {
+      const msg = parsed.message.slice(0, 300).trim();
+      if (!msg) return;
+      const body = JSON.stringify({ type: "lobby_chat", username: ws.username, message: msg, created_at: nowIso() });
+      // Only players who have opted in receive it -- the whole point of a separate channel is
+      // that someone mid-delve is not recruited at.
+      for (const client of chatClients) {
+        if (client.readyState === client.OPEN && client.inLobby) client.send(body);
+      }
+      return;
+    }
+    if (parsed.type === "lobby_presence") { ws.inLobby = !!parsed.active; return; }
     if (parsed.type !== "chat" || typeof parsed.message !== "string") return;
     const message = parsed.message.slice(0, 300).trim();
     if (!message) return;
@@ -7131,7 +8231,16 @@ wss.on("connection", (ws, req) => {
     }
   });
 
-  ws.on("close", () => chatClients.delete(ws));
+  ws.on("close", () => {
+    chatClients.delete(ws);
+    // v0.30 (Gwen): losing your connection takes you out of the party. The roster icon
+    // disappears, the party drops below the cap and reopens for matchmaking, and leadership
+    // passes by join order if it was yours -- all handled inside partyRemoveMember().
+    try {
+      const party = partyForAccount(ws.accountId);
+      if (party) partyRemoveMember(party.id, ws.accountId, "disconnected");
+    } catch (e) { /* a failed cleanup must not take the socket handler down */ }
+  });
 });
 
 // v0.21.2: server-driven continuous combat. Previously the ONLY thing that ever resolved "owed"

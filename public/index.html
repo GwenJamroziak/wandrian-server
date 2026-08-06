@@ -516,6 +516,37 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 
 .compare-box .compare-title{color:var(--accent);}
 
+.party-mate{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:7px 9px;
+  display:grid;grid-template-columns:32px 1fr;gap:8px;align-items:center;margin-bottom:7px;}
+.party-mate.is-leader{border-color:#c9a227;}
+.party-mate.is-away{opacity:.55;}
+.party-mate.is-dead{opacity:.5;border-color:#5a2626;}
+.party-pip{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-family:Cinzel,Georgia,serif;font-size:13px;border:2px solid var(--border);background:#0e1109;}
+.party-name{font-weight:bold;font-size:12.5px;display:flex;align-items:center;gap:5px;}
+.party-sub{font-size:10.5px;color:var(--muted);}
+.party-crown{color:#c9a227;font-size:10px;}
+.party-tag{font-size:9.5px;letter-spacing:.4px;padding:1px 5px;border-radius:8px;border:1px solid;
+  font-family:Cinzel,Georgia,serif;}
+.party-tag.town{color:#7fd0e0;border-color:#3c6a75;}
+.party-tag.front{color:var(--hp);border-color:#6d3232;}
+.party-tag.back{color:var(--mana);border-color:#2f5680;}
+.party-minibars{display:flex;flex-direction:column;gap:2px;margin-top:3px;}
+.party-minibar{height:5px;border-radius:3px;background:#0b0d08;border:1px solid #2a3020;overflow:hidden;}
+.party-minibar > i{display:block;height:100%;}
+.party-card{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:11px;
+  display:flex;flex-direction:column;gap:8px;}
+.party-slots{display:flex;gap:4px;}
+.party-slot{width:22px;height:22px;border-radius:50%;border:1px dashed #4a5438;}
+.party-slot.filled{border-style:solid;background:#0e1109;}
+.lobby-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;}
+.chan-tabs{display:flex;gap:3px;margin-bottom:6px;flex-wrap:wrap;}
+.chan-tab{font-family:Cinzel,Georgia,serif;font-size:11px;padding:4px 10px;border-radius:5px;
+  cursor:pointer;color:var(--muted);border:1px solid transparent;}
+.chan-tab.on{background:var(--panel2);color:var(--text);border-color:var(--border);}
+.chan-tab .cdot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:5px;}
+.mf-line{display:flex;justify-content:space-between;font-size:12px;padding:2px 0;}
+
 .affix-line{display:flex;align-items:center;gap:6px;line-height:1.5;}
 .roll-medal{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;}
 .roll-medal svg{width:100%;height:100%;display:block;}
@@ -553,6 +584,10 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 .town-row .panel{height:100%;margin-bottom:0;}
 
 .town-cell{flex:1 1 0;display:flex;}
+
+.town-cell-venture{flex:2 1 0;}
+.town-cell-kindle{flex:1 1 0;}
+.town-cell-party{flex:1.4 1 0;}
 .town-cell > *{flex:1;}
 .town-cell-wide{flex:2 1 0;}
 
@@ -1837,7 +1872,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.29.1-web",
+  GAME_VERSION:"v0.30-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
 
@@ -2793,6 +2828,13 @@ const NET_USERNAME_KEY="wandrian_web_username";
 
 const Net = {
   online:false, token:null, username:null,
+
+  party:null,
+  partyEncounter:null,
+  partyChat:[],
+  lobbyChat:[],
+  lobbyActive:false,
+  lastPartySeq:0,
   cache:null,
 
   accountGold:0,
@@ -2860,6 +2902,45 @@ const Net = {
     this.ensureChat();
 
     this.fetchActivePlayers().then(render).catch(()=>{});
+  },
+
+  async partyApi(path, body, method){
+    if(!this.online) return {ok:false, error:"You are offline."};
+    try{
+      const opts={ method: method || (body!==undefined ? "POST" : "GET"), headers:this.authHeaders(body!==undefined?{"Content-Type":"application/json"}:{}) };
+      if(body!==undefined) opts.body=JSON.stringify(body);
+      const res=await fetch(this.apiBase()+path,opts);
+      const json=await res.json().catch(()=>({}));
+      if(!res.ok) return {ok:false, error:json.error||("Request failed ("+res.status+").")};
+      return json;
+    }catch(e){ return {ok:false, error:e.message||"Network error."}; }
+  },
+  async partyRefresh(){
+    const r=await this.partyApi("/api/party/state");
+    if(r.ok!==false) this.party=r.party||null;
+    if(!this.party) this.partyEncounter=null;
+    return this.party;
+  },
+  inParty(){ return !!this.party; },
+  isPartyLeader(){
+    return !!(this.party && this.partyMe() && this.partyMe().is_leader);
+  },
+  partyMe(){
+    if(!this.party) return null;
+    return this.party.members.find(m=>m.username===this.username)||null;
+  },
+  sendPartyChat(message){
+    if(!this.chatSocket || this.chatSocket.readyState!==1) return;
+    this.chatSocket.send(JSON.stringify({type:"party_chat", message}));
+  },
+  sendLobbyChat(message){
+    if(!this.chatSocket || this.chatSocket.readyState!==1) return;
+    this.chatSocket.send(JSON.stringify({type:"lobby_chat", message}));
+  },
+
+  setLobbyPresence(active){
+    this.lobbyActive=!!active;
+    if(this.chatSocket && this.chatSocket.readyState===1) this.chatSocket.send(JSON.stringify({type:"lobby_presence", active:!!active}));
   },
   async refreshCharacters(){
     const res=await fetch(this.apiBase()+"/api/characters",{headers:this.authHeaders()});
@@ -3331,6 +3412,44 @@ const Net = {
       ws.onmessage=(ev)=>{
         try{
           const msg=JSON.parse(ev.data);
+
+          if(msg.party_id && typeof msg.seq==="number"){
+            if(msg.seq<=this.lastPartySeq) return;
+            this.lastPartySeq=msg.seq;
+          }
+          if(msg.type==="party_state"){ this.party=msg.state||null; if(!this.party) this.partyEncounter=null; render(); return; }
+          if(msg.type==="party_encounter"){
+            this.partyEncounter=msg.encounter||null;
+            if(msg.party) this.party=msg.party;
+
+            if(this.partyEncounter && this.partyEncounter.status==="active" && GF.screen!=="partyCombat"){
+              GF.goto("partyCombat");
+            } else render();
+            return;
+          }
+          if(msg.type==="party_chat"){
+            this.partyChat.push(msg);
+            if(this.partyChat.length>200) this.partyChat.shift();
+            render(); return;
+          }
+          if(msg.type==="lobby_chat"){
+            this.lobbyChat.push(msg);
+            if(this.lobbyChat.length>200) this.lobbyChat.shift();
+            render(); return;
+          }
+          if(msg.type==="party_disbanded"){
+            this.party=null; this.partyEncounter=null; this.partyChat=[];
+            setToast("The party has disbanded.");
+            if(GF.screen==="partyCombat") GF.goto("maze");
+            else render();
+            return;
+          }
+          if(msg.type==="party_maze"){
+
+            partyAdoptMaze(msg.maze, msg.area_level, msg.is_night);
+            return;
+          }
+          if(msg.type==="party_step"){ partyApplyStep(msg); return; }
           if(msg.type==="history") this.chatMessages=msg.messages||[];
           else if(msg.type==="chat"){ this.chatMessages.push(msg); if(this.chatMessages.length>200) this.chatMessages.shift(); }
 
@@ -5038,6 +5157,422 @@ function hudHeader(){
     h("div",{class:"hud-header-right"},[topBar()]),
   ]);
 }
+
+const PARTY_ATTR_COLOR={str:"var(--hp)", dex:"#5aa850", int:"var(--xp)", vit:"var(--gold)"};
+function partyMemberColor(classId){
+  const cls=DL.getClass ? DL.getClass(classId) : null;
+  const chain=cls && cls.chain;
+  if(chain==="wizard") return PARTY_ATTR_COLOR.int;
+  if(chain==="thornguard") return PARTY_ATTR_COLOR.str;
+  if(chain==="windrider") return PARTY_ATTR_COLOR.dex;
+  return "var(--muted)";
+}
+function partyMateNode(m, opts){
+  const o=opts||{};
+  const color=partyMemberColor(m.class_id);
+  const pip=h("div",{class:"party-pip",style:{borderColor:color,color:color}},[(m.character_name||"?")[0]]);
+  const tags=[];
+  if(m.in_town) tags.push(h("span",{class:"party-tag town"},["IN TOWN"]));
+  if(o.showRow) tags.push(h("span",{class:"party-tag "+(m.row_pos==="front"?"front":"back")},[m.row_pos==="front"?"FRONT":"BACK"]));
+  const bar=(cls,val,max,color)=>h("div",{class:"party-minibar"},[
+    h("i",{style:{width:Math.max(0,Math.min(100,(max?val/max*100:0)))+"%",background:color}}),
+  ]);
+  const node=h("div",{class:"party-mate"+(m.is_leader?" is-leader":"")+(m.in_town?" is-away":"")+(m.dead?" is-dead":"")},[
+    pip,
+    h("div",{},[
+      h("div",{class:"party-name"},[m.character_name, m.is_leader?h("span",{class:"party-crown"},["\u265B"]):null]),
+      h("div",{class:"party-sub"},[`Lv ${m.level} ${DL.getClass&&DL.getClass(m.class_id)?DL.getClass(m.class_id).display_name:""} `, ...tags]),
+      h("div",{class:"party-minibars"},[
+        bar("hp",m.hp,m.max_hp,"linear-gradient(90deg,#a83535,var(--hp))"),
+        bar("mana",m.mana,m.max_mana,"linear-gradient(90deg,#2f6ba8,var(--mana))"),
+        bar("stam",m.stamina,m.max_stamina,"linear-gradient(90deg,#b5b1a4,var(--stamina))"),
+      ]),
+    ]),
+  ]);
+  return node;
+}
+
+function hudPartyPanel(){
+  const p=Net.party;
+  if(!p) return null;
+  const mf=p.magic_find||{total:0};
+  const gate=p.stamina_gate||{};
+  const rows=[
+    h("div",{class:"hud-rail-title"},[`PARTY \u00B7 ${p.size}/${p.max_size}`]),
+  ];
+  for(const m of p.members) rows.push(partyMateNode(m,{showRow:true}));
+  rows.push(h("div",{class:"panel2",style:{marginTop:"4px",padding:"8px 10px"}},[
+    h("div",{class:"mf-line"},[
+      h("span",{class:"muted"},["Party Magic Find"]),
+      h("span",{style:{fontWeight:"bold",color:"var(--gold)"}},[`${mf.total}%`]),
+    ]),
+    h("div",{class:"muted",style:{fontSize:"10.5px"}},[
+      `${mf.members_total}% from ${p.size} member${p.size>1?"s":""}`,
+      mf.streak_pct>0?`, +${mf.streak_pct}% from a ${mf.streak_kills}-kill streak`:"",
+      mf.at_cap?" \u2014 at the 500% ceiling":"",
+    ]),
+  ]));
+  rows.push(h("div",{class:"panel2",style:{marginTop:"7px",padding:"8px 10px"}},[
+    h("div",{class:"mf-line"},[
+      h("span",{class:"muted"},["Party stamina"]),
+      h("span",{style:{fontWeight:"bold",color:gate.blocked?"var(--bad)":"var(--text)"}},[
+        gate.who?`${gate.who} ${gate.stamina}`:"\u2014"]),
+    ]),
+    h("div",{class:"muted",style:{fontSize:"10.5px"}},[
+      gate.blocked?"The party cannot move until they rest.":"Gated by whoever has the least left.",
+    ]),
+  ]));
+  rows.push(h("button",{style:{width:"100%",marginTop:"8px"},onClick:async()=>{
+    await Net.partyApi("/api/party/leave",{});
+    Net.party=null; Net.partyEncounter=null; render();
+  }},["Leave party"]));
+  return h("div",{class:"panel",style:{marginTop:"10px"}},rows);
+}
+
+function partyLobbyTownCard(){
+  const inParty=Net.inParty();
+  const p=Net.party;
+  const card=h("div",{class:"panel venture-card venture-fill npc-service-card venture-clickable",
+    onClick:()=>GF.goto("partyLobby")},[
+    h("div",{},[
+      h("div",{class:"venture-title"},["Party Lobby"]),
+      inParty
+        ? h("div",{class:"muted",style:{fontSize:".9em"}},[
+            `${p.size} of you, finding at ${p.magic_find?p.magic_find.total:0}% Magic Find.`])
+        : h("div",{class:"muted",style:{fontSize:".9em"}},[
+            "Share a maze with up to three others. Everyone finds loot at the party's combined rate."]),
+    ]),
+  ]);
+  return card;
+}
+function screenPartyLobby(){
+  const root=h("div",{});
+  root.appendChild(h("h2",{},["Party Lobby"]));
+  root.appendChild(h("button",{style:{marginBottom:"10px"},onClick:()=>{ Net.setLobbyPresence(false); GF.goto("town"); }},["\u2190 Back to Town"]));
+  if(!Net.lobbyActive) Net.setLobbyPresence(true);
+
+  if(Net.inParty()){
+    root.appendChild(partyLobbyMineNode());
+    root.appendChild(partyChatNode());
+    return root;
+  }
+
+  root.appendChild(h("div",{class:"lore",style:{maxWidth:"none"}},[
+    "Up to four of you share one maze, one set of fights and one pool of loot. Everyone finds "+
+    "treasure at the party's combined rate, and every kill counts for everyone's quests.",
+  ]));
+
+  root.appendChild(h("h3",{},["Open parties"]));
+  const listWrap=h("div",{class:"lobby-grid"});
+  root.appendChild(listWrap);
+  const renderList=(parties,yourLevel)=>{
+    listWrap.innerHTML="";
+    if(!parties || !parties.length){
+      listWrap.appendChild(h("div",{class:"muted",style:{gridColumn:"1 / -1"}},[
+        "Nobody is looking for company at your level right now. Start your own and keep playing \u2014 "+
+        "people will join you where you stand."]));
+      return;
+    }
+    for(const p of parties){
+      const slots=h("div",{class:"party-slots"});
+      for(let i=0;i<p.max_size;i++) slots.appendChild(h("div",{class:"party-slot"+(i<p.size?" filled":"")}));
+      listWrap.appendChild(h("div",{class:"party-card"},[
+        h("div",{class:"row",style:{justifyContent:"space-between",alignItems:"flex-start",gap:"9px"}},[
+          h("div",{},[
+            h("div",{style:{fontWeight:"bold"}},[p.leader_name, h("span",{class:"party-crown"},[" \u265B"])]),
+            h("div",{class:"muted",style:{fontSize:"11.5px"}},[p.note||`Area level ${p.area_level}`]),
+          ]),
+          h("div",{style:{textAlign:"right"}},[
+            h("div",{style:{color:"var(--gold)",fontSize:"11.5px",fontFamily:"Cinzel,Georgia,serif"}},[`Lv ${p.min_level}\u2013${p.max_level}`]),
+            h("div",{class:"muted",style:{fontSize:"11px"}},[`${p.size}/${p.max_size} \u00B7 ${p.magic_find}% MF`]),
+          ]),
+        ]),
+        h("div",{class:"row",style:{justifyContent:"space-between",alignItems:"center"}},[
+          slots,
+          h("button",{onClick:async()=>{
+            const r=await Net.partyApi("/api/party/join",{slot:PS.current_slot, party_id:p.id});
+            if(r.ok===false){ setToast(r.error); return; }
+            Net.party=r.party; render();
+          }},["Join"]),
+        ]),
+      ]));
+    }
+  };
+  Net.partyApi("/api/party/list?slot="+PS.current_slot).then(r=>{
+    if(r && r.ok!==false) renderList(r.parties,r.your_level);
+  });
+
+  root.appendChild(h("h3",{},["Start your own"]));
+  if(GF._partySpread==null) GF._partySpread=3;
+  const spreadLabel=h("span",{style:{fontFamily:"Cinzel,Georgia,serif",color:"var(--gold)"}},[]);
+  const paintSpread=()=>{ spreadLabel.textContent=`${Math.max(1,PS.level-GF._partySpread)} \u2013 ${PS.level+GF._partySpread}`; };
+  paintSpread();
+  const noteInput=h("input",{type:"text",placeholder:"What are you doing? (optional)",maxLength:90,
+    style:{flex:"1",minWidth:"180px",background:"#0a0c07",border:"1px solid var(--border)",
+      borderRadius:"5px",color:"var(--text)",padding:"6px 9px",fontFamily:"Georgia,serif"}});
+  root.appendChild(h("div",{class:"panel"},[
+    h("div",{class:"muted",style:{fontSize:"12.5px",marginBottom:"9px"}},[
+      "Creating a party does not park you in a waiting room. Walk into the maze and keep playing \u2014 "+
+      "anyone who joins arrives where you are."]),
+    h("div",{class:"row gap",style:{alignItems:"center",flexWrap:"wrap",marginBottom:"9px"}},[
+      h("span",{class:"muted",style:{fontSize:"12.5px"}},["Accept levels"]),
+      h("button",{onClick:()=>{ GF._partySpread=Math.max(1,GF._partySpread-1); paintSpread(); }},["\u2212"]),
+      spreadLabel,
+      h("button",{onClick:()=>{ GF._partySpread=Math.min(20,GF._partySpread+1); paintSpread(); }},["+"]),
+      h("span",{class:"muted",style:{fontSize:"11.5px"}},["\u2014 narrowing this later never removes anyone already with you"]),
+    ]),
+    h("div",{class:"row gap",style:{alignItems:"center",flexWrap:"wrap"}},[
+      noteInput,
+      h("button",{onClick:async()=>{
+        const r=await Net.partyApi("/api/party/create",{slot:PS.current_slot, spread:GF._partySpread, note:noteInput.value});
+        if(r.ok===false){ setToast(r.error); return; }
+        Net.party=r.party; render();
+      }},["Create party"]),
+    ]),
+  ]));
+
+  root.appendChild(partyChatNode());
+  return root;
+}
+
+function partyLobbyMineNode(){
+  const p=Net.party;
+  const mf=p.magic_find||{};
+  const wrap=h("div",{});
+  wrap.appendChild(h("h3",{},[`Your party \u00B7 ${p.size}/${p.max_size}`]));
+  const grid=h("div",{class:"lobby-grid"});
+  for(const m of p.members) grid.appendChild(partyMateNode(m,{showRow:true}));
+  wrap.appendChild(grid);
+  wrap.appendChild(h("div",{class:"panel",style:{marginTop:"12px"}},[
+    h("div",{class:"mf-line"},[
+      h("span",{},["Party Magic Find"]),
+      h("span",{style:{fontWeight:"bold",color:"var(--gold)",fontSize:"17px"}},[`${mf.total}%`]),
+    ]),
+    h("div",{class:"muted",style:{fontSize:"12px"}},[
+      `Every member finds loot at this rate. ${mf.members_total}% is what the ${p.size} of you brought between you`,
+      mf.streak_pct>0?`, and ${mf.streak_pct}% is the party's ${mf.streak_kills}-kill streak.`:".",
+      mf.at_cap?" You are at the 500% ceiling \u2014 more will not help.":"",
+    ]),
+  ]));
+  if(Net.isPartyLeader()){
+    wrap.appendChild(h("div",{class:"muted",style:{fontSize:"12px",marginTop:"9px"}},[
+      "You are leading. Your steps move the party, and your fights are everyone's fights."]));
+  }
+  wrap.appendChild(h("button",{style:{marginTop:"10px"},onClick:async()=>{
+    await Net.partyApi("/api/party/leave",{});
+    Net.party=null; Net.partyEncounter=null; render();
+  }},["Leave party"]));
+  return wrap;
+}
+
+function partyChatNode(){
+  const inParty=Net.inParty();
+  if(GF._chatChannel==null) GF._chatChannel=inParty?"party":"lobby";
+  if(GF._chatChannel==="party" && !inParty) GF._chatChannel="lobby";
+  const tabs=h("div",{class:"chan-tabs"});
+  const channels=[["lobby","Lobby","var(--accent)"]];
+  if(inParty) channels.push(["party","Party","#c9a227"]);
+  for(const [key,label,color] of channels){
+    tabs.appendChild(h("div",{class:"chan-tab"+(GF._chatChannel===key?" on":""),onClick:()=>{ GF._chatChannel=key; render(); }},[
+      h("span",{class:"cdot",style:{background:color}}), label,
+    ]));
+  }
+  const lines=GF._chatChannel==="party"?Net.partyChat:Net.lobbyChat;
+  const log=h("div",{style:{background:"#0d0f0a",border:"1px solid var(--border)",borderRadius:"8px",
+    padding:"9px 11px",height:"180px",overflowY:"auto",fontSize:"12.5px",display:"flex",flexDirection:"column",gap:"2px"}});
+  if(!lines.length){
+    log.appendChild(h("div",{class:"muted",style:{fontStyle:"italic"}},[
+      GF._chatChannel==="party"?"Nothing said yet. This channel is only your party.":
+        "Nothing said yet. This channel is only players with the lobby open."]));
+  }
+  for(const m of lines){
+    const when=new Date(m.created_at).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
+    if(m.system){
+      log.appendChild(h("div",{class:"muted",style:{fontStyle:"italic"}},[`[${when}] \u2014 ${m.message}`]));
+    } else {
+      log.appendChild(h("div",{},[
+        h("span",{class:"muted",style:{fontSize:"11px",marginRight:"5px"}},[`[${when}]`]),
+        h("span",{style:{fontWeight:"bold"}},[`${m.username}: `]), m.message,
+      ]));
+    }
+  }
+  requestAnimationFrame(()=>{ if(log.isConnected) log.scrollTop=log.scrollHeight; });
+  const input=h("input",{type:"text",maxLength:300,
+    placeholder:GF._chatChannel==="party"?"Message your party\u2026":"Message the lobby\u2026",
+    style:{flex:"1",background:"#0a0c07",border:"1px solid var(--border)",borderRadius:"5px",
+      color:"var(--text)",padding:"6px 9px",fontFamily:"Georgia,serif"}});
+  const send=()=>{
+    const v=(input.value||"").trim(); if(!v) return;
+    if(GF._chatChannel==="party") Net.sendPartyChat(v); else Net.sendLobbyChat(v);
+    input.value="";
+  };
+  input.addEventListener("keydown",(e)=>{ if(e.key==="Enter"){ e.preventDefault(); send(); } });
+  return h("div",{style:{marginTop:"14px"}},[
+    tabs, log,
+    h("div",{class:"row gap",style:{marginTop:"7px"}},[input, h("button",{onClick:send},["Send"])]),
+  ]);
+}
+
+function screenPartyCombat(){
+  const root=h("div",{});
+  const enc=Net.partyEncounter;
+  const p=Net.party;
+  if(!enc || !p){
+    root.appendChild(h("h2",{},["The fight is over"]));
+    root.appendChild(h("button",{onClick:()=>GF.goto("maze")},["Back to the maze"]));
+    return root;
+  }
+  const me=Net.partyMe();
+  const alive=enc.monsters.filter(m=>!m.dead);
+  const cleared=alive.length===0;
+
+  root.appendChild(h("h2",{},[cleared?"The path is clear":(enc.monsters.length===1?"A monster blocks the path":`${enc.monsters.length} monsters block the path`)]));
+
+  const mobRow=h("div",{class:"row gap",style:{justifyContent:"center",flexWrap:"wrap",marginBottom:"10px"}});
+  for(const mon of enc.monsters){
+    const target=p.members.find(x=>x.account_id===mon.target_account_id);
+    mobRow.appendChild(h("div",{class:"panel"+(mon.dead?"":""),style:{width:"170px",textAlign:"center",
+      opacity:mon.dead?".4":"1",cursor:mon.dead?"default":"pointer",
+      borderColor:GF._partyTarget===mon.idx?"var(--gold)":undefined},
+      onClick:()=>{ if(!mon.dead){ GF._partyTarget=mon.idx; render(); } }},[
+      h("div",{style:{fontWeight:"bold",fontSize:"13px"}},[mon.label]),
+      h("div",{class:"muted",style:{fontSize:"11px"}},[`${mon.hp} / ${mon.max_hp}`]),
+      h("div",{class:"party-minibar",style:{height:"7px",marginTop:"3px"}},[
+        h("i",{style:{width:(mon.max_hp?mon.hp/mon.max_hp*100:0)+"%",background:"linear-gradient(90deg,#a83535,var(--hp))"}}),
+      ]),
+      h("div",{class:"muted",style:{fontSize:"11px",marginTop:"4px"}},[
+        mon.dead?"defeated":(target?`\u25BC ${target.character_name}`:"choosing a target")]),
+    ]));
+  }
+  root.appendChild(mobRow);
+
+  const front=p.members.filter(m=>m.row_pos==="front" && !m.in_town);
+  const back=p.members.filter(m=>m.row_pos!=="front" && !m.in_town);
+  const rankLabel=(text,sub)=>h("div",{style:{textAlign:"center",margin:"12px 0 6px"}},[
+    h("span",{style:{fontFamily:"Cinzel,Georgia,serif",fontSize:"11px",letterSpacing:"1px",color:"var(--muted)"}},[text]),
+    h("span",{class:"muted",style:{fontSize:"11.5px"}},[" \u00B7 "+sub]),
+  ]);
+  root.appendChild(rankLabel("FRONT ROW","monsters strike here first"));
+  const frontRow=h("div",{class:"row gap",style:{justifyContent:"center",flexWrap:"wrap"}});
+  if(!front.length){
+    frontRow.appendChild(h("div",{class:"muted",style:{border:"1px dashed #4a5438",borderRadius:"8px",padding:"12px 16px",fontSize:"12.5px"}},
+      ["Nobody is holding the front \u2014 monsters pick a target at random"]));
+  }
+  for(const m of front) frontRow.appendChild(partyFighterNode(m,enc));
+  root.appendChild(frontRow);
+  root.appendChild(rankLabel("BACK ROW","safe while anyone holds the front"));
+  const backRow=h("div",{class:"row gap",style:{justifyContent:"center",flexWrap:"wrap"}});
+  for(const m of back) backRow.appendChild(partyFighterNode(m,enc));
+  root.appendChild(backRow);
+
+  const controls=h("div",{class:"row gap",style:{justifyContent:"center",marginTop:"14px",flexWrap:"wrap"}});
+  if(!cleared && me && !me.in_town && !me.dead){
+    controls.appendChild(h("button",{onClick:async()=>{
+      const idx=(GF._partyTarget!=null && enc.monsters[GF._partyTarget] && !enc.monsters[GF._partyTarget].dead)
+        ? GF._partyTarget : (alive[0]?alive[0].idx:0);
+      const r=await Net.partyApi("/api/party/encounter/attack",{target_idx:idx});
+      if(r.ok===false){ setToast(r.error); return; }
+      Net.partyEncounter=r.encounter; render();
+    }},["Attack"]));
+    controls.appendChild(h("button",{onClick:async()=>{
+      const r=await Net.partyApi("/api/party/row",{row:me.row_pos==="front"?"back":"front"});
+      if(r.ok===false){ setToast(r.error); return; }
+      await Net.partyRefresh(); render();
+    }},[me.row_pos==="front"?"Fall back":"Step to the front"]));
+  }
+  if(cleared){
+    controls.appendChild(h("button",{onClick:async()=>{
+      await Net.partyApi("/api/party/encounter/leave",{});
+      Net.partyEncounter=null; GF.goto("maze");
+    }},["Move on"]));
+  }
+  root.appendChild(controls);
+
+  if((enc.loot||[]).length) root.appendChild(partyLootNode(enc));
+
+  root.appendChild(h("div",{style:{marginTop:"14px"}},[
+    h("div",{class:"hud-rail-title"},["COMBAT LOG"]),
+    (()=>{
+      const log=h("div",{class:"muted panel",style:{height:"170px",overflowY:"auto",fontSize:"12.5px",
+        display:"flex",flexDirection:"column",gap:"2px"}},(enc.log||[]).map(l=>h("div",{},[l])));
+      requestAnimationFrame(()=>{ if(log.isConnected) log.scrollTop=log.scrollHeight; });
+      return log;
+    })(),
+  ]));
+  return root;
+}
+
+function partyFighterNode(m, enc){
+  const targetedBy=(enc.monsters||[]).filter(mon=>!mon.dead && mon.target_account_id===m.account_id).length;
+  const node=partyMateNode(m,{showRow:true});
+  node.style.width="150px";
+  if(targetedBy>0){
+    node.style.borderColor="var(--hp)";
+    node.style.boxShadow="0 0 10px rgba(217,74,74,.28)";
+  }
+  return node;
+}
+
+function partyLootNameNode(item){
+  if(item.kind==="gear" && item.instance){
+    const inst=item.instance;
+    const wrap=gearCompareWrap(
+      h("div",{class:"rarity-"+inst.rarity,style:{fontWeight:"bold",fontSize:"12.5px"}},
+        [`${IF.displayName(inst)}${IF.itemQualitySuffix(inst)} (${tierRomanNumeral(inst.tier)})`]),
+      inst);
+    return wrap;
+  }
+  if(item.kind==="consumable"){
+    const def=DL.getItem?DL.getItem(item.item_id):null;
+    return h("div",{style:{fontWeight:"bold",fontSize:"12.5px"}},[
+      (def&&def.name?def.name:item.item_id)+(item.qty>1?` \u00D7${item.qty}`:"")]);
+  }
+  if(item.kind==="herb"){
+    const def=DL.getHerb?DL.getHerb(item.herb_id):null;
+    return h("div",{style:{fontWeight:"bold",fontSize:"12.5px"}},[
+      (def&&def.name?def.name:item.herb_id)+(item.qty>1?` \u00D7${item.qty}`:"")]);
+  }
+  return h("div",{style:{fontWeight:"bold",fontSize:"12.5px"}},[item.display||"Something"]);
+}
+function partyLootNode(enc){
+  const wrap=h("div",{style:{marginTop:"14px"}});
+  wrap.appendChild(h("div",{class:"hud-rail-title"},["THE PARTY'S POOL"]));
+  const grid=h("div",{class:"lobby-grid"});
+  const myId=Net.partyMe()?Net.partyMe().account_id:null;
+  for(const item of enc.loot){
+    const claimed=!!item.resolved_to;
+    const winner=claimed?(Net.party.members.find(m=>m.account_id===item.resolved_to)||{}):null;
+
+    const kids=[partyLootNameNode(item)];
+    if(claimed){
+      const rollText=(item.rolls||[]).map(r=>`${r.name} rolled ${r.roll}`).join(", ");
+      kids.push(h("div",{class:"muted",style:{fontSize:"11.5px"}},[
+        rollText?`${rollText} \u2014 ${winner.character_name} takes it`:`${winner.character_name} took it`]));
+    } else if((item.claims||[]).length){
+      kids.push(h("div",{style:{fontSize:"11.5px",color:"var(--gold)"}},[
+        item.claims.length>1
+          ? `Contested by ${item.claims.map(c=>c.name).join(" and ")} \u2014 rolling`
+          : `${item.claims[0].name} claimed it \u2014 three seconds to contest`]));
+      if(!item.claims.some(c=>c.account_id===myId)){
+        kids.push(h("button",{style:{width:"100%"},onClick:async()=>{
+          const r=await Net.partyApi("/api/party/loot/claim",{loot_id:item.id});
+          if(r.ok===false) setToast(r.error);
+        }},["Contest"]));
+      }
+    } else {
+      kids.push(h("button",{style:{width:"100%"},onClick:async()=>{
+        const r=await Net.partyApi("/api/party/loot/claim",{loot_id:item.id});
+        if(r.ok===false) setToast(r.error);
+      }},["Claim"]));
+    }
+    grid.appendChild(h("div",{class:"party-card"},kids));
+  }
+  wrap.appendChild(grid);
+  wrap.appendChild(h("div",{class:"muted",style:{fontSize:"11.5px",marginTop:"7px"}},[
+    "Anything left behind when the party moves on is littered, and littering costs everyone a point of Forest Reputation."]));
+  return wrap;
+}
+
 function hudRail(){
   const c=PS.getClassData();
   const buffIcons=activePotionBuffIcons();
@@ -5124,6 +5659,9 @@ function hudRail(){
       spellSlotIconRow(),
     ]),
   ]));
+
+  const partyPanel=hudPartyPanel();
+  if(partyPanel) rail.appendChild(partyPanel);
   rail.appendChild(h("div",{class:"panel"},[hudCombatSummary()]));
 
   const spellPanel=hudSpellSummary();
@@ -7084,7 +7622,7 @@ function screenTown(){
 
   root.appendChild(h("div",{class:"town-grid"},[
     h("div",{class:"town-row"},[
-      h("div",{class:"town-cell"},[
+      h("div",{class:"town-cell town-cell-venture"},[
         h("div",{class:"row venture-row"},[
           h("div",{class:"panel venture-card venture-fill npc-service-card venture-clickable",onClick:()=>{ cancelBonfireWarmthOnLeavingTown(); PS.resetKillStreak(); GF.goto("maze",{maze_depth: ventureDepth}); }},[
 
@@ -7113,7 +7651,9 @@ function screenTown(){
         ]),
       ]),
 
-      h("div",{class:"town-cell"},[kindleBonfirePanel()]),
+      h("div",{class:"town-cell town-cell-kindle"},[kindleBonfirePanel()]),
+
+      h("div",{class:"town-cell town-cell-party"},[partyLobbyTownCard()]),
     ]),
 
     h("div",{class:"town-row"},[
@@ -7122,6 +7662,8 @@ function screenTown(){
       ]),
 
       h("div",{class:"town-cell"},[
+
+        npcServiceCard("party","Party Lobby", Net.inParty()?`You are in a party of ${Net.party.size}.`:"Find company for the maze.",()=>{ GF.goto("partyLobby"); }),
         npcServiceCard("auction","Auction House","Trade with other travelers.",()=>{ Net.auctionCache=null; GF.goto("auctionHouse"); }),
       ]),
       h("div",{class:"town-cell"},[
@@ -7451,9 +7993,47 @@ function strongholdChestUnlocked(maze){
     : maze.stronghold.guardianDefeated.some(Boolean);
 }
 
+function partyRelayMaze(maze){
+  if(!Net.inParty() || !Net.isPartyLeader() || !maze) return;
+
+  const payload={
+    depth:maze.depth, w:maze.w, h:maze.h, isNight:!!maze.isNight,
+    cells:(maze.cells||[]).map(c=>({x:c.x,y:c.y,type:c.type,baseTerrain:c.baseTerrain,
+      discovered:!!c.discovered,cleared:!!c.cleared,trample:c.trample||0,prop:c.prop||null})),
+    roamers:(maze.roamers||[]).map(r=>({idx:r.idx,behavior:r.behavior})),
+    startIdx:maze.startIdx, exitIdx:maze.exitIdx, playerIdx:maze.playerIdx,
+  };
+  Net.partyApi("/api/party/maze",{maze:payload, area_level:maze.depth, is_night:!!maze.isNight});
+}
+
+function partyAdoptMaze(maze, areaLevel, isNight){
+  if(!maze) return;
+  if(Net.isPartyLeader()) return;
+  GF.overworld_snapshot=Object.assign({},maze,{depth:areaLevel||maze.depth, isNight:!!isNight});
+  GF.isNight=!!isNight;
+  if(GF.screen!=="maze" && GF.screen!=="partyCombat") GF.goto("maze");
+  else render();
+}
+
+function partyApplyStep(msg){
+  const maze=GF.overworld_snapshot;
+  if(!maze || Net.isPartyLeader()) return;
+  if(typeof msg.pos==="number") maze.playerIdx=msg.pos;
+  for(const i of (msg.reveal||[])) if(maze.cells[i]) maze.cells[i].discovered=true;
+  if(Array.isArray(msg.roamers)){
+    for(let i=0;i<(maze.roamers||[]).length;i++){
+      if(msg.roamers[i] && typeof msg.roamers[i].idx==="number") maze.roamers[i].idx=msg.roamers[i].idx;
+    }
+  }
+  render();
+}
 function ensureMaze(depth){
 
-  if(!GF.overworld_snapshot || GF.overworld_snapshot.depth!==depth) GF.overworld_snapshot=generateMaze(depth, GF.isNight);
+  if(!GF.overworld_snapshot || GF.overworld_snapshot.depth!==depth){
+    GF.overworld_snapshot=generateMaze(depth, GF.isNight);
+
+    partyRelayMaze(GF.overworld_snapshot);
+  }
   return GF.overworld_snapshot;
 }
 
@@ -7966,6 +8546,16 @@ function animateMazeMovers(prevPlayerIdx, prevRoamerPositions){
   }
 }
 
+function partyReportStep(maze, targetIdx, cost){
+  const reveal=[];
+  for(let i=0;i<(maze.cells||[]).length;i++) if(maze.cells[i] && maze.cells[i].discovered) reveal.push(i);
+  Net.partyApi("/api/party/step",{
+    cost, pos:targetIdx, reveal,
+    roamers:(maze.roamers||[]).map(r=>({idx:r.idx})),
+  }).then(r=>{
+    if(r && r.ok===false && r.error) mazeToast(r.error,"bad");
+  });
+}
 function onStepMaze(maze,targetIdx){
 
   if(PS.current_stamina<=0){
@@ -7989,7 +8579,13 @@ function onStepMaze(maze,targetIdx){
   else if(newPy>prevPy) maze.facingUp=false;
   maze.playerIdx=targetIdx; cell.discovered=true; cell.visited=true;
 
-  PS.spendStamina(Balance.staminaCostPerStep(PS.countValidEquippedItems()));
+  const stepCost=Balance.staminaCostPerStep(PS.countValidEquippedItems());
+  if(Net.inParty()){
+    if(!Net.isPartyLeader()) return;
+    partyReportStep(maze, targetIdx, stepCost);
+  } else {
+    PS.spendStamina(stepCost);
+  }
 
   tickEyesightPotion();
 
@@ -8800,6 +9396,22 @@ function syncCombatRoundBuffs(playerPayload){
 function triggerMazeEncounter(payload){
   if(GF.encounterGateBusy) return;
   GF.encounterGateBusy=true;
+
+  if(Net.inParty()){
+    GF.encounterGateBusy=false;
+    if(!Net.isPartyLeader()) return;
+    Net.partyApi("/api/party/encounter/start",{
+      area_level:GF.maze_depth,
+      monster_id:payload.pending_monster_id,
+      is_guardian:payload.pending_guardian_cell_idx!=null,
+      is_roamer:payload.pending_roamer_id!=null,
+      is_night:!!(GF.overworld_snapshot&&GF.overworld_snapshot.isNight),
+    }).then(r=>{
+      if(r && r.ok===false){ setToast(r.error); return; }
+      Net.partyEncounter=r.encounter; GF.goto("partyCombat");
+    });
+    return;
+  }
   const monsterDef=MONSTERS.find(mm=>mm.id===payload.pending_monster_id);
   const promptEligible=monsterDef && ["Rare","Epic","Legendary"].includes(monsterDef.tier);
   GF.pendingEncounterMobType=payload.pending_guardian_cell_idx!=null?"Guardian":(payload.pending_roamer_id!=null?"Roaming":null);
@@ -12429,6 +13041,18 @@ function legacyGearSection(){
 }
 
 const CHANGELOG=[
+  { version:"v0.30", date:"2026-08-06 06:40", notes:[
+    "Co-op multiplayer. Up to four of you can share one maze, one set of fights and one pool of loot. Find company through the new Party Lobby in town.",
+    "The leader walks and everyone follows. Whatever they walk into, the whole party fights, and the number of monsters is rolled between one and the size of your party.",
+    "Choose a row. The front row takes the monsters' attention; the back row is safe for as long as somebody holds the front. Step up or fall back at any point in the fight.",
+    "Everyone finds loot at the party's combined Magic Find, so a well-geared companion makes the whole party richer. Your party also builds its own kill streak, worth a further tenth of a percent per kill.",
+    "Every member receives the full experience for a shared kill, plus 5, 10 or 15% for a party of two, three or four, and every kill counts towards everyone's own quests.",
+    "Loot drops into a pool anyone can claim. A claim gives everyone else three seconds to contest it, and a contested item goes to the highest roll, announced in party chat. Anything left behind is littered, and littering costs everyone a point of Forest Reputation.",
+    "Gold splits evenly the moment it drops, with the odd coin to the leader.",
+    "One step drains everyone's stamina, and the party can only walk as far as its most tired member. Anyone can slip back to town to rest without leaving the party, and the others keep exploring while they do.",
+    "Party and lobby chat, separate from global. If you lose your connection you leave the party, and if the leader goes, the next longest-standing member takes over.",
+    "Playing alone is completely unchanged.",
+  ]},
   { version:"v0.29.1", date:"2026-08-06 05:10", notes:[
     "Quad Damage now quadruples your spells too, not just your weapon. A caster who found a Furious Shrine was getting a buff that did nothing for the way they actually fight. Healing is deliberately left out of it.",
     "Spell Cooldown Reduction is uncapped. It can go as far down as your build takes you, and at the very bottom a spell has no cooldown at all and only mana limits how often you cast.",
@@ -13746,6 +14370,9 @@ function screenMonsterGuide(){
 }
 
 const SCREENS={
+
+  partyLobby: screenPartyLobby,
+  partyCombat: screenPartyCombat,
   authGate: screenAuthGate,
   login: screenLogin,
   register: screenRegister,
