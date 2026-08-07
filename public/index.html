@@ -56,6 +56,8 @@ body{
   display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
   padding-top:48px;}
 #hud-main.centered > *{width:100%;max-width:1180px;margin-inline:0;}
+
+#hud-main.centered > .auth-page{max-width:none;width:100vw;}
 #hud-footer{grid-column:1 / -1;grid-row:3;border-top:1px solid var(--border);
   background:linear-gradient(180deg,#161911,#0d0f0b);display:flex;align-items:center;gap:22px;padding:10px 26px;}
 #hud-footer .hud-bars{flex:1;display:flex;flex-direction:column;gap:7px;min-width:0;}
@@ -111,7 +113,12 @@ body{
 .hud-globe .glbl{position:absolute;inset:0;z-index:4;display:flex;flex-direction:column;align-items:center;justify-content:center;
   font-family:Cinzel,Georgia,serif;text-shadow:0 2px 5px rgba(0,0,0,.95);pointer-events:none;}
 
-.hud-globe .glbl .gn{font-size:21px;line-height:1;}
+.hud-globe .glbl .gn{font-size:21px;line-height:1;display:flex;align-items:baseline;justify-content:center;gap:1px;}
+
+.hud-globe .glbl .gn .gn-max{font-size:11px;opacity:.72;font-weight:normal;}
+
+.hud-globe .glbl .gn.gn-stacked{flex-direction:column;gap:0;}
+.hud-globe .glbl .gn.gn-stacked .gn-max{font-size:11px;line-height:1.1;}
 .hud-globe .glbl .gt{font-size:11px;letter-spacing:1.5px;color:rgba(255,255,255,.72);margin-top:3px;}
 .hud-globe.hp .gfill{background:linear-gradient(180deg,#e35b5b,#8e2020);}
 .hud-globe.hp.poisoned .gfill{background:linear-gradient(180deg,#8fd06a,#3f7a2a);}
@@ -275,6 +282,19 @@ input[type=checkbox]:checked::after{content:"✓";position:absolute;top:-3px;lef
   0%,100% { box-shadow:0 0 0 0 rgba(224,178,61,0); }
   50%     { box-shadow:0 0 9px 1px rgba(224,178,61,.55); }
 }
+
+.panel.has-unspent-points{border-color:var(--gold);box-shadow:0 0 12px rgba(224,178,61,.20) inset;}
+
+.party-prompt-backdrop{position:fixed;inset:0;z-index:70;display:flex;align-items:center;
+  justify-content:center;background:rgba(8,10,6,.55);animation:partyPromptIn 180ms ease-out;}
+.party-prompt{background:linear-gradient(180deg,#232b1b,#161a10);border:1px solid var(--gold);
+  border-radius:12px;padding:20px 26px;max-width:420px;text-align:center;
+  box-shadow:0 10px 40px rgba(0,0,0,.6);}
+.party-prompt-title{font-family:Cinzel,Georgia,serif;font-size:17px;color:var(--gold);
+  letter-spacing:.5px;margin-bottom:8px;}
+.party-prompt-body{font-size:13.5px;line-height:1.5;}
+.party-prompt-sub{font-size:11.5px;color:var(--muted);margin-top:5px;}
+@keyframes partyPromptIn{from{opacity:0;}to{opacity:1;}}
 .stat-point-badge{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:9px;
   background:rgba(224,178,61,.16);border:1px solid var(--gold);color:var(--gold);
   font-family:Cinzel,Georgia,serif;font-size:10.5px;font-weight:bold;letter-spacing:.3px;
@@ -709,13 +729,15 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 
 .gear-row-affixes{display:flex;flex-direction:column;gap:1px;margin-top:2px;}
 
-.recipe-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:stretch;}
+.recipe-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;align-items:stretch;}
 .recipe-row{margin-bottom:0;align-items:flex-start;flex-wrap:wrap;gap:8px;}
 .recipe-ingredients{font-size:.85em;margin-top:3px;line-height:1.45;}
 .recipe-ing-label{color:var(--muted);font-weight:bold;}
 
 .recipe-row-locked{opacity:.45;filter:saturate(.55);}
 .recipe-row-locked .tooltip{cursor:help;}
+
+@media (max-width:1200px){ .recipe-grid{grid-template-columns:repeat(2,minmax(0,1fr));} }
 @media (max-width:900px){ .recipe-grid{grid-template-columns:1fr;} }
 @media (max-width:1400px){ .merchant-item-grid{grid-template-columns:repeat(4,minmax(0,1fr));} }
 @media (max-width:1100px){ .merchant-item-grid{grid-template-columns:repeat(3,minmax(0,1fr));} }
@@ -896,6 +918,8 @@ hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
 .stat-point-cta{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;background:var(--gold);color:#2a2210;font-weight:bold;border-radius:5px;cursor:pointer;font-size:1.1em;line-height:1;}
 .stat-point-cta:hover{background:#f0c85a;}
 
+#app{ -webkit-user-select:none; user-select:none; }
+#app input, #app textarea, #app [contenteditable="true"]{ -webkit-user-select:text; user-select:text; }
 .auth-page{
   position:fixed; inset:0; z-index:1; overflow-y:auto;
   background:#212c1b; color:#e8dfc8;
@@ -1467,6 +1491,8 @@ function questsButton(){
 const ASCENDANT_HUNT_BAND_DISPLAY={Common:"Newborn", Uncommon:"Young", Rare:"Mature", Epic:"Elder", Legendary:"Ancient"};
 
 function questStepCount(qid){
+
+  if(qid==="streak") return Balance.QUEST_DEFS.STREAK_STEPS.length;
   if(qid==="wardens") return Balance.QUEST_DEFS.WARDEN_TRIAL_STEPS.length;
   if(qid==="elder") return Balance.QUEST_DEFS.ASCENDANT_HUNT_STEPS.length;
   if(qid==="trader") return Balance.QUEST_DEFS.TRADER_STEPS.length;
@@ -1519,6 +1545,8 @@ function questObjectiveText(qid,entry){
   if(qid==="palisade") return `Open ${T.palisade_chests>1?T.palisade_chests+" stronghold chests":"a stronghold chest"} (progress carries across the whole town, not just one delve).`;
 
   if(qid==="pacifist") return `Slay a monster in combat without ever landing a blow of your own.`;
+
+  if(qid==="surefooting") return `Descend ${Balance.QUEST_DEFS.SUREFOOTING_DESCENTS} area levels without springing a trap. Returning to town is fine; a trap starts you over.`;
   return "";
 }
 const QUEST_CHIP_ICONS={
@@ -1574,6 +1602,10 @@ function questRewardChips(qid,entry){
 
     const keyTier=clampi(((PS.quests&&PS.quests.town)||1)+1,1,Balance.ITEM_TIER_MAX);
     chips.push(questChip(DL.getItem(Balance.strongholdKeyItemIdForTier(keyTier)).name||"Stronghold Key"));
+  } else if(qid==="surefooting"){
+    const sr=Balance.QUEST_DEFS.REWARDS.surefooting;
+    chips.push(questChip(`+${sr.stat_points} stat pts`,"statpt"));
+    chips.push(questChip(`+${sr.stamina_max} Max Stamina`,"statpt"));
   } else if(qid==="pacifist"){
     const pr=Balance.QUEST_DEFS.PACIFIST_REWARD;
     chips.push(questChip(`+${pr.stat_points} stat pts`,"statpt"));
@@ -1696,7 +1728,8 @@ function questCard(qid){
 
   const entry=PS.quests.entries[qid]||questBuildEntry(qid);
   const status=entry.status;
-  const name=Balance.QUEST_DEFS.NAMES[qid]||qid;
+
+  const name=questDisplayName(qid,entry);
   const iconWrap=h("span",{},[]);
   iconWrap.innerHTML=questIconSvg(qid);
   const body=[
@@ -1927,7 +1960,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.32-web",
+  GAME_VERSION:"v0.33-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
 
@@ -2061,11 +2094,13 @@ const Balance = {
   },
 
   QUEST_DEFS:{
-    IDS:["explore","wardens","gatherer","wanderers","streak","cauldron","elder","palisade","pacifist","trader","cleanse"],
+    IDS:["explore","wardens","gatherer","wanderers","streak","cauldron","elder","palisade","pacifist","trader","cleanse", "surefooting"],
     NAMES:{
       explore:"Every Root and Hollow", wardens:"The Warden Trials", gatherer:"The Gatherer's Dozen",
       wanderers:"Thin the Wanderers", streak:"The Unbroken Chain", cauldron:"The Simmering Cauldron",
       elder:"The Ascendant Hunt", palisade:"Behind the Palisade", pacifist:"The Pacifist",
+
+      surefooting:"Sure Footing",
       trader:"The Long Road to Market", cleanse:"Cleanse the Forest",
     },
 
@@ -2078,39 +2113,72 @@ const Balance = {
       palisade_chests:1,
     },
 
-    WARDEN_TRIAL_STEPS:[
-      {count:4, stat_points:2, xp:300, gold:500},
-      {count:8, stat_points:3, xp:900, gold:1500},
-      {count:12, stat_points:4, xp:2500, gold:4000},
-      {count:16, stat_points:5, xp:6000, gold:10000},
-      {count:20, stat_points:6, xp:15000, gold:25000},
-    ],
+  WARDEN_TRIAL_STEPS: [
+    { count:4, stat_points:2, xp:300, gold:480 },
+    { count:8, stat_points:4, xp:600, gold:960 },
+    { count:16, stat_points:8, xp:1200, gold:1920 },
+    { count:32, stat_points:16, xp:2400, gold:3840 },
+    { count:64, stat_points:32, xp:4800, gold:7680 },
+    { count:128, stat_points:64, xp:9600, gold:15360 },
+    { count:256, stat_points:128, xp:19200, gold:30720 },
+    { count:512, stat_points:256, xp:38400, gold:61440 },
+    { count:1024, stat_points:512, xp:76800, gold:122880 },
+    { count:2048, stat_points:1024, xp:153600, gold:245760 },
+  ],
 
-    TRADER_STEPS:[
-      {count:1, stat_points:1, xp:50},
-      {count:5, stat_points:1, xp:50},
-      {count:20, stat_points:1, xp:200},
-      {count:50, stat_points:1, xp:500},
-      {count:100, stat_points:1, xp:1000},
-    ],
+  STREAK_STEPS: [
+    { count:8, xp:176, gold:13 },
+    { count:14, xp:317, gold:23 },
+    { count:26, xp:570, gold:41 },
+    { count:47, xp:1026, gold:75 },
+    { count:84, xp:1848, gold:134 },
+    { count:151, xp:3326, gold:242 },
+    { count:272, xp:5986, gold:435 },
+    { count:490, xp:10775, gold:784 },
+    { count:882, xp:19395, gold:1411 },
+    { count:1587, xp:34911, gold:2539 },
+  ],
+  TRADER_STEPS: [
+    { count:1, stat_points:5, xp:450 },
+    { count:5, stat_points:5, xp:2250 },
+    { count:20, stat_points:5, xp:9000 },
+    { count:60, stat_points:5, xp:27000 },
+    { count:120, stat_points:5, xp:54000 },
+  ],
 
-    CLEANSE_STEPS:[
-      {count:100, stat_points:5, gold:500},
-      {count:500, stat_points:5, gold:2500},
-      {count:3000, stat_points:10, gold:15000},
-      {count:10000, stat_points:25, gold:50000},
-      {count:100000, stat_points:50, gold:300000},
-    ],
+  CLEANSE_STEPS: [
+    { count:10, stat_points:1, gold:44 },
+    { count:40, stat_points:2, gold:176 },
+    { count:120, stat_points:3, gold:528 },
+    { count:300, stat_points:4, gold:1320 },
+    { count:750, stat_points:5, gold:3300 },
+    { count:2800, stat_points:6, gold:12320 },
+    { count:5500, stat_points:7, gold:24200 },
+    { count:10700, stat_points:8, gold:47080 },
+    { count:18800, stat_points:9, gold:82720 },
+    { count:30000, stat_points:10, gold:132000 },
+  ],
     CAULDRON_DISTINCT_TARGET:7,
-    ASCENDANT_HUNT_STEPS:[
-      {band:"Common", count:20, stat_points:5, xp:200},
-      {band:"Uncommon", count:10, stat_points:5, xp:500},
-      {band:"Rare", count:5, stat_points:5, xp:1000},
-      {band:"Epic", count:3, stat_points:5, xp:3000},
-      {band:"Legendary", count:1, stat_points:5, xp:15000},
-    ],
+  ASCENDANT_HUNT_STEPS: [
+    { count:15, band:"Common", stat_points:5, xp:180 },
+    { count:45, band:"Common", stat_points:5, xp:540 },
+    { count:15, band:"Uncommon", stat_points:5, xp:540 },
+    { count:45, band:"Uncommon", stat_points:5, xp:1620 },
+    { count:135, band:"Uncommon", stat_points:5, xp:4860 },
+    { count:15, band:"Rare", stat_points:5, xp:1440 },
+    { count:45, band:"Rare", stat_points:5, xp:4320 },
+    { count:135, band:"Rare", stat_points:5, xp:12960 },
+    { count:15, band:"Epic", stat_points:5, xp:3780 },
+    { count:45, band:"Epic", stat_points:5, xp:11340 },
+    { count:135, band:"Epic", stat_points:5, xp:34020 },
+    { count:15, band:"Legendary", stat_points:5, xp:6120 },
+    { count:45, band:"Legendary", stat_points:5, xp:18360 },
+    { count:135, band:"Legendary", stat_points:5, xp:55080 },
+  ],
 
     CAULDRON_ATTR_POTION_REQUIRED:true,
+
+    SUREFOOTING_DESCENTS:10,
     ATTR_POTION_IDS:["potion_of_might","potion_of_swiftness","potion_of_intellect"],
 
     REWARDS:{
@@ -2120,6 +2188,7 @@ const Balance = {
       streak:{gold:600, xp:250},
       cauldron:{elixirs:["elixir_of_eyesight"], stat_points:1},
       palisade:{gold:900},
+      surefooting:{stat_points:5, stamina_max:100},
     },
 
     PACIFIST_REWARD:{xp:5000, stat_points:20, potions:{potion_of_renewal:3, potion_of_wardveil:3}},
@@ -2997,6 +3066,15 @@ const Net = {
     this.lobbyActive=!!active;
     if(this.chatSocket && this.chatSocket.readyState===1) this.chatSocket.send(JSON.stringify({type:"lobby_presence", active:!!active}));
   },
+
+  reportFooting(slot,event,areaLevel){
+    if(!this.online) return;
+    const body={slot,event};
+    if(areaLevel!=null) body.area_level=areaLevel;
+    this.partyApi("/api/quests/report-footing",body).then(r=>{
+      if(r&&r.quests) PS.quests=r.quests;
+    }).catch(()=>{});
+  },
   async refreshCharacters(){
     const res=await fetch(this.apiBase()+"/api/characters",{headers:this.authHeaders()});
     if(!res.ok) throw new Error("Could not load your characters from the server.");
@@ -3556,6 +3634,10 @@ const Net = {
             else render();
             return;
           }
+          if(msg.type==="party_opened"){
+            partyQueueOpenedPrompt(msg);
+            return;
+          }
           if(msg.type==="party_descend"){
 
             GF.maze_depth=msg.area_level;
@@ -3638,7 +3720,7 @@ const PS = {
     if(delta!==0) notifyGoldChange(delta);
   },
 
-  quests:null, quest_bonus_hp:0,
+  quests:null, quest_bonus_hp:0, quest_bonus_stamina:0,
 
   quests_seen_at_level:0,
 
@@ -3769,6 +3851,15 @@ const PS = {
     let n=Balance.SPELL_SLOT_COUNT;
     if(IF.setBonusesFor("wizard_set").count>=6) n+=Balance.WIZARD_SET_6PC_BONUS_SPELL_SLOTS;
     return n;
+  },
+
+  getAvgCritMultiplier(){
+    const floor=Balance.CRIT_MULTIPLIER;
+    return (floor+Math.max(floor,this.getCritMultiplierMax()))/2;
+  },
+  getCritDamageFactor(){
+    const c=clampf(this.getCritChance(),0,1);
+    return 1+c*(this.getAvgCritMultiplier()-1);
   },
   getSpellSlots(){ const n=this.getEffectiveSpellSlotCount(); const s=(this.spell_slots||[]).slice(0,n); while(s.length<n) s.push(null); return s; },
   getHerbalismPoints(){ return this.herbalism_points||0; },
@@ -3917,7 +4008,7 @@ const PS = {
     return regen;
   },
 
-  getMaxStamina(){return Math.round(Balance.STAMINA_MAX_BASE+this.gearBonus("stamina_max")+Balance.vitStaminaBonus(this.getClassData(),this.getTotalAttr("vit")));},
+  getMaxStamina(){return Math.round(Balance.STAMINA_MAX_BASE+this.gearBonus("stamina_max")+Balance.vitStaminaBonus(this.getClassData(),this.getTotalAttr("vit"))+(this.quest_bonus_stamina||0));},
   getGoldFindMult(){return 1.0+this.gearBonus("gold_find")/100.0;},
   getXpFindMult(){return 1.0+this.gearBonus("xp_find")/100.0;},
 
@@ -4157,7 +4248,11 @@ const PS = {
 
     if(this.kill_streak>this.max_kill_streak) this.max_kill_streak=this.kill_streak;
   },
-  resetKillStreak(){ this.kill_streak=0; },
+
+  resetKillStreak(){ this.kill_streak=0; this.quest_kill_streak=0;
+    const e=this.quests&&this.quests.entries&&this.quests.entries.streak;
+    if(e&&e.status==="active"){ e._streak_base=0; e.progress=0; }
+  },
 
   getForestReputation(tier){
     const raw=(this.forest_reputation && this.forest_reputation[tier]) || 0;
@@ -4530,7 +4625,7 @@ const PS = {
     for(const s of IF.EQUIPPED_SLOT_KEYS) this.equipped[s]=null;
     this.equipped_bags=[]; this.pending_scroll_bonus=0; this.xp_buff_multiplier=1.0;
     this.xp_buff_encounters_left=0; this.stamina_shrine_buff=0.0; this.highest_tier_reached=1;
-    this.season_won=false; this.kill_streak=0; this.max_kill_streak=0; this.total_kills=0; this.forest_reputation={}; this.xp_to_next=Balance.xpRequiredForLevel(this.level);
+    this.season_won=false; this.kill_streak=0; this.quest_kill_streak=0; this.max_kill_streak=0; this.total_kills=0; this.forest_reputation={}; this.xp_to_next=Balance.xpRequiredForLevel(this.level);
     this.lifetime_xp=0; this.isRestingAtCampfire=false; this.eyesight_potion_steps_left=0;
 
     this.clarity_charges_left=0;
@@ -4641,7 +4736,7 @@ const PS = {
   },
   _applyLoadedData(slot,parsed){
     this.current_slot=slot; this.class_id=parsed.class_id||""; this.character_name=parsed.character_name||"Hero";
-    this.hardcore=!!parsed.hardcore; this.kill_streak=0;
+    this.hardcore=!!parsed.hardcore; this.kill_streak=0; this.quest_kill_streak=0;
 
     this.max_kill_streak=parsed.max_kill_streak||0;
 
@@ -5051,14 +5146,14 @@ function toggleChat(){
 
 function activePlayersLine(){
   const entries=Net.activePlayersCache;
-  if(entries===null||entries===undefined) return h("div",{class:"muted",style:{fontSize:".85em",marginBottom:"6px"}},["Currently playing: loading..."]);
+  if(entries===null||entries===undefined) return h("div",{id:"active-players-line",class:"muted",style:{fontSize:".85em",marginBottom:"6px"}},["Currently playing: loading..."]);
 
   const otherPlayers=entries.filter(e=>(e.character_name||e)!==PS.character_name);
-  if(otherPlayers.length===0) return h("div",{style:{display:"none"}});
+  if(otherPlayers.length===0) return h("div",{id:"active-players-line",style:{display:"none"}});
   const shown=entries.slice(0,5).map(e=>e.character_name);
   const others=entries.length-shown.length;
   const text="Currently playing: "+shown.join(", ")+(others>0?`, and ${others} other${others===1?"":"s"}`:"");
-  return h("div",{class:"muted",style:{fontSize:".85em",marginBottom:"6px"}},[text]);
+  return h("div",{id:"active-players-line",class:"muted",style:{fontSize:".85em",marginBottom:"6px"}},[text]);
 }
 
 function getCommunityXpBonusPct(){
@@ -5193,7 +5288,11 @@ function hudGlobe(kind,cur,max,size,tip,projected){
     h("div",{class:"gfill",id:"hud-globe-fill-"+kind,style:{height:p+"%"}}),
     h("div",{class:"ggloss"}),
     h("div",{class:"glbl"},[
-      h("div",{class:"gn",id:"hud-globe-num-"+kind},[`${Math.round(cur)}`]),
+
+      h("div",{class:"gn"+(max>=1000?" gn-stacked":""),id:"hud-globe-num-"+kind},[
+        h("span",{class:"gn-cur"},[`${Math.round(cur)}`]),
+        h("span",{class:"gn-max"},[`/${Math.round(max)}`]),
+      ]),
       h("div",{class:"gt"},[kind==="hp"?"LIFE":"MANA"]),
     ]),
   ]);
@@ -5379,6 +5478,52 @@ function partyOpenCountRefresh(){
     const next=(r.parties||[]).length;
     if(next!==GF._partyCount){ GF._partyCount=next; render(); }
   });
+}
+
+const PARTY_PROMPT_COOLDOWN_MS=90000;
+const PARTY_PROMPT_LIFE_MS=12000;
+function partyQueueOpenedPrompt(msg){
+  if(Net.inParty()) return;
+  if(GF._partyPrompt) return;
+  const now=Date.now();
+  if(GF._partyPromptLastAt && now-GF._partyPromptLastAt<PARTY_PROMPT_COOLDOWN_MS) return;
+
+  if(GF.screen==="combat" || GF.screen==="partyCombat"){ GF._partyPromptPending=msg; return; }
+  partyShowOpenedPrompt(msg);
+}
+
+function partyFlushOpenedPrompt(){
+  const held=GF._partyPromptPending;
+  if(!held) return;
+  GF._partyPromptPending=null;
+  partyQueueOpenedPrompt(held);
+}
+function partyShowOpenedPrompt(msg){
+  GF._partyPromptLastAt=Date.now();
+  GF._partyPrompt=msg;
+  render();
+
+  clearTimeout(GF._partyPromptTimer);
+  GF._partyPromptTimer=setTimeout(()=>{ GF._partyPrompt=null; render(); }, PARTY_PROMPT_LIFE_MS);
+}
+function partyOpenedPromptNode(){
+  const m=GF._partyPrompt;
+  if(!m) return null;
+  const dismiss=()=>{ clearTimeout(GF._partyPromptTimer); GF._partyPrompt=null; render(); };
+  return h("div",{class:"party-prompt-backdrop",onClick:dismiss},[
+    h("div",{class:"party-prompt",onClick:(e)=>e.stopPropagation()},[
+      h("div",{class:"party-prompt-title"},["A party has opened"]),
+      h("div",{class:"party-prompt-body"},[
+        h("b",{},[m.leader_name||"Someone"]),
+        ` has opened up a party in the lobby. Do you want to join it?`,
+      ]),
+      h("div",{class:"party-prompt-sub"},[`Taking levels ${m.min_level}\u2013${m.max_level}.`]),
+      h("div",{class:"row gap",style:{justifyContent:"center",marginTop:"12px"}},[
+        h("button",{class:"auth-cta",onClick:()=>{ dismiss(); Net.setLobbyPresence(true); GF.goto("partyLobby"); }},["Yes, take me there"]),
+        h("button",{onClick:dismiss},["Cancel"]),
+      ]),
+    ]),
+  ]);
 }
 function partyLobbyTownCard(){
   const inParty=Net.inParty();
@@ -6149,8 +6294,10 @@ function hudRail(){
       (()=>{
         const pts=unspentPointTotal();
         if(pts<=0) return null;
-        return h("span",{class:"stat-point-badge tooltip",
-          "data-tip":`You have ${pts} unspent attribute point${pts>1?"s":""}. Open the Character Sheet to spend them.`},
+
+        return h("span",{class:"stat-point-badge tooltip",style:{cursor:"pointer"},
+          "data-tip":`You have ${pts} unspent attribute point${pts>1?"s":""}. Click to spend them.`,
+          onClick:()=>{ GF.characterSheetTab="overview"; GF.goto("inventory",{inventory_return_to:GF.screen}); }},
           [`${pts} point${pts>1?"s":""}`]);
       })(),
     ]),
@@ -6202,7 +6349,9 @@ function hudSpellSummary(){
 
     const avg=(min+max)/2*hits*PS.getSpellEffectivenessMult()*(PS.hasQuadDamage()?4:1);
     const cdMs=PS.getSpellCooldownMs(def.cooldown_ms||1000);
-    const dps=cdMs>0?avg/(cdMs/1000):avg;
+
+    const critFactor=PS.getCritDamageFactor();
+    const dps=cdMs>0?(avg*critFactor)/(cdMs/1000):avg*critFactor;
     if(!best||dps>best.dps) best={spellId,def,tier,avg,cdMs,dps,name:Balance.SPELLS[spellId].name};
   }
   if(!best) return null;
@@ -6221,7 +6370,8 @@ function hudSpellSummary(){
     best.cdMs<=0
       ? `Cooldown: none. Reduced ${cdr}%, so only mana limits how often you cast.`
       : `Cooldown: ${(best.cdMs/1000).toFixed(2)}s${cdr>0?` (reduced ${cdr}%)`:""}`,
-    `Spell DPS: ${Math.round(best.avg)} / ${(best.cdMs/1000).toFixed(2)}s = ${Math.round(best.dps)}`,
+    `Critical hits: ${Math.round(PS.getCritChance()*100)}% chance, ${PS.getAvgCritMultiplier().toFixed(2)}x average`,
+    `Spell DPS: ${Math.round(best.avg)} x ${PS.getCritDamageFactor().toFixed(2)} crit / ${(best.cdMs/1000).toFixed(2)}s = ${Math.round(best.dps)}`,
   ].filter(Boolean);
   return h("div",{class:"panel"},[
     h("div",{class:"dps-block"},[
@@ -6256,13 +6406,15 @@ function hudCombatSummary(){
     parts.push(`${profLabel} proficiency: +${(d.weaponSkillPct*100).toFixed(0)}% (+${Math.round(d.weaponSkillBonus)} damage)`);
   }
 
-  if(d.intDmgBonus) parts.push(`Intelligence: +${Math.round(d.intDmgBonus)}`);
   parts.push(`Total: ${total}`);
 
   const attackSpeed=PS.getAttackSpeed();
-  const dps=Math.round(total*attackSpeed);
+
+  const critFactor=PS.getCritDamageFactor();
+  const dps=Math.round(total*critFactor*attackSpeed);
   parts.push(`Attack Speed: ${attackSpeed.toFixed(2)} per second`);
-  parts.push(`Physical DPS: ${total} x ${attackSpeed.toFixed(2)} = ${dps}`);
+  parts.push(`Critical hits: ${Math.round(PS.getCritChance()*100)}% chance, ${PS.getAvgCritMultiplier().toFixed(2)}x average`);
+  parts.push(`Physical DPS: ${total} x ${critFactor.toFixed(2)} crit x ${attackSpeed.toFixed(2)} = ${dps}`);
 
   return h("div",{},[
     h("div",{class:"dps-block"},[
@@ -6285,6 +6437,22 @@ function hudCombatSummary(){
   ]);
 }
 
+function refreshActivePlayersLineInPlace(){
+  const box=document.getElementById("active-players-line");
+  if(!box || !box.parentNode) return false;
+  const fresh=activePlayersLine();
+  if(!fresh){ return false; }
+  box.replaceWith(fresh);
+  return true;
+}
+
+function hudGlobeSetNums(el,cur,max){
+  const c=el.querySelector(".gn-cur"), m=el.querySelector(".gn-max");
+  if(!c||!m){ el.textContent=`${Math.round(cur)}`; return; }
+  c.textContent=`${Math.round(cur)}`;
+  m.textContent=`/${Math.round(max)}`;
+  el.classList.toggle("gn-stacked",max>=1000);
+}
 function refreshStatHeaderInPlace(smooth){
   const footer=document.getElementById("hud-footer");
   if(!footer || !footer.parentNode){
@@ -6308,9 +6476,10 @@ function refreshStatHeaderInPlace(smooth){
   if(manaGhost) manaGhost.style.height=clampf(maxMana>0?PS.getProjectedMana()/maxMana*100:0,0,100)+"%";
   if(stamGhost) stamGhost.style.width=clampf(PS.getProjectedStamina()/maxStam*100,0,100)+"%";
   if(hpFillG) hpFillG.style.height=clampf(PS.current_hp/maxHp*100,0,100)+"%";
-  if(hpNumG) hpNumG.textContent=`${Math.round(PS.current_hp)}`;
+
+  if(hpNumG) hudGlobeSetNums(hpNumG,PS.current_hp,maxHp);
   if(manaFillG) manaFillG.style.height=clampf(maxMana>0?PS.current_mana/maxMana*100:0,0,100)+"%";
-  if(manaNumG) manaNumG.textContent=`${Math.round(PS.current_mana)}`;
+  if(manaNumG) hudGlobeSetNums(manaNumG,PS.current_mana,maxMana);
   if(stamFill) stamFill.style.width=clampf(PS.current_stamina/maxStam*100,0,100)+"%";
   if(stamCap) stamCap.textContent=`Stamina ${Math.round(PS.current_stamina)} / ${Math.round(maxStam)}`;
   if(xpFill) xpFill.style.width=clampf(PS.xp_to_next>0?PS.xp/PS.xp_to_next*100:0,0,100)+"%";
@@ -6427,6 +6596,34 @@ function installSelectRenderGuard(){
   document.addEventListener("blur",()=>flush(false),true);
 }
 installSelectRenderGuard();
+
+document.addEventListener("contextmenu",(e)=>{
+  const el=e.target;
+  if(el && (el.tagName==="INPUT" || el.tagName==="TEXTAREA" || el.isContentEditable)) return;
+  e.preventDefault();
+});
+
+function captureUiState(){
+  const el=document.activeElement;
+  if(!el || el===document.body) return null;
+  const st={ id:el.id||null, tag:el.tagName, cls:el.className||"" };
+
+  if(typeof el.selectionStart==="number"){ st.selStart=el.selectionStart; st.selEnd=el.selectionEnd; }
+  if("value" in el) st.value=el.value;
+  return st;
+}
+function restoreUiState(st){
+  if(!st || !st.id) return;
+  const el=document.getElementById(st.id);
+  if(!el) return;
+  try{
+    if("value" in el && st.value!=null && el.value!==st.value) el.value=st.value;
+    el.focus({preventScroll:true});
+    if(typeof st.selStart==="number" && typeof el.setSelectionRange==="function"){
+      el.setSelectionRange(st.selStart,st.selEnd);
+    }
+  }catch(e){  }
+}
 function render(){
   if(renderDeferredBySelect()){ GF._renderDeferred=true; return; }
   const prevMain=document.getElementById("hud-main");
@@ -6435,6 +6632,9 @@ function render(){
   const keepRailScroll=prevRail?prevRail.scrollTop:0;
 
   const keepWindowScroll=window.scrollY||document.documentElement.scrollTop||0;
+  const keepUi=captureUiState();
+
+  const prevHtml=GF._renderSkipCheck===false?null:app.innerHTML;
   app.innerHTML="";
 
   const chromeless=NO_TOPBAR_SCREENS.includes(GF.screen) || PS.current_slot<0;
@@ -6459,6 +6659,13 @@ function render(){
   if(keepRailScroll && newRail) newRail.scrollTop=keepRailScroll;
 
   if(keepWindowScroll) window.scrollTo(0,keepWindowScroll);
+
+  restoreUiState(keepUi);
+
+  const prompt=partyOpenedPromptNode();
+  if(prompt) app.appendChild(prompt);
+
+  if(GF.screen!=="combat" && GF.screen!=="partyCombat") partyFlushOpenedPrompt();
   maybeShowWhatsNewPopup();
 }
 
@@ -6771,10 +6978,21 @@ function playerStatsCompactPanel(){
   ]);
   if(!expanded) return root;
 
-  const cell=(label,base,suffix,addition,additionIsPercent)=>h("div",{class:"player-stats-cell"},[
+  const cell=(label,base,suffix,addition,additionIsPercent,tip)=>h("div",
+    {class:"player-stats-cell"+(tip?" tooltip":""),"data-tip":tip||null},[
     h("div",{class:"muted"},[label]),
     h("div",{},[playerStatsStatText(base,suffix), playerStatsGearDelta(addition,additionIsPercent)]),
   ]);
+
+  const attrTip=(key)=>{
+    const c=PS.getClassData();
+    const lines=attributeSummaryLines(c.chain,c);
+    const idx={str:0,dex:1,vit:2,int:3}[key];
+    const line=(lines&&lines[idx])||"";
+    const gearKey={str:"strength",dex:"dexterity",vit:"vitality",int:"intelligence"}[key];
+    const gear=Math.round(PS.gearBonus(gearKey)||0);
+    return gear>0 ? `${line}\n\n${PS.attributes[key]||0} from points, +${gear} from gear.` : line;
+  };
 
   const col=(title,cells,wide)=>h("div",{class:"player-stats-col",style:wide?{gridColumn:"span 2"}:{}},[
     h("div",{class:"player-stats-cat"},[title]),
@@ -6784,10 +7002,10 @@ function playerStatsCompactPanel(){
   const dmgBreak=PS.getDamageBreakdown();
   const grid=h("div",{class:"player-stats-grid"},[
     col("Attributes",[
-      cell("Strength",PS.attributes.str||0,"",PS.gearBonus("strength"),false),
-      cell("Dexterity",PS.attributes.dex||0,"",PS.gearBonus("dexterity"),false),
-      cell("Vitality",PS.attributes.vit||0,"",PS.gearBonus("vitality"),false),
-      cell("Intelligence",PS.attributes.int||0,"",PS.gearBonus("intelligence"),false),
+      cell("Strength",PS.attributes.str||0,"",PS.gearBonus("strength"),false,attrTip("str")),
+      cell("Dexterity",PS.attributes.dex||0,"",PS.gearBonus("dexterity"),false,attrTip("dex")),
+      cell("Vitality",PS.attributes.vit||0,"",PS.gearBonus("vitality"),false,attrTip("vit")),
+      cell("Intelligence",PS.attributes.int||0,"",PS.gearBonus("intelligence"),false,attrTip("int")),
     ],true),
     col("Offense",[
       cell("Damage",Math.round((dmgBreak.baseMin+dmgBreak.baseMax)/2),"",Math.round(dmgBreak.gearBonus),false),
@@ -9269,6 +9487,8 @@ function onStepMaze(maze,targetIdx){
     autosave();
 
     if(Net.inParty() && Net.isPartyLeader()) Net.partyApi("/api/party/descend",{area_level:nextDepth});
+
+    Net.reportFooting(PS.current_slot,"descent",nextDepth);
     GF.mazeOverlay={text:`Advanced to area level ${nextDepth}!`, andThen:()=>{ GF.overworld_snapshot=null; GF.goto("maze",{maze_depth:nextDepth}); }};
     render();
     return;
@@ -9276,6 +9496,8 @@ function onStepMaze(maze,targetIdx){
   if(cell.type==="trap" && !cell.cleared){
     cell.cleared=true; cell.type=cell.baseTerrain;
     PS.spendStamina(Balance.TRAP_STAMINA_LOSS);
+
+    Net.reportFooting(PS.current_slot,"trap");
 
     const trapWardPct=Math.min(100,PS.gearBonus("trap_ward"));
     const outcome=Balance.rollTrapOutcome(maze.depth);
@@ -11056,7 +11278,8 @@ function attributeSummaryLines(chain,classData){
   const strArmorLine=`+${strArmorPerPoint} Armor per point (reduces incoming direct-hit damage).`;
   if(chain==="thornguard"){
     return [
-      `Strength: +1 damage per point, and ${strArmorLine}`,
+
+      `Strength: +1 weapon damage per point, and ${strArmorLine}`,
       `Dexterity: +${blockPct}% Block Chance per point, a chance to take 0 damage from a hit.`,
       vitLine,
       "Intelligence: no effect for this path.",
@@ -11065,7 +11288,7 @@ function attributeSummaryLines(chain,classData){
   if(chain==="windrider"){
     return [
       `Strength: ${strArmorLine}`,
-      `Dexterity: +1 damage per point, and +${blockPct}% Block Chance per point, a chance to take 0 damage from a hit.`,
+      `Dexterity: +1 weapon damage per point, and +${blockPct}% Block Chance per point, a chance to take 0 damage from a hit.`,
       vitLine,
       "Intelligence: no effect for this path.",
     ];
@@ -11076,7 +11299,7 @@ function attributeSummaryLines(chain,classData){
       `Dexterity: +${blockPct}% Block Chance per point, a chance to take 0 damage from a hit.`,
       vitLine,
 
-      `Intelligence: +${Balance.WIZARD_INT_DAMAGE_PER_POINT} damage per point.`,
+      `Intelligence: +${Balance.WIZARD_INT_DAMAGE_PER_POINT} spell damage per point.`,
     ];
   }
   return [];
@@ -11084,6 +11307,8 @@ function attributeSummaryLines(chain,classData){
 
 function attributesPanel(){
   const c=PS.getClassData();
+
+  const hasPoints=(PS.unspent_stat_points||0)>0;
   const rows=[{key:"str",label:"Strength",gearStat:"strength"},{key:"dex",label:"Dexterity",gearStat:"dexterity"},{key:"vit",label:"Vitality",gearStat:"vitality"},{key:"int",label:"Intelligence",gearStat:"intelligence"}];
   const summaryLines=attributeSummaryLines(c.chain,c);
 
@@ -11099,7 +11324,7 @@ function attributesPanel(){
     ]);
   });
 
-  return h("div",{class:"panel",style:{marginTop:"12px",marginBottom:"12px",height:"100%"}},[
+  return h("div",{class:"panel"+(hasPoints?" has-unspent-points":""),style:{marginTop:"12px",marginBottom:"12px",height:"100%"}},[
     h("div",{class:"row panel-section-title",style:{justifyContent:"space-between",alignItems:"center"}},[
       h("div",{},["Attributes"]),
       h("div",{class:PS.unspent_stat_points>0?"gold-text":"muted",style:{textTransform:"none",letterSpacing:"normal",fontSize:"1em"}},[PS.unspent_stat_points>0?`${PS.unspent_stat_points} point${PS.unspent_stat_points===1?"":"s"} to spend`:"No unspent points"]),
@@ -13725,6 +13950,23 @@ function legacyGearSection(){
 }
 
 const CHANGELOG=[
+  { version:"v0.33", date:"2026-08-07 12:00", notes:[
+    "Critical hits now count toward the damage figures on your character panel, for both weapons and spells. Suggested by Stration.",
+    "Spells can land critical hits. Critical Strike Chance and Multiplier finally do something for casters.",
+    "Fixed the Magic Find shrine running out on swings instead of monsters. A tough fight could burn the whole thing without a single kill to show for it. Reported by Stration.",
+    "New quest: Sure Footing. Descend ten area levels without springing a trap, for five attribute points and +100 maximum stamina. Going back to town is fine; a trap starts you over.",
+    "The Unbroken Chain is a ten-part chain now, and it progresses while you play in a party.",
+    "The Warden Trials, The Ascendant Hunt, The Long Road to Market and Cleanse the Forest have all been retuned, and every chain shows which part you are on.",
+    "Claiming a quest step always starts the next one from zero.",
+    "Someone opening a party now announces it. You can join from the message, or dismiss it; it never interrupts a fight.",
+    "The health and mana globes show your maximum beside the current value, so gear and attribute changes are visible.",
+    "Hovering an attribute in the sidebar explains what it does for your class. Intelligence is described as spell damage, which is what it actually is.",
+    "The login screen fills the window again.",
+    "Text no longer highlights blue when you drag or double-click, and right-click no longer opens the browser menu.",
+    "Unspent attribute points are one click away from the sidebar, and the Attributes panel is marked while any are waiting.",
+    "Alchemist recipes are three across.",
+    "Typing in a field is no longer interrupted by background updates.",
+  ]},
   { version:"v0.32", date:"2026-08-07 08:00", notes:[
     "Quest stat points are just stat points now. Rewards go straight into your normal pool and are spent from the same place as the rest, so the separate Quest Points box is gone. Points you had already earned are carried over.",
     "The Gameplay Guide is much shorter, and the Broken Bridge is now shown as a picture of an attempt in progress rather than described in a paragraph.",
@@ -15455,7 +15697,9 @@ setInterval(idleRoamerTick,1000);
 
 setInterval(()=>{
   if(!Net.online) return;
-  Net.fetchActivePlayers().then(render).catch(()=>{});
+  Net.fetchActivePlayers().then(()=>{
+    if(!refreshActivePlayersLineInPlace()) render();
+  }).catch(()=>{});
 },30000);
 
 (async function boot(){

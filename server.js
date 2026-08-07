@@ -1039,7 +1039,7 @@ function applyLadderReset(data) {
 const QUEST_DEFS = {
   // v0.25: two new questlines, both 5-step like "wardens"/"elder". "trader" gets trade moving
   // by rewarding Auction House sales; "cleanse" is the season-long lifetime-kill chase.
-  IDS: ["explore", "wardens", "gatherer", "wanderers", "streak", "cauldron", "elder", "palisade", "pacifist", "trader", "cleanse"],
+  IDS: ["explore", "wardens", "gatherer", "wanderers", "streak", "cauldron", "elder", "palisade", "pacifist", "trader", "cleanse", "surefooting"],
   NAMES: {
     explore: "Every Root and Hollow", wardens: "The Warden Trials", gatherer: "The Gatherer's Dozen",
     wanderers: "Thin the Wanderers", streak: "The Unbroken Chain", cauldron: "The Simmering Cauldron",
@@ -1050,6 +1050,8 @@ const QUEST_DEFS = {
     // mechanics -- see questObjectiveText's "pacifist" branch in index.html for the exact
     // player-facing copy, per Gwen's explicit instruction not to spell out the mechanism.
     pacifist: "The Pacifist",
+    // v0.33 (credit: Gwen): descend ten area levels without springing a trap.
+    surefooting: "Sure Footing",
     trader: "The Long Road to Market", cleanse: "Cleanse the Forest",
   },
   // Level requirement (within the CURRENT town's own level arc) for a quest to flip from
@@ -1087,11 +1089,16 @@ const QUEST_DEFS = {
   //      without going home. That difficulty is intentional; the rewards are sized for it.
   // Total across all 5 steps: +20 stat points, 24,700 XP, 41,000 gold.
   WARDEN_TRIAL_STEPS: [
-    { count: 4, stat_points: 2, xp: 300, gold: 500 },
-    { count: 8, stat_points: 3, xp: 900, gold: 1500 },
-    { count: 12, stat_points: 4, xp: 2500, gold: 4000 },
-    { count: 16, stat_points: 5, xp: 6000, gold: 10000 },
-    { count: 20, stat_points: 6, xp: 15000, gold: 25000 },
+    { count:4, stat_points:2, xp:300, gold:480 },
+    { count:8, stat_points:4, xp:600, gold:960 },
+    { count:16, stat_points:8, xp:1200, gold:1920 },
+    { count:32, stat_points:16, xp:2400, gold:3840 },
+    { count:64, stat_points:32, xp:4800, gold:7680 },
+    { count:128, stat_points:64, xp:9600, gold:15360 },
+    { count:256, stat_points:128, xp:19200, gold:30720 },
+    { count:512, stat_points:256, xp:38400, gold:61440 },
+    { count:1024, stat_points:512, xp:76800, gold:122880 },
+    { count:2048, stat_points:1024, xp:153600, gold:245760 },
   ],
   // v0.24.1 (B4): "elder" is now a 5-step questline through every band in order, replacing the
   // old single "kill N of band X" target -- each step must be individually claimed at the board
@@ -1103,11 +1110,20 @@ const QUEST_DEFS = {
   // Uncommon/Rare/Epic/Legendary), displayed via index.html's MONSTER_BAND_INFO[...].label as
   // Newborn/Young/Mature/Elder/Ancient. Total across all 5 steps: +25 stat points, +19,700 XP.
   ASCENDANT_HUNT_STEPS: [
-    { band: "Common", count: 20, stat_points: 5, xp: 200 },
-    { band: "Uncommon", count: 10, stat_points: 5, xp: 500 },
-    { band: "Rare", count: 5, stat_points: 5, xp: 1000 },
-    { band: "Epic", count: 3, stat_points: 5, xp: 3000 },
-    { band: "Legendary", count: 1, stat_points: 5, xp: 15000 },
+    { count:15, band:"Common", stat_points:5, xp:180 },
+    { count:45, band:"Common", stat_points:5, xp:540 },
+    { count:15, band:"Uncommon", stat_points:5, xp:540 },
+    { count:45, band:"Uncommon", stat_points:5, xp:1620 },
+    { count:135, band:"Uncommon", stat_points:5, xp:4860 },
+    { count:15, band:"Rare", stat_points:5, xp:1440 },
+    { count:45, band:"Rare", stat_points:5, xp:4320 },
+    { count:135, band:"Rare", stat_points:5, xp:12960 },
+    { count:15, band:"Epic", stat_points:5, xp:3780 },
+    { count:45, band:"Epic", stat_points:5, xp:11340 },
+    { count:135, band:"Epic", stat_points:5, xp:34020 },
+    { count:15, band:"Legendary", stat_points:5, xp:6120 },
+    { count:45, band:"Legendary", stat_points:5, xp:18360 },
+    { count:135, band:"Legendary", stat_points:5, xp:55080 },
   ],
   // v0.24.1 (B6): "The Simmering Cauldron" now asks for 7 DISTINCT potion recipes brewed while
   // the quest is active, not 7 (or N) brews of anything -- brewing the same potion twice no
@@ -1122,12 +1138,27 @@ const QUEST_DEFS = {
   // character earns its own way through this line even though the gold from a sale is
   // account-shared. Step 1 is a single sale on purpose -- the whole point is getting a player
   // to list something for the first time.
+  /* v0.33 (credit: Gwen): The Unbroken Chain becomes a ten-part chain. It used to be a single
+     8-kill quest with no step field at all, so it gains the same step machinery the other four
+     chains have. */
+  STREAK_STEPS: [
+    { count:8, xp:176, gold:13 },
+    { count:14, xp:317, gold:23 },
+    { count:26, xp:570, gold:41 },
+    { count:47, xp:1026, gold:75 },
+    { count:84, xp:1848, gold:134 },
+    { count:151, xp:3326, gold:242 },
+    { count:272, xp:5986, gold:435 },
+    { count:490, xp:10775, gold:784 },
+    { count:882, xp:19395, gold:1411 },
+    { count:1587, xp:34911, gold:2539 },
+  ],
   TRADER_STEPS: [
-    { count: 1, stat_points: 1, xp: 50 },
-    { count: 5, stat_points: 1, xp: 50 },
-    { count: 20, stat_points: 1, xp: 200 },
-    { count: 50, stat_points: 1, xp: 500 },
-    { count: 100, stat_points: 1, xp: 1000 },
+    { count:1, stat_points:5, xp:450 },
+    { count:5, stat_points:5, xp:2250 },
+    { count:20, stat_points:5, xp:9000 },
+    { count:60, stat_points:5, xp:27000 },
+    { count:120, stat_points:5, xp:54000 },
   ],
   // v0.25 (credit: Gwen): "Cleanse the Forest" -- 5 steps against data.total_kills, the LIFETIME
   // monster counter that already survives Broken Bridge promotions and ladder resets. Step 5's
@@ -1137,11 +1168,16 @@ const QUEST_DEFS = {
   // questTrackTotalKills(), which re-derives progress from total_kills on every kill, so a board
   // rebuild simply recomputes the same true number rather than losing it.
   CLEANSE_STEPS: [
-    { count: 100, stat_points: 5, gold: 500 },
-    { count: 500, stat_points: 5, gold: 2500 },
-    { count: 3000, stat_points: 10, gold: 15000 },
-    { count: 10000, stat_points: 25, gold: 50000 },
-    { count: 100000, stat_points: 50, gold: 300000 },
+    { count:10, stat_points:1, gold:44 },
+    { count:40, stat_points:2, gold:176 },
+    { count:120, stat_points:3, gold:528 },
+    { count:300, stat_points:4, gold:1320 },
+    { count:750, stat_points:5, gold:3300 },
+    { count:2800, stat_points:6, gold:12320 },
+    { count:5500, stat_points:7, gold:24200 },
+    { count:10700, stat_points:8, gold:47080 },
+    { count:18800, stat_points:9, gold:82720 },
+    { count:30000, stat_points:10, gold:132000 },
   ],
   CAULDRON_DISTINCT_TARGET: 7,
   // v0.24.2 / v0.25.2 (credit: Gwen): this used to be a per-town array
@@ -1153,6 +1189,11 @@ const QUEST_DEFS = {
   // of the distinct recipes brewed toward the target must be a Potion of Might, Swiftness or
   // Intellect (see ATTR_POTION_IDS and questTrackBrewReport()'s attr_potion_brewed flag).
   CAULDRON_ATTR_POTION_REQUIRED: true,
+  /* v0.33 (credit: Gwen): "Sure Footing" -- descend ten area levels without springing a trap.
+     Descents rather than steps, deliberately: a step target would be farmed by pacing left and
+     right on a safe tile, whereas a descent cannot be faked. Retreating to town does NOT break
+     the run; only a trap does. */
+  SUREFOOTING_DESCENTS: 10,
   ATTR_POTION_IDS: ["potion_of_might", "potion_of_swiftness", "potion_of_intellect"],
   // v-quest: every valid brew RESULT item id (mirrors index.html's ALCHEMY_RECIPES result_item
   // list verbatim) -- COMBAT_CONSUMABLES above is deliberately narrower (only what combat's
@@ -1174,6 +1215,9 @@ const QUEST_DEFS = {
     streak: { gold: 600, xp: 250 },
     cauldron: { elixirs: ["elixir_of_eyesight"], stat_points: 1 },
     palisade: { gold: 900 },
+  // The largest single reward in the game, by request. +100 stamina is more than half again what
+  // a mid-level character carries -- which is the point: ten clean descents is a long discipline.
+  surefooting: { stat_points: 5, stamina_max: 100 },
   },
   // v0.24.1 (B5 "The Pacifist"): a single fixed reward, deliberately NOT town-scaled (like
   // ASCENDANT_HUNT_STEPS above) -- this is a one-time "did you ever pull off a pure-Thorns
@@ -1218,6 +1262,7 @@ function questBuildEntry(qid) {
   else if (qid === "streak") target = QUEST_DEFS.TARGETS.streak_kills;
   else if (qid === "cauldron") target = QUEST_DEFS.CAULDRON_DISTINCT_TARGET;
   else if (qid === "palisade") target = QUEST_DEFS.TARGETS.palisade_chests;
+  else if (qid === "surefooting") target = QUEST_DEFS.SUREFOOTING_DESCENTS;
   let entry;
   if (qid === "elder") {
     entry = { step: 1, progress: 0, target: QUEST_DEFS.ASCENDANT_HUNT_STEPS[0].count, status: questInitialStatus(qid) };
@@ -1225,9 +1270,14 @@ function questBuildEntry(qid) {
     // v0.24.2: "wardens" is step-based now too, same shape as "elder" -- see WARDEN_TRIAL_STEPS.
     entry = { step: 1, progress: 0, target: QUEST_DEFS.WARDEN_TRIAL_STEPS[0].count, status: questInitialStatus(qid) };
   } else if (qid === "trader") {
-    entry = { step: 1, progress: 0, target: QUEST_DEFS.TRADER_STEPS[0].count, status: questInitialStatus(qid) };
+    // v0.33: _sales_base seeded like Cleanse's _kill_base -- a character with 120 lifetime sales
+    // starts Part 1 needing one NEW sale, not already holding it.
+    entry = { step: 1, progress: 0, target: QUEST_DEFS.TRADER_STEPS[0].count, status: questInitialStatus(qid), _sales_base: null };
   } else if (qid === "cleanse") {
     entry = { step: 1, progress: 0, target: QUEST_DEFS.CLEANSE_STEPS[0].count, status: questInitialStatus(qid), _kill_base: null };
+  } else if (qid === "streak") {
+    // v0.33 (credit: Gwen): stepped, with its own measurement base.
+    entry = { step: 1, progress: 0, target: QUEST_DEFS.STREAK_STEPS[0].count, status: questInitialStatus(qid), _streak_base: null };
   } else {
     entry = { progress: 0, target, status: questInitialStatus(qid) };
   }
@@ -1256,6 +1306,7 @@ function questRebuildBoardForTown(data, town) {
   // already overwrites data.attributes and data.unspent_stat_points wholesale -- so there is
   // nothing left to clear here beyond the flat HP bonus, which is not an attribute.
   data.quest_bonus_hp = 0;
+  data.quest_bonus_stamina = 0;
 }
 
 // Lazily hydrates data.quests/quest_attr_bonus/quest_bonus_hp/unspent_quest_stat_points for a
@@ -1310,6 +1361,7 @@ function questEnsureState(data) {
     questRebuildBoardForTown(data, tier);
   }
   if (typeof data.quest_bonus_hp !== "number") data.quest_bonus_hp = 0;
+  if (typeof data.quest_bonus_stamina !== "number") data.quest_bonus_stamina = 0;
   const level = data.level || 1;
   for (const qid of QUEST_DEFS.IDS) {
     // v0.24.2 BUG FIX (credit: Gwen, "The Pacifist" showing as locked): backfill any quest id
@@ -1392,16 +1444,67 @@ function questEnsureState(data) {
 // reset (we simply never re-check a "ready" entry down), but the quest can also never
 // complete without a genuine unbroken streak reaching the target in one go, since progress is
 // only ever raised to (never speculatively past) the CURRENT streak value.
+/* v0.33 (credit: Gwen): the quest reads its OWN streak counter, not the Magic Find one.
+
+   These were the same number until now, and that forced a choice nobody should have to make.
+   data.kill_streak drives Magic Find at 1% per kill, so party kills must NOT advance it -- four
+   members each brewing a full-rate streak is what produced 253% Magic Find at area level 3 and,
+   with it, a Legendary from a Sprout. But Gwen wants The Unbroken Chain to progress in a party,
+   and at 1,587 consecutive kills for Part 10 that chain would otherwise be solo-only.
+
+   So there are two counters now. quest_kill_streak counts EVERY kill, solo or shared, and only
+   the quest reads it. kill_streak stays exactly as it was and only Magic Find reads it. Both
+   reset on death, because both are streaks; they differ only in what feeds them.
+
+   Progress is only ever RAISED to the current streak, never speculatively past it, so a step can
+   never complete without a genuine unbroken run reaching its target in one go. */
 function questTrackKillStreak(data) {
   const entry = data.quests.entries.streak;
   if (!entry || entry.status !== "active") return;
-  const streak = data.kill_streak || 0;
-  entry.progress = Math.min(entry.target, Math.max(entry.progress || 0, streak));
-  if (streak >= entry.target) entry.status = "ready";
+  const streak = data.quest_kill_streak || 0;
+  if (typeof entry._streak_base !== "number") entry._streak_base = streak;
+  const base = entry._streak_base || 0;
+  // Claiming rebases (see the claim handler), so each part asks for its own unbroken run rather
+  // than inheriting the streak that completed the previous one.
+  const since = Math.max(0, streak - base);
+  entry.progress = Math.min(entry.target, Math.max(entry.progress || 0, since));
+  if (since >= entry.target) entry.status = "ready";
+}
+
+/* Advances the quest-side streak. Called from every kill resolution -- solo AND party. */
+function questAdvanceKillStreak(data) {
+  data.quest_kill_streak = (data.quest_kill_streak || 0) + 1;
+}
+/* Both streaks break together. A death is a death. */
+function questResetKillStreak(data) {
+  data.quest_kill_streak = 0;
+  const entry = data.quests && data.quests.entries && data.quests.entries.streak;
+  // The measurement base goes with it, so a fresh run counts from zero rather than from a
+  // baseline that predates the break.
+  if (entry && entry.status === "active") { entry._streak_base = 0; entry.progress = 0; }
 }
 
 // v-quest (Q4 "wanderers"): a genuine persistent per-town running total -- every is_roamer
 // kill counts, no delve-boundary logic needed (unlike wardens/streak/explore below).
+/* v0.33 (credit: Gwen): "Sure Footing". Two events feed it, and they are the whole quest -- a
+   descent advances it, a sprung trap sends it back to zero.
+
+   Progress is NOT the capped-and-held kind a lifetime counter uses: the run has to be unbroken,
+   so a trap genuinely resets it rather than merely pausing it. Going back to town is not a break;
+   the player simply has not advanced yet, which is Gwen's rule exactly. */
+function questTrackDescent(data) {
+  const entry = data.quests && data.quests.entries && data.quests.entries.surefooting;
+  if (!entry || entry.status !== "active") return;
+  entry.progress = Math.min(entry.target, (entry.progress || 0) + 1);
+  if (entry.progress >= entry.target) entry.status = "ready";
+}
+function questTrackTrapSprung(data) {
+  const entry = data.quests && data.quests.entries && data.quests.entries.surefooting;
+  if (!entry || entry.status !== "active") return;
+  // Counted whether or not the trap actually hurt: with enough Trap Ward a trap costs almost
+  // nothing, and letting gear make traps free would turn a discipline quest into a gear check.
+  entry.progress = 0;
+}
 function questTrackRoamerKill(data) {
   const entry = data.quests.entries.wanderers;
   if (!entry || entry.status !== "active") return;
@@ -1499,7 +1602,14 @@ function questTrackAuctionSales(data) {
   const step = QUEST_DEFS.TRADER_STEPS[(entry.step || 1) - 1];
   if (!step) return;
   entry.target = step.count;
-  entry.progress = Math.min(step.count, data.auction_sales || 0);
+  /* v0.33 (credit: Gwen): measured from this part's own baseline, not from lifetime sales. Without
+     it, a player with 120 lifetime sales would have every part of the chain already complete the
+     moment they claimed the first. The base is seeded on first sight for characters that predate
+     this, so nobody is retroactively set back. */
+  // A null base means "not anchored yet" -- anchor it to now, so the part counts from here.
+  if (typeof entry._sales_base !== "number") entry._sales_base = data.auction_sales || 0;
+  const since = Math.max(0, (data.auction_sales || 0) - entry._sales_base);
+  entry.progress = Math.min(step.count, since);
   if (entry.progress >= step.count) entry.status = "ready";
 }
 
@@ -1939,7 +2049,9 @@ app.post("/api/quests/:questId/claim", requireAuth, (req, res) => {
     }
   } else if (questId === "trader" || questId === "cleanse") {
     // v0.25: both new questlines share the exact step-advance shape "wardens"/"elder" use.
-    const steps = questId === "trader" ? QUEST_DEFS.TRADER_STEPS : QUEST_DEFS.CLEANSE_STEPS;
+    const steps = questId === "trader" ? QUEST_DEFS.TRADER_STEPS
+                : questId === "streak" ? QUEST_DEFS.STREAK_STEPS
+                : QUEST_DEFS.CLEANSE_STEPS;
     const stepIdx = (entry.step || 1) - 1;
     const stepDef = steps[stepIdx] || steps[0];
     data.unspent_stat_points = (data.unspent_stat_points || 0) + stepDef.stat_points;
@@ -1951,18 +2063,32 @@ app.post("/api/quests/:questId/claim", requireAuth, (req, res) => {
       reward.xp = xpResult.xpGained;
     }
     reward.step = entry.step || 1;
-    reward.step_count = steps.length;
+    // v0.33 (credit: Gwen): step_count is no longer sent. The length of a chain is meant to be a
+    // mystery, and a number that is never displayed is still readable in the network tab.
     if (stepIdx + 1 < steps.length) {
       entry.step = stepIdx + 2;
       entry.target = steps[stepIdx + 1].count;
-      // Both count a LIFETIME total, so the next step's progress carries straight over rather
-      // than restarting at 0 -- a player at 120 kills who claims step 1 (100) is genuinely
-      // already 120/500 toward step 2, and showing 0/500 would be a lie.
-      // v0.29: Cleanse counts kills since its own baseline, so claiming a step moves that
-      // baseline to now -- each step asks for its own kills rather than inheriting the last
-      // step's. Trader still carries its lifetime sales forward, which is correct for it: an
-      // Auction House sale is a permanent fact about the character, not something a trial undoes.
-      if (questId === "cleanse") {
+      /* v0.33 (credit: Gwen): claiming ALWAYS rebases. "New quest = entirely new progress on
+         counters" -- the next part starts at 0%, never part-way along.
+
+         This overturns the reasoning that used to sit here, which argued a lifetime total should
+         carry forward because showing 0/500 to a player already at 120 kills "would be a lie".
+         The trouble is what that produced: with the new Trader targets, a player with 120
+         lifetime sales would claim Parts 1 through 5 back to back without selling anything at
+         all. Each part now asks for its own progress, measured from the moment the previous one
+         was claimed.
+
+         Cleanse already worked this way (v0.29). Trader and the streak now do too, each with
+         their own baseline field. */
+      if (questId === "trader") {
+        entry._sales_base = data.auction_sales || 0;
+        entry.progress = 0;
+      } else if (questId === "streak") {
+        // The streak itself keeps running -- only the quest's measurement restarts, so claiming
+        // never costs the player their Magic Find.
+        entry._streak_base = data.quest_kill_streak || 0;
+        entry.progress = 0;
+      } else if (questId === "cleanse") {
         entry._kill_base = data.total_kills || 0;
         entry.progress = 0;
       } else {
@@ -1973,6 +2099,17 @@ app.post("/api/quests/:questId/claim", requireAuth, (req, res) => {
     } else {
       reward.done = true;
     }
+  } else if (questId === "surefooting") {
+    /* v0.33 (credit: Gwen): "Sure Footing". quest_bonus_stamina mirrors quest_bonus_hp exactly --
+       a flat additive layer on the pool rather than an attribute, so it has nothing to merge into
+       and is cleared by a Broken Bridge Trial the same way. */
+    const r = QUEST_DEFS.REWARDS.surefooting;
+    data.unspent_stat_points = (data.unspent_stat_points || 0) + r.stat_points;
+    data.quest_bonus_stamina = (data.quest_bonus_stamina || 0) + r.stamina_max;
+    // Granted immediately, not on next load: the point of the reward is feeling it right away.
+    data.current_stamina = Math.min(combatGetMaxStamina(data), (data.current_stamina || 0) + r.stamina_max);
+    reward.stat_points = r.stat_points;
+    reward.stamina_max = r.stamina_max;
   } else if (questId === "palisade") {
     creditAccountGold(req.account.id, QUEST_DEFS.REWARDS.palisade.gold);
     const keyTier = cbClampi((data.quests.town || 1) + 1, 1, ITEM_TIER_MAX);
@@ -2077,6 +2214,41 @@ app.post("/api/quests/spend-stat-point", requireAuth, (req, res) => {
 // per Gwen's exact spec this quest is meant to be satisfiable at ANY area level (same simple
 // "finish exploring a delve" objective everywhere for a given town), so that lower-bound check
 // is dropped entirely. The max_maze_depth_reached upper-bound plausibility check stays.
+/* v0.33 (credit: Gwen): the two events "Sure Footing" listens for. Both are client-reported, the
+   same trust model every other maze report already uses (see the SCOPE NOTE ON MAZE LEGITIMACY) --
+   the maze is not server-tracked, so a descent and a sprung trap can only be asserted. The
+   descent report is bounded by max_maze_depth_reached, exactly as report-explore is, so it cannot
+   be used to claim progress in areas the character has never reached.
+
+   A single route rather than two: a trap and a descent are the same quest's two halves, and one
+   endpoint means they cannot be handled inconsistently. */
+app.post("/api/quests/report-footing", requireAuth, (req, res) => {
+  const slot = Number(req.body?.slot);
+  const event = String(req.body?.event || "");
+  if (!Number.isInteger(slot) || slot < 0 || slot >= MAX_CHARACTER_SLOTS) return res.status(400).json({ error: "Invalid slot." });
+  if (event !== "descent" && event !== "trap") return res.status(400).json({ error: "Invalid event." });
+  const data = loadCharacterRow(req.account.id, slot);
+  if (!data) return res.status(404).json({ error: "No character in that slot." });
+  questEnsureState(data);
+  const entry = data.quests.entries.surefooting;
+  if (!entry || entry.status !== "active") return res.json({ ok: true, ignored: true, quests: data.quests });
+  if (event === "descent") {
+    const areaLevel = Number(req.body?.area_level);
+    if (!Number.isInteger(areaLevel) || areaLevel < 1) return res.status(400).json({ error: "Invalid area_level." });
+    if (areaLevel > (data.max_maze_depth_reached || 1)) {
+      return res.status(400).json({ error: "That report isn't plausible for your current progress." });
+    }
+    if (!questReportRateLimitOk(entry)) return res.status(429).json({ error: "Too soon since your last report." });
+    questTrackDescent(data);
+  } else {
+    // A trap report is never rate-limited: it only ever COSTS the player progress, so there is
+    // nothing to gain by sending it often and nothing to protect against.
+    questTrackTrapSprung(data);
+  }
+  const saveSeq = saveCharacterRow(req.account.id, slot, data);
+  res.json({ ok: true, quests: data.quests, _save_seq: saveSeq });
+});
+
 app.post("/api/quests/report-explore", requireAuth, (req, res) => {
   const slot = Number(req.body?.slot);
   const areaLevel = Number(req.body?.area_level);
@@ -3622,7 +3794,8 @@ function combatGetMaxStamina(data) {
   // v0.24.2: same fix as combatGetMaxHp() just above -- gear/quest/potion Vitality now counts
   // toward the Stamina pool too, instead of base attributes only.
   const vit = combatGetTotalAttr(data, "vit");
-  return Math.round(CB.STAMINA_MAX_BASE + combatGearBonus(data, "stamina_max") + combatVitStaminaBonus(c, vit));
+  // v0.33: + the flat quest layer, the twin of quest_bonus_hp in combatGetMaxHp().
+  return Math.round(CB.STAMINA_MAX_BASE + combatGearBonus(data, "stamina_max") + combatVitStaminaBonus(c, vit) + (data.quest_bonus_stamina || 0));
 }
 // v0.23.0 (Part A4): the level-derived half of the future Mana resource (base per-class amount,
 // current_mana tracking, and regen land with Part B) -- lands now so Part B's mana pool inherits
@@ -3806,6 +3979,11 @@ function combatGetMonsterCritCeiling(areaLevel) {
 // as of v0.22.7 (#18) -- see combatRollMonsterCritMultiplier() below for the monster path,
 // which no longer reuses CB.CRIT_MULTIPLIER as its floor.
 function combatRollCritMultiplier(maxMult) { return CB.CRIT_MULTIPLIER + Math.random() * Math.max(0, maxMult - CB.CRIT_MULTIPLIER); }
+/* v0.33 (credit: Gwen): the EXPECTED multiplier, for anything that needs an average rather than a
+   roll -- the DPS readouts, most of all. The roll above is uniform between the floor and the
+   character's ceiling, so the expected value is the midpoint. Using the ceiling would overstate
+   DPS for exactly the players who stacked Critical Strike Multiplier. */
+function combatAvgCritMultiplier(maxMult) { return (CB.CRIT_MULTIPLIER + Math.max(CB.CRIT_MULTIPLIER, maxMult)) / 2; }
 // v0.22.7 (#18): monster-specific crit roll -- unlike the player's combatRollCritMultiplier()
 // above, a monster's floor is NOT the shared CB.CRIT_MULTIPLIER constant; it's its own
 // area-level-dependent value from combatGetMonsterCritFloor(). Takes both bounds explicitly
@@ -3915,7 +4093,17 @@ function combatHasQuadDamage(data) { return (data.quad_dmg_rounds_left || 0) > 0
 function combatTickCombatRoundBuffs(data) {
   if (data.invuln_rounds_left > 0) data.invuln_rounds_left--;
   if (data.quad_dmg_rounds_left > 0) data.quad_dmg_rounds_left--;
-  if (data.magic_find_rounds_left > 0) data.magic_find_rounds_left--;
+  /* v0.33 BUG FIX (credit: Stration, via Gwen): the Magic Find shrine buff no longer burns down
+     here. A "round" is one attack or failed flee, so 25 rounds meant 25 SWINGS -- and a monster
+     that took 26 hits to kill consumed the entire buff while granting Magic Find on exactly zero
+     kills, because the loot roll happens at the kill and the counter was already at 0. It got
+     worse with depth, which is precisely where the shrine matters: monster health scales faster
+     than player damage, so the deeper you went the fewer monsters those 25 swings covered.
+
+     Invulnerability and Quad Damage are per-swing effects, so rounds are the right unit for them.
+     Magic Find only ever pays out at a kill, so it is the one buff in this list where rounds were
+     the wrong unit entirely. It is decremented at the kill instead -- see
+     combatSpendMagicFindCharge(), called from both the solo and party kill paths. */
   // v0.22 (batch2 #5): apply Health/Stamina Regen gear-affix ticks once per combat round.
   // Combat HP/Stamina is server-authoritative, so a client-only regen tick during combat
   // would desync -- this mirrors the client's town/maze wall-clock regen tick (see the
@@ -4088,8 +4276,18 @@ function combatRegisterWeaponHit(data, weaponType) {
   const after = combatWeaponSkillLevelForHits(data.weapon_skills[weaponType].hits);
   return { leveledUp: after > before, newLevel: after };
 }
+/* One charge per monster killed. Called at kill resolution on both combat paths, so a shrine now
+   genuinely lasts 25 monsters rather than 25 swings. A monster that flees, or that the player
+   flees from, does not consume a charge -- no loot rolled, so nothing was spent. */
+function combatSpendMagicFindCharge(data) {
+  if ((data.magic_find_rounds_left || 0) > 0) data.magic_find_rounds_left--;
+}
 function combatIncrementKillStreak(data) {
+  combatSpendMagicFindCharge(data);
   data.kill_streak = (data.kill_streak || 0) + 1;
+  // v0.33: the quest-side streak advances alongside. Solo kills feed both; party kills feed only
+  // the quest one (see partyResolveKill), which is the whole reason they are separate.
+  questAdvanceKillStreak(data);
   if (data.kill_streak > (data.max_kill_streak || 0)) data.max_kill_streak = data.kill_streak;
   // v0.21 (#17): total_kills is a separate, NEVER-reset lifetime counter (kill_streak
   // resets to 0 on every town return/reload) -- feeds the new "Monsters Killed" leaderboard
@@ -4573,10 +4771,23 @@ function combatSettleSpellDots(session, data) {
     let changed = false;
     while (d.hits_remaining > 0 && d.next_hit_at <= now && hp > 0) {
       // v0.24.1 (C1): hp can now reach exactly 0 (a genuine killing blow), not just hp-1.
-      const dmg = Math.min(hp, Math.round(cbRandRange(d.dmg_min, d.dmg_max)));
+      /* v0.33 (credit: Gwen): spells crit. Every hit of a damaging spell rolls against the same
+         Critical Strike Chance and Multiplier a weapon swing uses, so caster gear finally does
+         something for casters -- both affixes roll on caster items and appear in the affix table
+         with no "casters excluded" caveat, and until now neither had any effect on a spell.
+         Rolled per HIT rather than per cast: Fireflies lands its damage over several ticks, and
+         critting the whole cast at once would make it far swingier than a weapon. */
+      let raw = cbRandRange(d.dmg_min, d.dmg_max);
+      let spellCrit = false;
+      if (data && Math.random() < combatGetCritChance(data)) {
+        spellCrit = true;
+        raw *= combatRollCritMultiplier(combatGetCritMultiplierMax(data));
+      }
+      const dmg = Math.min(hp, Math.round(raw));
       hp -= dmg;
       session.player_dealt_direct_damage = 1;
       const tick = { spell_id: d.spell_id, damage: dmg };
+      if (spellCrit) tick.crit = true;
       if (d.heal_pct && data) {
         const healAmt = Math.round(dmg * d.heal_pct);
         if (healAmt > 0) {
@@ -7622,6 +7833,25 @@ app.post("/api/party/create", requireAuth, (req, res) => {
      VALUES (?, ?, ?, ?, 'open', 1, 0, ?, ?, ?)`
   ).run(id, req.account.id, Math.max(1, data.level - spread), data.level + spread, note, now, now);
   partyAddMemberRow(id, req.account.id, slot, req.account.username, data, 0);
+  /* v0.33 (credit: Gwen): tell the woods a party has opened. Sent ONLY to players who are online
+     and not already in a party -- announcing to someone mid-delve with their own group is noise,
+     and they cannot act on it anyway. The client decides when to show it (never over a live
+     fight) and rate-limits itself; the server's job is only to say that it happened. */
+  {
+    const body = JSON.stringify({
+      type: "party_opened",
+      party_id: id,
+      leader_name: data.character_name || req.account.username,
+      min_level: Math.max(1, data.level - spread),
+      max_level: data.level + spread,
+    });
+    for (const client of chatClients) {
+      if (client.readyState !== client.OPEN) continue;
+      if (client.accountId === req.account.id) continue;
+      if (partyForAccount(client.accountId)) continue;
+      client.send(body);
+    }
+  }
   res.json({ ok: true, party: partyPublicState(id) });
 });
 
@@ -8132,6 +8362,12 @@ function partyResolveKill(party, enc, mon) {
        it advance without paying Magic Find would need the two to be separated properly, which is
        a bigger change than this fix. */
     data.total_kills = (data.total_kills || 0) + 1;
+    /* v0.33 (credit: Gwen): a shared kill advances The Unbroken Chain but NOT the Magic Find
+       streak. Feeding data.kill_streak here is what let a party of four brew four full-rate
+       streaks at once; the quest counter has no such multiplier problem because the quest only
+       cares whether the run is unbroken. */
+    questAdvanceKillStreak(data);
+    combatSpendMagicFindCharge(data);
     questEnsureState(data);
     questTrackTotalKills(data);
     saveCharacterRow(m.account_id, m.slot, data);
@@ -8400,9 +8636,18 @@ app.post("/api/party/encounter/cast", requireAuth, (req, res) => {
       const min = spell.hit_min != null ? spell.hit_min : spell.dmg_min;
       const max = spell.hit_max != null ? spell.hit_max : spell.dmg_max;
       const hits = (SPELLS[spellId] && SPELLS[spellId].hit_count) || 1;
-      const dmg = Math.round(((min + max) / 2) * hits * mult);
+      /* v0.33 (credit: Gwen): spells crit in party fights as well. The party path resolves a
+         cast in one go rather than over ticks, so the roll happens once here -- same chance and
+         same multiplier as the solo path, applied to the whole cast. */
+      let raw = ((min + max) / 2) * hits * mult;
+      let spellCrit = false;
+      if (Math.random() < combatGetCritChance(data)) {
+        spellCrit = true;
+        raw *= combatRollCritMultiplier(combatGetCritMultiplierMax(data));
+      }
+      const dmg = Math.round(raw);
       mon.hp = Math.max(0, mon.hp - dmg);
-      lines.push(`${me.character_name} casts ${(SPELLS[spellId] && SPELLS[spellId].name) || spellId} at the ${mon.label} for ${dmg} damage.`);
+      lines.push(`${me.character_name} casts ${(SPELLS[spellId] && SPELLS[spellId].name) || spellId} at the ${mon.label} for ${dmg} damage.${spellCrit ? " (Critical!)" : ""}`);
       if (mon.hp <= 0 && !mon.dead) { mon.dead = true; anyKill = true; lines.push(...partyResolveKill(party, partyLastEncounter(party.id), mon)); }
     }
   }
