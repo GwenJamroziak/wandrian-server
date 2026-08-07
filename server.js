@@ -520,6 +520,13 @@ app.get("/api/characters", requireAuth, (req, res) => {
   const bySlot = {};
   for (const row of rows) {
     const data = JSON.parse(row.data);
+    /* v0.31.13: fold the retired quest stat fields on the way out to the client as well. This is
+       the route a client loads a character through, so a save that never passes through a
+       server-side gameplay route still arrives merged rather than showing the old split. */
+    if (questMergeLegacyStatPoints(data)) {
+      db.prepare("UPDATE characters SET data = ? WHERE account_id = ? AND slot = ?")
+        .run(JSON.stringify(data), req.account.id, row.slot);
+    }
     // v0.17 (#29): gold is account-bound now -- always hand back the CURRENT authoritative
     // account total here, regardless of whatever (now-stale) gold figure happens to be
     // sitting in this character's own stored JSON blob. This is what lets a player catch
@@ -634,7 +641,9 @@ app.put("/api/characters/:slot", requireAuth, (req, res) => {
     let stored = null;
     try { stored = JSON.parse(storedRowForQuests.data); } catch (e) { stored = null; }
     if (stored) {
-      for (const field of ["quests", "quest_attr_bonus", "quest_bonus_hp", "unspent_quest_stat_points"]) {
+      // v0.31.13: quest_attr_bonus/unspent_quest_stat_points are gone; a client still sending them
+      // is simply ignored, since they are no longer in this list.
+      for (const field of ["quests", "quest_bonus_hp"]) {
         if (stored[field] !== undefined) data[field] = stored[field];
         else delete data[field];
       }
@@ -1006,22 +1015,13 @@ function applyLadderReset(data) {
    byte-identical (mirrors how Balance.SPELLS/SPELLS are kept in sync, see that section's own
    comment further down this file).
 
-   DATA-MODEL NOTE on stat points (see the feature spec's own "trickiest data-integrity part"
-   callout): this project already has a general-purpose unspent-stat-points pool
-   (data.unspent_stat_points, from the original v0.11 Attributes system) that the CLIENT spends
-   directly into data.attributes with no dedicated server endpoint of its own (spend-time
-   validation for that pool doesn't exist yet -- see the top-of-file Phase 1 scope note). Quest
-   stat-point rewards do NOT merge into that pool. Reusing it would mean quest-granted points
-   become indistinguishable from level-derived ones the instant they're spent, so a later
-   promotion could never subtract back out exactly what quests granted without risking either
-   double-clearing manually-earned points or leaving quest points behind. Instead, quest stat
-   points get their OWN pool (data.unspent_quest_stat_points) and their OWN spend endpoint
-   (POST /api/quests/spend-stat-point) that adds straight into data.quest_attr_bonus -- a
-   SEPARATE additive layer, never folded into data.attributes itself. combatGetTotalAttr()/
-   combatGetMaxHp() below add quest_attr_bonus/quest_bonus_hp on top of the normal totals, so
-   the points still do something in combat, but questRebuildBoardForTown() can wipe
-   quest_attr_bonus/quest_bonus_hp/unspent_quest_stat_points to zero on a town change with zero
-   ambiguity about which points were whose -- no shared-pool bookkeeping needed at all. */
+   DATA-MODEL NOTE on stat points.
+   v0.31.13 (credit: Gwen): quest stat points are no longer a separate pool -- they are ordinary
+   attribute points, granted straight into data.unspent_stat_points and spent into data.attributes
+   like any other. The old split existed so a promotion could subtract quest-granted points back
+   out, which applyTrialResolutionReset() never does: it OVERWRITES attributes and the unspent
+   pool wholesale, so there was never anything to disentangle. See questMergeLegacyStatPoints()
+   for the one-time fold of characters still carrying the old fields. */
 
 // v0.24.2 (credit: Gwen): quest requirements and rewards no longer scale with the town/class
 // tier at all. Two players on the same quest were seeing different numbers (one asked for 4
@@ -1252,9 +1252,10 @@ function questRebuildBoardForTown(data, town) {
   // cleared here on every town-scoped reset so a quest-granted attribute point never survives
   // past the town it was earned in, without touching level-derived or manually-earned
   // points living in data.attributes itself.
-  data.quest_attr_bonus = { str: 0, dex: 0, vit: 0, int: 0 };
+  // v0.31.13: quest attribute points are ordinary attribute points now, and applyTrialResolutionReset()
+  // already overwrites data.attributes and data.unspent_stat_points wholesale -- so there is
+  // nothing left to clear here beyond the flat HP bonus, which is not an attribute.
   data.quest_bonus_hp = 0;
-  data.unspent_quest_stat_points = 0;
 }
 
 // Lazily hydrates data.quests/quest_attr_bonus/quest_bonus_hp/unspent_quest_stat_points for a
@@ -1262,14 +1263,53 @@ function questRebuildBoardForTown(data, town) {
 // any locked->active transitions live off the character's CURRENT level -- so a level-up
 // unlocks a not-yet-active quest immediately, without a dedicated reset trigger of its own.
 // Idempotent; called at the top of every quest-touching route/hook below.
+/* v0.31.13 (credit: Gwen): quest stat points are merged into the ordinary attribute pool.
+
+   The separate pool existed on the reasoning that a promotion would otherwise be unable to
+   "subtract back out exactly what quests granted". Gwen challenged that and was right: a trial
+   resolution does not subtract anything. applyTrialResolutionReset() OVERWRITES -- attributes go
+   to the target class's base values, unspent points are replaced by startingPoints, and the quest
+   layer is zeroed. Nothing needs to know which point came from where, because the whole set is
+   replaced. And a plain town change never wipes anything either; only a trial does.
+
+   So the split was bookkeeping guarding against a case that cannot occur, at the cost of a second
+   pool, a second spend endpoint and a second panel on the character sheet.
+
+   MIGRATION. Characters already exist mid-flight with points spent into quest_attr_bonus and
+   unspent points sitting in unspent_quest_stat_points. Both are folded in ONCE, here, and the old
+   fields deleted so the fold cannot run twice. Without this, everyone loses stats they earned.
+   quest_bonus_hp is deliberately NOT merged -- it is flat HP, not an attribute, and has no pool to
+   merge into; it stays exactly as it was. */
+function questMergeLegacyStatPoints(data) {
+  let merged = false;
+  if (data.quest_attr_bonus && typeof data.quest_attr_bonus === "object") {
+    const map = { str: "str", dex: "dex", vit: "vit", int: "int" };
+    data.attributes = data.attributes || { str: 0, dex: 0, vit: 0, int: 0 };
+    for (const k in map) {
+      const v = data.quest_attr_bonus[k] || 0;
+      if (v > 0) { data.attributes[k] = (data.attributes[k] || 0) + v; merged = true; }
+    }
+    delete data.quest_attr_bonus;
+  }
+  if (typeof data.unspent_quest_stat_points === "number") {
+    if (data.unspent_quest_stat_points > 0) {
+      data.unspent_stat_points = (data.unspent_stat_points || 0) + data.unspent_quest_stat_points;
+      merged = true;
+    }
+    delete data.unspent_quest_stat_points;
+  }
+  return merged;
+}
+
 function questEnsureState(data) {
+  // Runs at the top of every quest-touching route, which is the earliest and most reliable place
+  // a live character passes through.
+  questMergeLegacyStatPoints(data);
   const tier = (TRIAL_CLASSES[data.class_id] || {}).tier || 1;
   if (!data.quests || typeof data.quests !== "object" || !data.quests.entries) {
     questRebuildBoardForTown(data, tier);
   }
-  if (!data.quest_attr_bonus || typeof data.quest_attr_bonus !== "object") data.quest_attr_bonus = { str: 0, dex: 0, vit: 0, int: 0 };
   if (typeof data.quest_bonus_hp !== "number") data.quest_bonus_hp = 0;
-  if (typeof data.unspent_quest_stat_points !== "number") data.unspent_quest_stat_points = 0;
   const level = data.level || 1;
   for (const qid of QUEST_DEFS.IDS) {
     // v0.24.2 BUG FIX (credit: Gwen, "The Pacifist" showing as locked): backfill any quest id
@@ -1826,7 +1866,7 @@ app.post("/api/quests/:questId/claim", requireAuth, (req, res) => {
     // terminating the quest.
     const stepIdx = (entry.step || 1) - 1;
     const stepDef = QUEST_DEFS.WARDEN_TRIAL_STEPS[stepIdx] || QUEST_DEFS.WARDEN_TRIAL_STEPS[0];
-    data.unspent_quest_stat_points = (data.unspent_quest_stat_points || 0) + stepDef.stat_points;
+    data.unspent_stat_points = (data.unspent_stat_points || 0) + stepDef.stat_points;
     creditAccountGold(req.account.id, stepDef.gold);
     const xpResult = combatAddXp(data, stepDef.xp);
     if (xpResult.leveled) maybeDeclareSeasonWinner(req.account.id, data);
@@ -1870,7 +1910,7 @@ app.post("/api/quests/:questId/claim", requireAuth, (req, res) => {
     reward.xp = xpResult.xpGained;
   } else if (questId === "cauldron") {
     for (const itemId of QUEST_DEFS.REWARDS.cauldron.elixirs) combatAddConsumable(data, itemId, 1);
-    data.unspent_quest_stat_points = (data.unspent_quest_stat_points || 0) + QUEST_DEFS.REWARDS.cauldron.stat_points;
+    data.unspent_stat_points = (data.unspent_stat_points || 0) + QUEST_DEFS.REWARDS.cauldron.stat_points;
     reward.elixirs = QUEST_DEFS.REWARDS.cauldron.elixirs;
     reward.stat_points = QUEST_DEFS.REWARDS.cauldron.stat_points;
   } else if (questId === "elder") {
@@ -1879,7 +1919,7 @@ app.post("/api/quests/:questId/claim", requireAuth, (req, res) => {
     // stat points + XP only.
     const stepIdx = (entry.step || 1) - 1;
     const stepDef = QUEST_DEFS.ASCENDANT_HUNT_STEPS[stepIdx] || QUEST_DEFS.ASCENDANT_HUNT_STEPS[0];
-    data.unspent_quest_stat_points = (data.unspent_quest_stat_points || 0) + stepDef.stat_points;
+    data.unspent_stat_points = (data.unspent_stat_points || 0) + stepDef.stat_points;
     const xpResult = combatAddXp(data, stepDef.xp);
     if (xpResult.leveled) maybeDeclareSeasonWinner(req.account.id, data);
     reward.stat_points = stepDef.stat_points;
@@ -1902,7 +1942,7 @@ app.post("/api/quests/:questId/claim", requireAuth, (req, res) => {
     const steps = questId === "trader" ? QUEST_DEFS.TRADER_STEPS : QUEST_DEFS.CLEANSE_STEPS;
     const stepIdx = (entry.step || 1) - 1;
     const stepDef = steps[stepIdx] || steps[0];
-    data.unspent_quest_stat_points = (data.unspent_quest_stat_points || 0) + stepDef.stat_points;
+    data.unspent_stat_points = (data.unspent_stat_points || 0) + stepDef.stat_points;
     reward.stat_points = stepDef.stat_points;
     if (stepDef.gold) { creditAccountGold(req.account.id, stepDef.gold); reward.gold = stepDef.gold; }
     if (stepDef.xp) {
@@ -1943,7 +1983,7 @@ app.post("/api/quests/:questId/claim", requireAuth, (req, res) => {
   } else if (questId === "pacifist") {
     // v0.24.1 (B5): single fixed non-town-scaled reward -- see PACIFIST_REWARD's own comment.
     const r = QUEST_DEFS.PACIFIST_REWARD;
-    data.unspent_quest_stat_points = (data.unspent_quest_stat_points || 0) + r.stat_points;
+    data.unspent_stat_points = (data.unspent_stat_points || 0) + r.stat_points;
     const xpResult = combatAddXp(data, r.xp);
     if (xpResult.leveled) maybeDeclareSeasonWinner(req.account.id, data);
     const potions = {};
@@ -1964,8 +2004,8 @@ app.post("/api/quests/:questId/claim", requireAuth, (req, res) => {
   const saveSeq = saveCharacterRow(req.account.id, slot, data);
   res.json({
     ok: true, reward, quests: data.quests,
-    quest_attr_bonus: data.quest_attr_bonus, quest_bonus_hp: data.quest_bonus_hp,
-    unspent_quest_stat_points: data.unspent_quest_stat_points,
+    quest_bonus_hp: data.quest_bonus_hp,
+    unspent_stat_points: data.unspent_stat_points, attributes: data.attributes,
     level: data.level, xp: data.xp, xp_to_next: data.xp_to_next,
     current_hp: cbInt(data.current_hp), max_hp: combatGetMaxHp(data),
     account_gold: getAccountGold(req.account.id), _save_seq: saveSeq,
@@ -2018,11 +2058,14 @@ app.post("/api/quests/spend-stat-point", requireAuth, (req, res) => {
   const data = loadCharacterRow(req.account.id, slot);
   if (!data) return res.status(404).json({ error: "No character in that slot." });
   questEnsureState(data);
-  if ((data.unspent_quest_stat_points || 0) <= 0) return res.status(400).json({ error: "No unspent quest stat points." });
-  data.unspent_quest_stat_points -= 1;
-  data.quest_attr_bonus[stat] = (data.quest_attr_bonus[stat] || 0) + 1;
+  /* v0.31.13: kept as a working alias rather than deleted outright -- an older client still
+     posting here would otherwise silently fail to spend. It now moves a point out of the ordinary
+     pool, exactly as the normal spend route does. */
+  if ((data.unspent_stat_points || 0) <= 0) return res.status(400).json({ error: "No unspent stat points." });
+  data.unspent_stat_points -= 1;
+  data.attributes[stat] = (data.attributes[stat] || 0) + 1;
   const saveSeq = saveCharacterRow(req.account.id, slot, data);
-  res.json({ ok: true, unspent_quest_stat_points: data.unspent_quest_stat_points, quest_attr_bonus: data.quest_attr_bonus, _save_seq: saveSeq });
+  res.json({ ok: true, unspent_stat_points: data.unspent_stat_points, attributes: data.attributes, _save_seq: saveSeq });
 });
 
 // v-quest (Q1 "explore"): client-attested (see the Quest System section's report-route
@@ -2679,13 +2722,8 @@ app.post("/api/blacksmith/refine", requireAuth, (req, res) => {
    guardian on that tile" isn't provable without server-side maze state (tracked separately,
    see BACKLOG task #483/#484).
 
-   v0.23.2 (Night delve): is_night joins is_guardian/is_roamer/area_level as client-asserted
-   at POST /api/combat/start, under this exact same scope note -- there's no server-tracked
-   maze/delve session to validate it against yet (that's the same BACKLOG #483/#484 gap), so
-   it's trusted the same way the maze content flags already are. The stakes it unlocks
-   (tighter sight, more encounters) are purely client-side anyway; the one thing THIS file is
-   responsible for keeping honest is the loot/gold bonus below, which only reads is_night off
-   the combat_sessions row set at fight-start, not a value re-sent per-request.
+   v0.31: night delves were removed from the game entirely, so the is_night flag that used to be
+   client-asserted here is gone with them.
 */
 
 db.exec(`
@@ -2706,7 +2744,6 @@ db.exec(`
     loot_table TEXT NOT NULL,
     is_guardian INTEGER NOT NULL DEFAULT 0,
     is_roamer INTEGER NOT NULL DEFAULT 0,
-    is_night INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'active',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -2738,9 +2775,8 @@ for (const stmt of [
   "ALTER TABLE combat_sessions ADD COLUMN rooted_until INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE combat_sessions ADD COLUMN flee_override_until INTEGER NOT NULL DEFAULT 0",
   // v0.23.2 (Night delve): same belt-and-suspenders as the columns above -- CREATE TABLE IF
-  // NOT EXISTS above already includes is_night for a fresh database, this covers one that
-  // already existed before this change shipped.
-  "ALTER TABLE combat_sessions ADD COLUMN is_night INTEGER NOT NULL DEFAULT 0",
+  // NOT EXISTS above already covers a fresh database; this covers one that already existed
+  // before the column shipped.
   // v0.24.1 (B5 "The Pacifist" / C2): tracks, for THIS fight only, whether the player has
   // landed any direct attack swing or spell-damage tick against the monster. Thorns reflect
   // damage (combatResolveMonsterTurn) never sets this. Monotonic within a fight (set to 1,
@@ -3162,15 +3198,13 @@ const CB = {
   // of in #7, which the client stopped ever populating -- so the shrine's bonus silently
   // never affected a single server-resolved loot roll after that change shipped.
   SHRINE_MAGIC_FIND_PCT: 25,
-  // v0.23.2 (Night delve): applied on top of every other Magic Find/Gold Find source, exactly
-  // once, only when the combat_sessions row this kill resolved against has is_night=1 (see
-  // combatGetMagicFind()/combatGetGoldFindMult() below and POST /api/combat/start's is_night
-  // handling). Must stay in sync with Balance.NIGHT_MAGIC_FIND_BONUS_PCT/NIGHT_GOLD_FIND_
-  // BONUS_PCT in index.html (those are display-copy mirrors only -- this is the real bonus).
-  NIGHT_MAGIC_FIND_BONUS_PCT: 15, NIGHT_GOLD_FIND_BONUS_PCT: 15,
+  /* v0.31 (credit: Gwen): night delves are removed from the game. The Magic Find and Gold Find
+     bonuses that lived here are deleted rather than zeroed, so nothing can read them and treat 0
+     as a meaningful value. */
   // v0.22.3 (#10): raised 60 -> 100 -- the season win condition moves from "reach tier 5"
   // to "reach tier 5 AND level 100", so the level cap has to actually allow level 100.
-  STAT_POINTS_PER_LEVEL: 3, LEVEL_CAP: 100,
+  // v0.31.5 (credit: Gwen): mirrors Balance.LEVEL_CAP in index.html.
+  STAT_POINTS_PER_LEVEL: 3, LEVEL_CAP: 60,
   // Keeper of the Emerald endgame choice: the Crown's "massive gold payout" from the design
   // doc. Must stay in sync with Balance.CROWN_GOLD_REWARD in index.html.
   CROWN_GOLD_REWARD: 50000,
@@ -3505,7 +3539,8 @@ function combatGetTotalAttr(data, key) {
   // one choke point str/dex/int already flow through for damage/armor/block chance, so a
   // quest-allocated point actually does something in combat without duplicating any of those
   // formulas.
-  const questBonus = (data.quest_attr_bonus && data.quest_attr_bonus[key]) || 0;
+  // v0.31.13: quest points live in data.attributes now, so there is no second layer to add.
+  const questBonus = 0;
   return ((data.attributes && data.attributes[key]) || 0) + questBonus + combatGearBonus(data, gearStat) + combatGetActiveTempBuff(data, gearStat);
 }
 // v0.20 (#11): now also sums the "block_chance" gear affix (see ITEM_AFFIX_TIER1_MAX's
@@ -3793,16 +3828,12 @@ function combatGetMagicFind(data, session) {
   // wall-clock temp-buff bag Magic Find moved off of in v0.20 (#7) -- see CB.SHRINE_MAGIC_FIND_PCT's
   // comment for why that silently zeroed the shrine's effect on server-resolved loot.
   const shrineBonus = (data.magic_find_rounds_left || 0) > 0 ? CB.SHRINE_MAGIC_FIND_PCT : 0;
-  // Maze restyle (night delve): session is the server-tracked combat_sessions row, which now
-  // carries the client-asserted is_night flag from /api/combat/start (see the SCOPE NOTE ON MAZE
-  // LEGITIMACY comment above the combat_sessions table) -- the bonus itself is still applied here,
-  // server-side, so it can't be forged past this point even though the flag's origin is trusted.
-  const nightBonus = session && session.is_night ? CB.NIGHT_MAGIC_FIND_BONUS_PCT : 0;
-  return cbClampf(combatGearBonus(data, "magic_find") + shrineBonus + nightBonus + (data.kill_streak || 0) * CB.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL, 0, CB.MAGIC_FIND_CAP_PCT);
+  // v0.31: the night-delve bonus that used to be summed here is gone with the feature.
+  return cbClampf(combatGearBonus(data, "magic_find") + shrineBonus + (data.kill_streak || 0) * CB.KILL_STREAK_MAGIC_FIND_PCT_PER_KILL, 0, CB.MAGIC_FIND_CAP_PCT);
 }
 function combatGetGoldFindMult(data, session) {
-  const nightBonus = session && session.is_night ? CB.NIGHT_GOLD_FIND_BONUS_PCT : 0;
-  return 1.0 + (combatGearBonus(data, "gold_find") + nightBonus) / 100.0;
+  // v0.31: the night-delve bonus that used to be added here is gone with the feature.
+  return 1.0 + combatGearBonus(data, "gold_find") / 100.0;
 }
 // v0.20 (#9.3): XP Find is expressed as a plain percentage (gear affixes already store it
 // that way), so it plugs directly into combatGetTotalXpBonusPct()'s additive stack without
@@ -4108,7 +4139,17 @@ function combatMonsterAllowedForAreaLevel(monster, areaLevel) {
 function loadCharacterRow(accountId, slot) {
   const row = db.prepare("SELECT data FROM characters WHERE account_id = ? AND slot = ?").get(accountId, slot);
   if (!row) return null;
-  try { return migrateSpellTiers(JSON.parse(row.data)); } catch (e) { return null; }
+  let data = null;
+  try { data = migrateSpellTiers(JSON.parse(row.data)); } catch (e) { return null; }
+  /* v0.31.13: fold the retired quest stat-point fields here rather than only inside
+     questEnsureState(). A read-only route (GET /api/quests among them) never saves, so folding
+     there alone left the change in memory and threw it away -- the migration appeared to do
+     nothing. Doing it at the load path means EVERY route sees merged values immediately, and the
+     next ordinary save persists it. Idempotent: the fields are deleted as they are folded. */
+  if (data && questMergeLegacyStatPoints(data)) {
+    saveCharacterRow(accountId, slot, data);
+  }
+  return data;
 }
 function saveCharacterRow(accountId, slot, data) {
   data._save_seq = (data._save_seq || 0) + 1;
@@ -4691,7 +4732,6 @@ app.post("/api/combat/start", requireAuth, (req, res) => {
   const areaLevel = Number(req.body?.area_level);
   const isGuardian = !!req.body?.is_guardian;
   const isRoamer = !!req.body?.is_roamer;
-  const isNight = !!req.body?.is_night;
   if (!Number.isInteger(slot) || slot < 0 || slot >= MAX_CHARACTER_SLOTS) return res.status(400).json({ error: "Invalid slot." });
   if (!Number.isInteger(areaLevel) || areaLevel < 1 || areaLevel > CB.AREA_LEVEL_MAX) return res.status(400).json({ error: "Invalid area level." });
   const monster = COMBAT_MONSTERS.find((m) => m.id === monsterId);
@@ -4794,9 +4834,9 @@ app.post("/api/combat/start", requireAuth, (req, res) => {
   // first combat-touching call owes 0 elapsed seconds of regen, same logic as the monster's
   // own catch-up clock.
   db.prepare(
-    `INSERT INTO combat_sessions (id, account_id, slot, monster_id, name, area_level, max_hp, hp, dmg_min, dmg_max, xp, gold_min, gold_max, loot_table, is_guardian, is_roamer, is_night, status, created_at, updated_at, player_attack_speed, monster_attack_speed, last_monster_hit_at, last_regen_tick_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?, ?, ?, ?, ?, ?)`
-  ).run(id, req.account.id, slot, monster.id, name, areaLevel, maxHp, startingHp, dmgMin, dmgMax, xp, monster.gold_min, monster.gold_max, monster.loot_table, isGuardian ? 1 : 0, isRoamer ? 1 : 0, isNight ? 1 : 0, now, now, playerAttackSpeed, monsterAttackSpeed, lastMonsterHitAt, lastMonsterHitAt);
+    `INSERT INTO combat_sessions (id, account_id, slot, monster_id, name, area_level, max_hp, hp, dmg_min, dmg_max, xp, gold_min, gold_max, loot_table, is_guardian, is_roamer, status, created_at, updated_at, player_attack_speed, monster_attack_speed, last_monster_hit_at, last_regen_tick_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?, ?, ?, ?, ?, ?)`
+  ).run(id, req.account.id, slot, monster.id, name, areaLevel, maxHp, startingHp, dmgMin, dmgMax, xp, monster.gold_min, monster.gold_max, monster.loot_table, isGuardian ? 1 : 0, isRoamer ? 1 : 0, now, now, playerAttackSpeed, monsterAttackSpeed, lastMonsterHitAt, lastMonsterHitAt);
 
   const saveSeq = saveCharacterRow(req.account.id, slot, data);
   res.json({
@@ -4941,9 +4981,9 @@ function combatFinalizeMonsterKill(req, session, data, extraSessionFields) {
     // routes AND the server-clock WebSocket pusher, which is the only path a Thorns or spell-DOT
     // killing blow ever travels.
     quests: data.quests,
-    quest_attr_bonus: data.quest_attr_bonus,
+
     quest_bonus_hp: data.quest_bonus_hp,
-    unspent_quest_stat_points: data.unspent_quest_stat_points,
+
     // The Pacifist and several gear-driven fixes can change the HP ceiling mid-fight, so hand
     // back the recomputed pools alongside it.
     max_hp: combatGetMaxHp(data),
@@ -6653,6 +6693,122 @@ function deleteLegacyGearAtLocation(location) {
   throw Object.assign(new Error("Invalid location kind."), { httpStatus: 400 });
 }
 
+
+/* ==================================================================================
+   DEPRECATED CONSUMABLES -- SCAN AND PURGE                        (v0.31.12, Gwen)
+   ==================================================================================
+   Two items were retired from the game but never removed from the saves that already
+   held them: the Dry Log (replaced by the one-click Bonfire) and the three Scrolls of
+   Challenge. Neither drops, neither is sold, and neither does anything -- they simply
+   sit in backpacks and vaults confusing people, which is why the Gameplay Guide had
+   grown a section explaining items that no longer exist.
+
+   Rather than documenting them forever, they are removed. This scans every character
+   row AND every account vault, because an item a player tidied away into the vault is
+   exactly as stranded as one in their pack.
+
+   The id list is the single source of truth for both the scan and the purge -- a future
+   retirement is one line here, not a second function to keep in step. */
+const DEPRECATED_CONSUMABLE_IDS = ["dry_branch", "scroll_of_challenge_1", "scroll_of_challenge_2", "scroll_of_challenge_3"];
+const DEPRECATED_CONSUMABLE_LABELS = {
+  dry_branch: "Dry Log",
+  scroll_of_challenge_1: "Scroll of Challenge I",
+  scroll_of_challenge_2: "Scroll of Challenge II",
+  scroll_of_challenge_3: "Scroll of Challenge III",
+};
+
+/* Reports who holds what, without changing anything. Deliberately separate from the purge so an
+   admin can look before they act -- a delete that cannot be previewed is a delete nobody trusts. */
+function deprecatedItemScan() {
+  const found = [];
+  const charRows = db.prepare(
+    "SELECT c.account_id, c.slot, c.data, a.username FROM characters c JOIN accounts a ON a.id = c.account_id"
+  ).all();
+  for (const row of charRows) {
+    let data = null;
+    try { data = JSON.parse(row.data); } catch (e) { continue; }
+    const items = [];
+    for (const id of DEPRECATED_CONSUMABLE_IDS) {
+      const qty = (data.consumables && data.consumables[id]) || 0;
+      if (qty > 0) items.push({ id, label: DEPRECATED_CONSUMABLE_LABELS[id] || id, qty });
+    }
+    if (items.length) {
+      found.push({
+        where: "character", account_id: row.account_id, username: row.username, slot: row.slot,
+        character_name: data.character_name || "(unnamed)", items,
+      });
+    }
+  }
+  // Vaults are account-wide and stored separately from characters, so a scan that only walked
+  // character rows would report a clean sweep while the items sat safely in storage.
+  // The vault blob lives in the `data` column and IS the item array itself -- not an object with
+  // an items field. Checked rather than assumed; my first pass had this wrong.
+  const vaultRows = db.prepare(
+    "SELECT v.account_id, v.data, a.username FROM vaults v JOIN accounts a ON a.id = v.account_id"
+  ).all();
+  for (const row of vaultRows) {
+    let items = null;
+    try { items = JSON.parse(row.data); } catch (e) { continue; }
+    if (!Array.isArray(items)) continue;
+    const counts = {};
+    for (const entry of items) {
+      const id = entry && (entry.item_id || entry.id);
+      if (id && DEPRECATED_CONSUMABLE_IDS.includes(id)) counts[id] = (counts[id] || 0) + (entry.qty || 1);
+    }
+    const list = Object.keys(counts).map((id) => ({ id, label: DEPRECATED_CONSUMABLE_LABELS[id] || id, qty: counts[id] }));
+    if (list.length) found.push({ where: "vault", account_id: row.account_id, username: row.username, items: list });
+  }
+  return found;
+}
+
+function deprecatedItemPurge() {
+  let charactersTouched = 0, vaultsTouched = 0, itemsRemoved = 0;
+  const charRows = db.prepare("SELECT account_id, slot, data FROM characters").all();
+  for (const row of charRows) {
+    let data = null;
+    try { data = JSON.parse(row.data); } catch (e) { continue; }
+    if (!data.consumables) continue;
+    let touched = false;
+    for (const id of DEPRECATED_CONSUMABLE_IDS) {
+      const qty = data.consumables[id] || 0;
+      if (qty > 0) { itemsRemoved += qty; delete data.consumables[id]; touched = true; }
+    }
+    if (touched) { charactersTouched++; saveCharacterRow(row.account_id, row.slot, data); }
+  }
+  const vaultRows = db.prepare("SELECT account_id, data, version FROM vaults").all();
+  for (const row of vaultRows) {
+    let items = null;
+    try { items = JSON.parse(row.data); } catch (e) { continue; }
+    if (!Array.isArray(items)) continue;
+    const kept = items.filter((entry) => {
+      const id = entry && (entry.item_id || entry.id);
+      if (id && DEPRECATED_CONSUMABLE_IDS.includes(id)) { itemsRemoved += (entry.qty || 1); return false; }
+      return true;
+    });
+    if (kept.length !== items.length) {
+      vaultsTouched++;
+      // The version is bumped so any client holding the old vault is refused on its next write
+      // rather than silently putting the deleted items back.
+      db.prepare("UPDATE vaults SET data = ?, version = version + 1, updated_at = ? WHERE account_id = ?")
+        .run(JSON.stringify(kept), nowIso(), row.account_id);
+    }
+  }
+  return { charactersTouched, vaultsTouched, itemsRemoved };
+}
+
+app.get("/api/admin/deprecated-items/scan", requireAuth, requireAdmin, (req, res) => {
+  res.json({ ok: true, holders: deprecatedItemScan(), ids: DEPRECATED_CONSUMABLE_IDS, labels: DEPRECATED_CONSUMABLE_LABELS });
+});
+
+app.post("/api/admin/deprecated-items/purge", requireAuth, requireAdmin, (req, res) => {
+  const result = deprecatedItemPurge();
+  console.log(`[admin] ${req.account.username} purged ${result.itemsRemoved} deprecated item(s) from ${result.charactersTouched} character(s) and ${result.vaultsTouched} vault(s)`);
+  if (result.itemsRemoved > 0) {
+    broadcastSystemMessage(`An admin cleared ${result.itemsRemoved} retired item${result.itemsRemoved === 1 ? "" : "s"} that no longer had any use.`);
+  }
+  res.json({ ok: true, ...result });
+});
+
 app.post("/api/admin/legacy-gear/delete", requireAuth, requireAdmin, (req, res) => {
   const location = req.body && req.body.location;
   try {
@@ -7121,7 +7277,6 @@ db.exec(`
     status TEXT NOT NULL DEFAULT 'open',
     maze_json TEXT,
     area_level INTEGER NOT NULL DEFAULT 1,
-    is_night INTEGER NOT NULL DEFAULT 0,
     kill_streak INTEGER NOT NULL DEFAULT 0,
     note TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
@@ -7213,7 +7368,7 @@ function partyMagicFindBreakdown(partyId) {
     // Reuse the SOLO magic-find function verbatim so a member's contribution is computed exactly
     // the way their own character sheet computes it -- one source of truth for what a player's
     // Magic Find is, whatever context asks.
-    const own = combatGetMagicFind(data, { is_night: party ? party.is_night : 0 });
+    const own = combatGetMagicFind(data, null);
     membersTotal += own;
     rows.push({ account_id: m.account_id, character_name: m.character_name, magic_find: Math.round(own) });
   }
@@ -7275,7 +7430,6 @@ function partyPublicState(partyId) {
     max_level: party.max_level,
     status: party.status,
     area_level: party.area_level,
-    is_night: !!party.is_night,
     note: party.note,
     size: members.length,
     max_size: PARTY_MAX,
@@ -7392,7 +7546,7 @@ function partyRemoveMember(partyId, accountId, reason) {
       if (handover) {
         const body = JSON.stringify({
           party_id: partyId, seq: ++partySeq, type: "party_maze",
-          maze: handover, area_level: party.area_level, is_night: !!party.is_night, handover: true,
+          maze: handover, area_level: party.area_level, handover: true,
         });
         for (const client of chatClients) {
           if (client.readyState === client.OPEN && client.accountId === next.account_id) client.send(body);
@@ -7464,8 +7618,8 @@ app.post("/api/party/create", requireAuth, (req, res) => {
   const id = partyNewId();
   const now = nowIso();
   db.prepare(
-    `INSERT INTO parties (id, leader_account_id, min_level, max_level, status, area_level, is_night, kill_streak, note, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'open', 1, 0, 0, ?, ?, ?)`
+    `INSERT INTO parties (id, leader_account_id, min_level, max_level, status, area_level, kill_streak, note, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'open', 1, 0, ?, ?, ?)`
   ).run(id, req.account.id, Math.max(1, data.level - spread), data.level + spread, note, now, now);
   partyAddMemberRow(id, req.account.id, slot, req.account.username, data, 0);
   res.json({ ok: true, party: partyPublicState(id) });
@@ -7516,7 +7670,7 @@ app.post("/api/party/join", requireAuth, (req, res) => {
   if (party.maze_json) { try { joinMaze = JSON.parse(party.maze_json); } catch (e) { joinMaze = null; } }
   res.json({
     ok: true, party: partyPublicState(partyId),
-    maze: joinMaze, area_level: party.area_level, is_night: !!party.is_night,
+    maze: joinMaze, area_level: party.area_level,
   });
 });
 
@@ -7580,7 +7734,7 @@ app.post("/api/party/town", requireAuth, (req, res) => {
   let backMaze = null;
   if (!inTown && party.maze_json) { try { backMaze = JSON.parse(party.maze_json); } catch (e) { backMaze = null; } }
   res.json({
-    ok: true, in_town: inTown, maze: backMaze, area_level: party.area_level, is_night: !!party.is_night,
+    ok: true, in_town: inTown, maze: backMaze, area_level: party.area_level,
     // Coming back from town hands over whatever the party is currently doing, fight included.
     encounter: inTown ? null : partyEncounterPublic(party.id),
   });
@@ -7614,7 +7768,6 @@ db.exec(`
     id TEXT PRIMARY KEY,
     party_id TEXT NOT NULL,
     area_level INTEGER NOT NULL,
-    is_night INTEGER NOT NULL DEFAULT 0,
     roamer_id INTEGER,
     monsters TEXT NOT NULL,
     loot TEXT NOT NULL DEFAULT '[]',
@@ -7750,7 +7903,6 @@ app.post("/api/party/encounter/start", requireAuth, (req, res) => {
   const areaLevel = Math.max(1, Math.min(Number(req.body?.area_level) || 1, leaderData.max_maze_depth_reached || 1));
   const isGuardian = !!req.body?.is_guardian;
   const isRoamer = !!req.body?.is_roamer;
-  const isNight = !!req.body?.is_night;
   /* v0.30.6 BUG FIX (credit: Gwen, "we fought about 50 new instances of roamers"). Solo retires a
      roamer after the kill by finding it in the maze by roamerId and setting defeated=true. The
      party encounter recorded is_roamer but never carried the ID, and nothing on this path ever
@@ -7786,11 +7938,11 @@ app.post("/api/party/encounter/start", requireAuth, (req, res) => {
   const id = "e" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const now = nowIso();
   db.prepare(
-    `INSERT INTO party_encounters (id, party_id, area_level, is_night, roamer_id, monsters, loot, log, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, '[]', ?, 'active', ?, ?)`
-  ).run(id, party.id, areaLevel, isNight ? 1 : 0, roamerId, JSON.stringify(monsters),
+    `INSERT INTO party_encounters (id, party_id, area_level, roamer_id, monsters, loot, log, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, '[]', ?, 'active', ?, ?)`
+  ).run(id, party.id, areaLevel, roamerId, JSON.stringify(monsters),
         JSON.stringify([`The party is set upon by ${monsters.length === 1 ? monsters[0].label : monsters.length + " monsters"}!`]), now, now);
-  partyTouch(party.id, { area_level: areaLevel, is_night: isNight ? 1 : 0 });
+  partyTouch(party.id, { area_level: areaLevel });
   partyBroadcastEncounter(party.id);
   res.json({ ok: true, encounter: partyEncounterPublic(party.id) });
 });
@@ -7818,7 +7970,6 @@ function partyEncounterPublic(partyId) {
   return {
     id: enc.id,
     area_level: enc.area_level,
-    is_night: !!enc.is_night,
     monsters: partyEncMonsters(enc).map((m) => ({
       idx: m.idx, label: m.label, hp: Math.round(m.hp), max_hp: m.max_hp,
       dead: m.dead, target_account_id: m.target_account_id,
@@ -7956,7 +8107,7 @@ function partyResolveKill(party, enc, mon) {
     const xpBase = mon.xp * combatLevelDiffXpMult(data.level, enc.area_level);
     const xpTotal = xpBase * (1 + bonusPct / 100);
     combatAddXp(data, xpTotal);
-    let goldFor = Math.round(share * combatGetGoldFindMult(data, { is_night: enc.is_night }));
+    let goldFor = Math.round(share * combatGetGoldFindMult(data, null));
     if (m.account_id === party.leader_account_id) goldFor += remainder;
     // Gold is account-bound, not character-bound -- credited through the same helper every other
     // gold award uses so the account row stays the single source of truth.
@@ -8398,7 +8549,7 @@ app.get("/api/party/maze", requireAuth, (req, res) => {
   if (!party) return res.status(400).json({ error: "You are not in a party." });
   let maze = null;
   if (party.maze_json) { try { maze = JSON.parse(party.maze_json); } catch (e) { maze = null; } }
-  res.json({ ok: true, maze, area_level: party.area_level, is_night: !!party.is_night });
+  res.json({ ok: true, maze, area_level: party.area_level });
 });
 
 /* v0.30.5 (credit: Gwen): "I am in the maze" as its own statement. Called by the client whenever
@@ -8439,9 +8590,8 @@ app.post("/api/party/maze", requireAuth, (req, res) => {
   partyTouch(party.id, {
     maze_json: json,
     area_level: Math.max(1, Number(req.body?.area_level) || party.area_level),
-    is_night: req.body?.is_night ? 1 : 0,
   });
-  partyBroadcast(party.id, { type: "party_maze", maze, area_level: Number(req.body?.area_level) || party.area_level, is_night: !!req.body?.is_night });
+  partyBroadcast(party.id, { type: "party_maze", maze, area_level: Number(req.body?.area_level) || party.area_level });
   res.json({ ok: true });
 });
 
