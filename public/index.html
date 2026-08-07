@@ -1906,7 +1906,7 @@ const Balance = {
   ELEMENT_IDS:["fire","wind","earth","water"],
   ELEMENT_DISPLAY_NAMES:{fire:"Fire",wind:"Wind",earth:"Earth",water:"Water"},
   ELEMENT_AFFIX_BIAS:{fire:"damage",wind:"stamina_max",earth:"armor",water:"regen"},
-  GAME_VERSION:"v0.30.5-web",
+  GAME_VERSION:"v0.30.7-web",
   TOWN_1_NAME:"Emberroot Camp",
   TOWN_NAMES:["Emberroot Camp","Willowmere Hollow","Duskfall Reach","Starlight Bastion","Ashveil Sanctum"],
 
@@ -3451,7 +3451,13 @@ const Net = {
             if(msg.seq<=this.lastPartySeq) return;
             this.lastPartySeq=msg.seq;
           }
-          if(msg.type==="party_state"){ this.party=msg.state||null; if(!this.party) this.partyEncounter=null; render(); return; }
+          if(msg.type==="party_state"){
+            this.party=msg.state||null;
+            if(!this.party) this.partyEncounter=null;
+
+            partyEnsureRelayed();
+            render(); return;
+          }
           if(msg.type==="party_encounter"){
             const hadFight=!!this.partyEncounter;
             this.partyEncounter=msg.encounter||null;
@@ -3497,6 +3503,15 @@ const Net = {
               PS.current_hp=Math.max(1,Math.round(PS.getMaxHp()*0.25));
               GF.goto("town");
             }
+            return;
+          }
+          if(msg.type==="party_to_town"){
+
+            this.partyEncounter=null;
+            GF.overworld_snapshot=null;
+            partyStopAutoAttack();
+            setToast("Your leader left the woods. The party is back in town.");
+            GF.goto("town");
             return;
           }
           if(msg.type==="party_disbanded"){
@@ -5470,7 +5485,8 @@ function partyLobbyMineNode(){
       h("span",{style:{fontFamily:"Cinzel,Georgia,serif",color:"var(--gold)"}},[`${p.min_level} \u2013 ${p.max_level}`]),
     ]),
     ...(Net.isPartyLeader()?(()=>{
-      if(GF._partyEditSpread==null) GF._partyEditSpread=Math.max(1,PS.level-p.min_level);
+
+      if(GF._partyEditSpread==null) GF._partyEditSpread=Math.max(1,p.max_level-PS.level);
       const label=h("span",{style:{fontFamily:"Cinzel,Georgia,serif",color:"var(--gold)"}},[]);
       const paint=()=>{ label.textContent=`${Math.max(1,PS.level-GF._partyEditSpread)} \u2013 ${PS.level+GF._partyEditSpread}`; };
       paint();
@@ -5489,7 +5505,8 @@ function partyLobbyMineNode(){
           h("button",{onClick:async()=>{
             const r=await Net.partyApi("/api/party/settings",{spread:GF._partyEditSpread, note:note.value});
             if(r.ok===false){ setToast(r.error); return; }
-            Net.party=r.party; GF._partyEditSpread=null; setToast("Party updated."); render();
+
+            Net.party=r.party; setToast("Party updated."); render();
           }},["Save"]),
         ]),
       ];
@@ -5587,6 +5604,8 @@ function screenPartyCombat(){
         PS.current_hp=Math.max(1,Math.round(PS.getMaxHp()*0.25));
         GF.goto("town");
       }},["Wake in town"]),
+      h("div",{class:"muted",style:{fontSize:"11.5px",marginTop:"7px"}},
+        ["Rejoin from the Party Lobby when you are ready."]),
     ]));
     return root;
   }
@@ -5726,7 +5745,9 @@ function screenPartyCombat(){
     }},["Flee to town"]));
   }
   if(cleared && Net.isPartyLeader()){
-    controls.appendChild(h("button",{onClick:()=>partyContinueFromCorpses()},["Move on"]));
+    const rollOpen=!!enc.loot_pending;
+    controls.appendChild(h("button",{disabled:rollOpen,onClick:()=>partyContinueFromCorpses()},
+      [rollOpen?"Waiting for the roll\u2026":"Move on"]));
     if(!(enc.loot||[]).length){
       root.appendChild(h("div",{class:"muted",style:{textAlign:"center",marginTop:"10px",fontSize:"12.5px"}},
         ["Nothing was dropped. The gold has already been split between you."]));
@@ -5744,11 +5765,24 @@ function screenPartyCombat(){
   return root;
 }
 
+function partyRetireRoamer(enc){
+  if(!enc || enc.roamer_id==null) return;
+  const maze=GF.overworld_snapshot;
+  if(!maze || !maze.roamers) return;
+  const r=maze.roamers.find(rr=>rr.roamerId===enc.roamer_id);
+  if(r) r.defeated=true;
+}
 async function partyContinueFromCorpses(){
   if(!Net.isPartyLeader()){
     combatNotice("Only the leader decides when to move on.","bad");
     return;
   }
+
+  if(Net.partyEncounter && Net.partyEncounter.loot_pending){
+    combatNotice("A roll is still open. Wait for it to settle before moving on.","bad");
+    return;
+  }
+  partyRetireRoamer(Net.partyEncounter);
   const r=await Net.partyApi("/api/party/encounter/leave",{});
   if(r && r.ok===false){ combatNotice(r.error,"bad"); return; }
   Net.partyEncounter=null;
@@ -8437,6 +8471,15 @@ function partyStripPrivate(value){
   }
   return value;
 }
+
+function partyEnsureRelayed(){
+  if(!Net.inParty() || !Net.isPartyLeader()) return;
+  const maze=GF.overworld_snapshot;
+  if(!maze || !maze.cells || !maze.cells.length) return;
+  if(GF._partyRelayedFor===maze) return;
+  GF._partyRelayedFor=maze;
+  partyRelayMaze(maze);
+}
 function partyRelayMaze(maze){
   if(!Net.inParty() || !Net.isPartyLeader() || !maze) return;
 
@@ -8718,6 +8761,18 @@ function screenMaze(){
   const maze=ensureMaze(depth);
 
   if(Net.inParty()){
+
+    if(!Net.partyEncounter && !GF._partyEncAsked){
+      GF._partyEncAsked=true;
+      Net.partyApi("/api/party/encounter").then(r=>{
+        GF._partyEncAsked=false;
+        if(r && r.ok!==false && r.encounter && r.encounter.status==="active"){
+          Net.partyEncounter=r.encounter;
+          if(r.party) Net.party=r.party;
+          GF.goto("partyCombat");
+        }
+      });
+    }
     const me=Net.partyMe();
     if(me && me.in_town && !GF._partyPresenceSent){
       GF._partyPresenceSent=true;
@@ -8725,10 +8780,16 @@ function screenMaze(){
     }
   }
   if(!maze){
+
     const wait=h("div",{});
     wait.appendChild(h("h2",{},["Finding the party"]));
     wait.appendChild(h("div",{class:"lore"},[
-      "Waiting for your leader's map of these woods. It will arrive in a moment."]));
+      "Waiting for your leader's map of these woods. If your leader is still in town, there is "+
+      "nothing to see yet \u2014 the map arrives when they set off."]));
+    wait.appendChild(h("div",{class:"row gap"},[
+      h("button",{onClick:()=>{ GF._partyMazeAskedAt=0; partyRequestMaze(); setToast("Asked again."); }},["Ask again"]),
+      h("button",{onClick:()=>{ Net.partyApi("/api/party/town",{in_town:true}); GF.goto("town"); }},["Back to town"]),
+    ]));
     return wait;
   }
 
@@ -9044,6 +9105,14 @@ function onStepMaze(maze,targetIdx){
   if(Net.inParty() && !Net.isPartyLeader()){
     mazeToast("Your leader chooses the way.","bad");
     return;
+  }
+
+  if(Net.inParty() && Net.isPartyLeader()){
+    const gate=Net.party && Net.party.stamina_gate;
+    if(gate && gate.blocked && gate.reason==="exhausted"){
+      mazeToast(`${gate.who} is out of stamina.\nThe party cannot move until they rest.`,"bad");
+      return;
+    }
   }
 
   if(PS.current_stamina<=0){
@@ -9900,6 +9969,8 @@ function triggerMazeEncounter(payload){
       monster_id:payload.pending_monster_id,
       is_guardian:payload.pending_guardian_cell_idx!=null,
       is_roamer:payload.pending_roamer_id!=null,
+
+      roamer_id:payload.pending_roamer_id,
       is_night:!!(GF.overworld_snapshot&&GF.overworld_snapshot.isNight),
     }).then(r=>{
       if(r && r.ok===false){ setToast(r.error); return; }
@@ -13536,6 +13607,21 @@ function legacyGearSection(){
 }
 
 const CHANGELOG=[
+  { version:"v0.30.7", date:"2026-08-07 02:45", notes:[
+    "Fixed party loot ignoring what the monster you killed can actually drop. Every drop was skipping its monster's rarity limit, so an ordinary Sprout in a low area could hand out a Legendary. Monsters now respect their own bands again, exactly as they do when you play alone.",
+  ]},
+  { version:"v0.30.6", date:"2026-08-07 02:10", notes:[
+    "Fixed your personal kill streak climbing on every party kill. It was paying full Magic Find on top of the party's own streak, which is why a party found far more than it should and why Legendaries were turning up at low area levels.",
+    "Roaming monsters you defeat in a party stay defeated. They were never being retired, so the same few kept hunting you all delve.",
+    "Followers no longer wait forever for a map. A leader who was already in a maze never sent it; now they share what they have, and the waiting screen lets you ask again or go back to town.",
+    "The leader can no longer walk while somebody is out of stamina. The step was happening on screen before the server refused it.",
+    "Moving on is blocked while loot is still being rolled for, so a stray click cannot destroy what you are rolling on.",
+    "Leaving unclaimed loot behind no longer costs Forest Reputation. It was draining faster than it could be earned and filling the woods with roamers.",
+    "The party roster shows your current level and class rather than whatever you were when you joined.",
+    "Dying and coming back now puts you back in the fight your party is still having.",
+    "When the leader leaves, the whole party returns to town together and the party stays intact.",
+    "The level-range stepper stays where you set it after saving.",
+  ]},
   { version:"v0.30.5", date:"2026-08-07 00:50", notes:[
     "Fixed the party being told it was out of stamina when it was not. Standing in town was being reported as exhaustion, which also stopped the leader taking a step.",
     "Followers see exactly what the leader sees. Their view of the fog was arriving one step behind.",

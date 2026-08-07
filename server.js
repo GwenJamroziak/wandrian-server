@@ -7158,6 +7158,7 @@ db.exec(`
    so an already-migrated database simply skips it. Any future party column goes here as well as
    in the CREATE TABLE, never only in the CREATE TABLE. */
 for (const stmt of [
+  "ALTER TABLE party_encounters ADD COLUMN roamer_id INTEGER",
   "ALTER TABLE party_members ADD COLUMN last_attack_at INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE party_members ADD COLUMN last_regen_at INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE party_members ADD COLUMN spell_cooldowns TEXT NOT NULL DEFAULT '{}'",
@@ -7241,9 +7242,16 @@ function partyPublicState(partyId) {
     return {
       account_id: m.account_id,
       username: m.username,
-      character_name: m.character_name,
-      class_id: m.class_id,
-      level: m.level,
+      /* v0.30.6 BUG FIX (credit: Gwen, "I'm level 7 but the interface shows level 4"). These came
+         off the party_members row, which is a snapshot taken at JOIN time -- while the live
+         character was already loaded two lines above for the vitals. Level, class and name are all
+         read from the character now. Class matters most: passing a Broken Bridge Trial mid-party
+         changes it, and the pip colour and forest name both derive from it.
+         The party_members columns keep doing what they are actually for -- level gating at join
+         time and join order -- rather than pretending to be a live view. */
+      character_name: (data && data.character_name) || m.character_name,
+      class_id: (data && data.class_id) || m.class_id,
+      level: (data && data.level) || m.level,
       hardcore: !!m.hardcore,
       is_leader: m.account_id === party.leader_account_id,
       row_pos: m.row_pos,
@@ -7361,6 +7369,18 @@ function partyRemoveMember(partyId, accountId, reason) {
     const next = remaining[0]; // join_order ASC -- the longest-standing member takes over
     db.prepare("UPDATE parties SET leader_account_id = ? WHERE id = ?").run(next.account_id, partyId);
     leaderChanged = true;
+    /* v0.30.6 (credit: Gwen): when the leader goes, the whole party goes back to town. Handing the
+       maze to the promoted member was the original plan and it is the wrong one -- a maze is the
+       ongoing state of whoever was walking it (their fog, their position, their trampled tiles,
+       their roamer clock), and transplanting that onto someone else leaves them in a world they
+       did not explore. Ending the delve is a clean boundary: the party survives, the maze does
+       not. It also sidesteps the promoted member's client generating one of its own, which is
+       what actually happened in testing. */
+    db.prepare("UPDATE party_members SET in_town = 1 WHERE party_id = ?").run(partyId);
+    db.prepare("UPDATE party_encounters SET status = 'closed' WHERE party_id = ?").run(partyId);
+    partyTouch(partyId, { maze_json: null });
+    partySystem(partyId, "Your leader left the woods. The party returns to town.");
+    partyBroadcast(partyId, { type: "party_to_town" });
     // v0.30.4 (credit: Gwen): "when a leader leaves, the followers should remain in the leader's
     // left-behind maze". The layout lives on the PARTY row rather than on the leader's client, so
     // it survives them going -- but the promoted member has to be told to adopt it rather than
@@ -7559,7 +7579,11 @@ app.post("/api/party/town", requireAuth, (req, res) => {
   // it -- parsed, not the raw JSON string, which is what this used to hand back.
   let backMaze = null;
   if (!inTown && party.maze_json) { try { backMaze = JSON.parse(party.maze_json); } catch (e) { backMaze = null; } }
-  res.json({ ok: true, in_town: inTown, maze: backMaze, area_level: party.area_level, is_night: !!party.is_night });
+  res.json({
+    ok: true, in_town: inTown, maze: backMaze, area_level: party.area_level, is_night: !!party.is_night,
+    // Coming back from town hands over whatever the party is currently doing, fight included.
+    encounter: inTown ? null : partyEncounterPublic(party.id),
+  });
 });
 
 
@@ -7591,6 +7615,7 @@ db.exec(`
     party_id TEXT NOT NULL,
     area_level INTEGER NOT NULL,
     is_night INTEGER NOT NULL DEFAULT 0,
+    roamer_id INTEGER,
     monsters TEXT NOT NULL,
     loot TEXT NOT NULL DEFAULT '[]',
     log TEXT NOT NULL DEFAULT '[]',
@@ -7664,6 +7689,19 @@ function partyBuildMonster(idx, monsterId, areaLevel, isGuardian, isRoamer, lead
     gold_min: monster.gold_min,
     gold_max: monster.gold_max,
     loot_table: monster.loot_table,
+    /* v0.30.7 BUG FIX (credit: Gwen, who spotted this reading the loot tables). The loot roll was
+       being handed mon.monster_id ("sprout") where a BAND ("Common") was expected.
+       MONSTER_BAND_LOOT_RARITY_WEIGHTS is keyed by band, so the lookup missed, and
+       combatRollRarityForBand() falls back to the UNBANDED roll when it finds no weights:
+
+           if (!weights) return combatRollRarity(mfPct);
+
+       That meant every party drop bypassed its monster's rarity ceiling entirely and let Magic
+       Find alone decide -- so a Sprout at area level 3, whose band caps at Uncommon, could drop a
+       Legendary. Not "more likely because Magic Find was high": possible at all, which it never
+       should have been. The high Magic Find made it frequent; this made it possible.
+       Stored on the monster at build time so the loot path cannot derive it wrongly again. */
+    band: monster.tier,
     is_guardian: !!isGuardian,
     is_roamer: !!isRoamer,
     attack_speed: CB.MONSTER_BASE_ATTACK_SPEED,
@@ -7713,6 +7751,13 @@ app.post("/api/party/encounter/start", requireAuth, (req, res) => {
   const isGuardian = !!req.body?.is_guardian;
   const isRoamer = !!req.body?.is_roamer;
   const isNight = !!req.body?.is_night;
+  /* v0.30.6 BUG FIX (credit: Gwen, "we fought about 50 new instances of roamers"). Solo retires a
+     roamer after the kill by finding it in the maze by roamerId and setting defeated=true. The
+     party encounter recorded is_roamer but never carried the ID, and nothing on this path ever
+     marked one dead -- so every roamer the party killed stayed alive and kept hunting. It was
+     never a spawn-rate problem: it was the same handful of creatures, immortal. Carried on the
+     encounter so it can be handed back when the fight is won. */
+  const roamerId = req.body?.roamer_id != null ? req.body.roamer_id : null;
 
   const members = partyMembers(party.id);
   // Members resting in town do not swell the encounter. Rolling monster count against the party's
@@ -7741,9 +7786,9 @@ app.post("/api/party/encounter/start", requireAuth, (req, res) => {
   const id = "e" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const now = nowIso();
   db.prepare(
-    `INSERT INTO party_encounters (id, party_id, area_level, is_night, monsters, loot, log, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, '[]', ?, 'active', ?, ?)`
-  ).run(id, party.id, areaLevel, isNight ? 1 : 0, JSON.stringify(monsters),
+    `INSERT INTO party_encounters (id, party_id, area_level, is_night, roamer_id, monsters, loot, log, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, '[]', ?, 'active', ?, ?)`
+  ).run(id, party.id, areaLevel, isNight ? 1 : 0, roamerId, JSON.stringify(monsters),
         JSON.stringify([`The party is set upon by ${monsters.length === 1 ? monsters[0].label : monsters.length + " monsters"}!`]), now, now);
   partyTouch(party.id, { area_level: areaLevel, is_night: isNight ? 1 : 0 });
   partyBroadcastEncounter(party.id);
@@ -7782,6 +7827,12 @@ function partyEncounterPublic(partyId) {
     loot: partyEncLoot(enc),
     log: partyEncLog(enc),
     status: enc.status,
+    // Handed back so the client can retire the roamer in its own maze when the fight is won,
+    // exactly as the solo kill result does.
+    roamer_id: enc.roamer_id != null ? enc.roamer_id : null,
+    // Whether any loot still has an open claim window -- the client disables "move on" while this
+    // is true, because clicking through a pending roll destroys the item being rolled for.
+    loot_pending: partyEncLoot(enc).some((l) => !l.resolved_to && l.claim_opened_at),
   };
 }
 function partyBroadcastEncounter(partyId, opts) {
@@ -7912,9 +7963,24 @@ function partyResolveKill(party, enc, mon) {
     creditAccountGold(m.account_id, goldFor);
     // Personal quest and kill-streak credit for a shared kill, per Gwen: one kill shared by four
     // players advances four personal Cleanse counters.
+    /* v0.30.6 BUG FIX (credit: Gwen and a tester, "kill streak leaked onto my character, granting
+       117 MF"). Two different counters were being conflated here.
+
+       total_kills is lifetime progress and SHOULD advance for everyone on a shared kill -- that is
+       Gwen's rule, and it is what quests read.
+
+       kill_streak is the SOLO Magic Find engine, paying 1% per kill. Advancing it per member meant
+       a party of three brewed three personal streaks at once, each paying full rate, on top of the
+       party's own streak -- which is the deliberately gentler 0.1% per kill counted ONCE for the
+       whole party. That is where the tester's "each kill counts as 3 kills" came from, and it is
+       also what produced a 253% Magic Find at area level 3 and, with it, the Legendary. The party
+       counter itself was always correct: verified one increment per kill, not one per member.
+
+       Party kills therefore no longer touch the personal streak. NOTE the knock-on, deliberately
+       accepted: The Unbroken Chain tracks kill_streak, so it does not progress in a party. Making
+       it advance without paying Magic Find would need the two to be separated properly, which is
+       a bigger change than this fix. */
     data.total_kills = (data.total_kills || 0) + 1;
-    data.kill_streak = (data.kill_streak || 0) + 1;
-    if (data.kill_streak > (data.max_kill_streak || 0)) data.max_kill_streak = data.kill_streak;
     questEnsureState(data);
     questTrackTotalKills(data);
     saveCharacterRow(m.account_id, m.slot, data);
@@ -7932,7 +7998,7 @@ function partyResolveKill(party, enc, mon) {
   // One loot roll per monster, into the shared pool, at the party's combined magic find.
   const drop = combatRollLoot(mon.loot_table, mf.total);
   if (drop && drop.type !== "nothing") {
-    const entry = partyLootEntryFrom(drop, enc.area_level, mon.monster_id, mf.total);
+    const entry = partyLootEntryFrom(drop, enc.area_level, mon.band || null, mf.total);
     if (entry) {
       const loot = partyEncLoot(enc);
       entry.id = "l" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -7948,6 +8014,8 @@ function partyResolveKill(party, enc, mon) {
   return lines;
 }
 
+/* monsterBand is the monster's TIER band ("Common", "Uncommon", ...), never its id -- see the
+   band field on partyBuildMonster() for what happens when that distinction is lost. */
 function partyLootEntryFrom(drop, areaLevel, monsterBand, mfPct) {
   if (drop.type === "gear") {
     // Same generator solo loot uses, so a party drop is indistinguishable from a solo drop of the
@@ -8299,20 +8367,13 @@ app.post("/api/party/encounter/leave", requireAuth, (req, res) => {
   if (!enc) return res.json({ ok: true });
   const loot = partyEncLoot(enc);
   const abandoned = loot.filter((l) => !l.resolved_to);
+  /* v0.30.6 (credit: Gwen): littering no longer costs Forest Reputation. It was docking a point
+     per member per abandoned ITEM, so a single busy fight could cost several -- and since
+     reputation drives the roamer count, a party bled reputation far faster than it could earn it
+     and drowned in wandering monsters. Unclaimed loot is still lost; it simply no longer punishes
+     the party for it. */
   if (abandoned.length) {
-    for (const m of partyMembers(party.id)) {
-      const data = loadCharacterRow(m.account_id, m.slot);
-      if (!data) continue;
-      // forest_reputation is a per-area-tier map on the character; littering costs a point in the
-      // tier the party is actually delving, not a global figure.
-      // Reputation is tracked per area tier, keyed the same way combatGetForestReputationXpPct()
-      // reads it: by the character's own highest tier reached.
-      const repTier = combatForestRepTier(data);
-      data.forest_reputation = data.forest_reputation || {};
-      data.forest_reputation[repTier] = (data.forest_reputation[repTier] || 0) - 1;
-      saveCharacterRow(m.account_id, m.slot, data);
-    }
-    partySystem(party.id, `${abandoned.length} item${abandoned.length > 1 ? "s were" : " was"} left to rot. Forest Reputation -1 for everyone.`);
+    partySystem(party.id, `${abandoned.length} item${abandoned.length > 1 ? "s were" : " was"} left behind.`);
   }
   partyEncounterSave(enc.id, { status: "closed" });
   // Littering docks every member a point of Forest Reputation -- another character-row write, and
@@ -8343,6 +8404,16 @@ app.get("/api/party/maze", requireAuth, (req, res) => {
 /* v0.30.5 (credit: Gwen): "I am in the maze" as its own statement. Called by the client whenever
    it actually enters or resumes a maze, so the in_town flag can never outlive the trip to town
    that set it. Idempotent and cheap; better to say it too often than to leave it stale. */
+/* v0.30.6 BUG FIX (credit: Gwen's tester, "die, return to town, rejoin -- I don't see the monsters
+   any more"). The encounter only ever reached a client by broadcast, so anyone who left and came
+   back had nothing to render and had to wait for the next broadcast to happen along. Same gap the
+   maze had, same fix: let them ask. */
+app.get("/api/party/encounter", requireAuth, (req, res) => {
+  const party = partyForAccount(req.account.id);
+  if (!party) return res.json({ ok: true, encounter: null });
+  res.json({ ok: true, encounter: partyEncounterPublic(party.id), party: partyPublicState(party.id) });
+});
+
 app.post("/api/party/present", requireAuth, (req, res) => {
   const party = partyForAccount(req.account.id);
   if (!party) return res.json({ ok: true, party: null });
